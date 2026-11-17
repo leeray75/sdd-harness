@@ -1,0 +1,22 @@
+# sdd plugin per-repo state (approval hashes, active feature, local config)
+.claude/sdd/
+
+# Node / Electron
+node_modules/
+dist/
+out/
+release/
+*.log
+npm-debug.log*
+.pnpm-store/
+
+# Env and secrets
+.env
+.env.*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+.idea/
