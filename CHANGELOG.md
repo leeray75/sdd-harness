@@ -16,11 +16,20 @@ All notable changes to SDD Harness are recorded here. The format follows [Keep a
   - unit and e2e tests proving `window.open` is denied and foreign navigation is blocked (the guards now live in the pure `applyNavigationGuards`);
   - e2e tests for the title bar and the window controls;
   - the smoke test checks the new bridge keys.
+- **Design tokens** (`p0-design-tokens`, PR #4, D21): every colour, type, spacing, height and radius token from design-notes §2–4 in `src/shared/tokens.ts` and `src/renderer/styles/tokens.css` (87 tokens), plus the new `titlebar/close-hover` token. A unit test keeps the two files equal, and another fails on any hex colour outside `tokens.css`.
+- **Bundled fonts:** Inter (400–700) and JetBrains Mono (400, 500) through @fontsource, with no CSP change.
+- **Base styles** (`src/renderer/styles/base.css`): the app background, primary text colour, Inter and one 2px accent focus ring. This fixes the shell's unreadable black-on-black text.
+- **Button and Chip components:** Button (primary, gate, secondary, ghost, danger; 40px and 32px; disabled) and Chip (neutral, accent, amber, green, red; span or 28px button), with hover and pressed states. Tests check their contrast against WCAG AA.
+- **Component gallery:** every Button and Chip variant and the font weights, shown under `pnpm dev` or with `HARNESS_GALLERY=1`.
+
+### Changed
+
+- The title bar and the window's background colour now use the design tokens instead of local values.
 
 ### Known issues
 
 - Dragging the window by the title bar has no automated check.
-- The title bar uses local CSS variables until `p0-design-tokens` adds the token set.
+- One e2e run crashed at launch (worker exit code 3221226505) and passed on rerun; not yet reproduced.
 
 ## [0.1.0] - 2026-11-17
 
