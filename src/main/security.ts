@@ -19,6 +19,34 @@ export function isAllowedAppUrl(url: string, appUrl: string): boolean {
   );
 }
 
+/** The part of a WebContents the guards use. Electron's WebContents satisfies it. */
+export interface GuardableContents {
+  setWindowOpenHandler(handler: () => { action: 'deny' }): unknown;
+  on(
+    event: 'will-navigate' | 'will-redirect',
+    listener: (event: { preventDefault: () => void }, url: string) => void,
+  ): unknown;
+}
+
+/**
+ * Applies the window guards to a window's web contents: every window-open
+ * request is denied, and navigation or redirects to any URL other than the
+ * app's own page are prevented.
+ */
+export function applyNavigationGuards(contents: GuardableContents, appUrl: string): void {
+  // No new windows, popups or webviews.
+  contents.setWindowOpenHandler(() => ({ action: 'deny' }));
+
+  // Only the app's own page may be navigated to.
+  const blockForeignNavigation = (event: { preventDefault: () => void }, url: string) => {
+    if (!isAllowedAppUrl(url, appUrl)) {
+      event.preventDefault();
+    }
+  };
+  contents.on('will-navigate', blockForeignNavigation);
+  contents.on('will-redirect', blockForeignNavigation);
+}
+
 /**
  * True when an IPC call came from the app's own window and its top-level page.
  * `senderId` and `expectedId` are WebContents ids; `frameUrl` is the URL of the
