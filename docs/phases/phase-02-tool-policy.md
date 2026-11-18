@@ -43,13 +43,13 @@ Give the four agent jobs their tools and enforce, in the main process, exactly w
 
 A starting point. Claude adjusts it in step 2 and you confirm.
 
-| # | Feature | Delivers |
-| --- | --- | --- |
-| 1 | `p2-tools` | Tool implementations with schemas, run in the main process, with tests |
-| 2 | `p2-policy-engine` | Job-to-tool matrix, path rules, project tightening, Rule events |
-| 3 | `p2-command-allowlist` | Allowlist and detection, read-only spec folder during commands, changed-file check and revert, network limits |
-| 4 | `p2-jobs-and-prompts` | Four job definitions with prompts ported from the plugin |
-| 5 | `p2-human-only-channel` | Human-only IPC channel and tests that the agent process and files cannot trigger it |
+| #   | Feature                 | Delivers                                                                                                      |
+| --- | ----------------------- | ------------------------------------------------------------------------------------------------------------- |
+| 1   | `p2-tools`              | Tool implementations with schemas, run in the main process, with tests                                        |
+| 2   | `p2-policy-engine`      | Job-to-tool matrix, path rules, project tightening, Rule events                                               |
+| 3   | `p2-command-allowlist`  | Allowlist and detection, read-only spec folder during commands, changed-file check and revert, network limits |
+| 4   | `p2-jobs-and-prompts`   | Four job definitions with prompts ported from the plugin                                                      |
+| 5   | `p2-human-only-channel` | Human-only IPC channel and tests that the agent process and files cannot trigger it                           |
 
 ## Definition of done
 
@@ -67,7 +67,7 @@ You are running **Phase 2** of SDD Harness in this chat. The phase is split into
    - each is small enough for one build: about 3–8 tasks, testable and committable on its own;
    - ordered by dependency; together they meet the phase "Definition of done";
    - nothing outside this phase's scope.
-   Before asking, explain in one or two sentences what is being decided. Then ask the user to confirm or change the list, with choices (recommended first). Also raise any item under "Decide during planning" that the first subtask needs.
+     Before asking, explain in one or two sentences what is being decided. Then ask the user to confirm or change the list, with choices (recommended first). Also raise any item under "Decide during planning" that the first subtask needs.
 3. **Write the progress file** `docs/phases/phase-02-progress.md` from the template at the end of this document (files under `docs/` are editable without a spec). Commit it on its own with message `docs: phase 2 plan`.
 4. **Hand off the first pending subtask.** End your reply with a **Next step** block:
    1. Type `/sdd:start` (in its own code block).
@@ -87,16 +87,19 @@ You are running **Phase 2** of SDD Harness in this chat. The phase is split into
 
 Status: in progress · Started: <date>
 
-| # | Feature | Goal | Status | Spec | Commit |
-| --- | --- | --- | --- | --- | --- |
-| 1 | p2-... | ... | pending | | |
+| #   | Feature | Goal | Status  | Spec | Commit |
+| --- | ------- | ---- | ------- | ---- | ------ |
+| 1   | p2-...  | ...  | pending |      |        |
 
 ## Decisions added
+
 - (none yet)
 
 ## Follow-ups
+
 - (none yet)
 
 ## Phase summary
+
 (written when the phase is done)
 ```

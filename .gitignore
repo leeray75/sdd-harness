@@ -6,6 +6,9 @@ node_modules/
 dist/
 out/
 release/
+test-results/
+playwright-report/
+coverage/
 *.log
 npm-debug.log*
 .pnpm-store/

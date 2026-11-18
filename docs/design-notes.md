@@ -4,12 +4,12 @@
 
 The 16 screens in [`design/`](design/README.md) are the source of truth for layout, copy and exact values: `design/screens/*.dc.html` hold the markup with inline styles, `design/png/*.png` show how each renders. These notes explain the system behind them and cover what static screens don't show: states, behaviour and rules. The app enforces the workflow itself; nothing in the UI depends on Claude Code hooks or typed commands.
 
-| Page | Screens (files) |
-| --- | --- |
-| 1 · Workspace | New feature (`Flow0Empty`), Pick a ticket (`Flow1Start`), Plan and approve the spec (`Main`), Start the build (`Flow3Approved`), Building (`Flow4Building`), Review the result (`Flow5Done`), Shipped (`Flow6Closed`) |
-| 2 · Build run | Running (`Build`), Paused for a spec problem (`Build2Paused`), Round limit reached (`Build3Limit`) |
-| 3 · Models and agents | Overview with tool permissions (`Providers`), Add a server (`Models2Add`), Test and assign (`Models3Test`) |
-| 4 · Projects | Projects and Needs you (`Projects`), Add project: where (`Projects2Env`), checks and rules (`Projects3Setup`) |
+| Page                  | Screens (files)                                                                                                                                                                                                       |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1 · Workspace         | New feature (`Flow0Empty`), Pick a ticket (`Flow1Start`), Plan and approve the spec (`Main`), Start the build (`Flow3Approved`), Building (`Flow4Building`), Review the result (`Flow5Done`), Shipped (`Flow6Closed`) |
+| 2 · Build run         | Running (`Build`), Paused for a spec problem (`Build2Paused`), Round limit reached (`Build3Limit`)                                                                                                                    |
+| 3 · Models and agents | Overview with tool permissions (`Providers`), Add a server (`Models2Add`), Test and assign (`Models3Test`)                                                                                                            |
+| 4 · Projects          | Projects and Needs you (`Projects`), Add project: where (`Projects2Env`), checks and rules (`Projects3Setup`)                                                                                                         |
 
 ## 1. Principles
 
@@ -26,64 +26,64 @@ Dark theme only in v1. Every text and background pair below meets WCAG AA (4.5:1
 
 ### Surfaces
 
-| Token | Hex | Use |
-| --- | --- | --- |
-| `bg/titlebar` | `#0B0D10` | Window title bar, log box |
-| `bg/app` | `#0E1014` | Main content, input fields |
-| `bg/rail` | `#111317` | Sidebars, icon rail, right rails, table headers |
-| `bg/surface` | `#14171C` | Cards, file rows, composer |
-| `bg/raised` | `#161A20` | Project switcher, search field, file chips in chat |
-| `bg/chip` | `#1A1E24` | Neutral chips, selected settings-nav item |
+| Token         | Hex       | Use                                                |
+| ------------- | --------- | -------------------------------------------------- |
+| `bg/titlebar` | `#0B0D10` | Window title bar, log box                          |
+| `bg/app`      | `#0E1014` | Main content, input fields                         |
+| `bg/rail`     | `#111317` | Sidebars, icon rail, right rails, table headers    |
+| `bg/surface`  | `#14171C` | Cards, file rows, composer                         |
+| `bg/raised`   | `#161A20` | Project switcher, search field, file chips in chat |
+| `bg/chip`     | `#1A1E24` | Neutral chips, selected settings-nav item          |
 
 ### Borders
 
-| Token | Hex | Use |
-| --- | --- | --- |
-| `border/subtle` | `#23272E` | Panel dividers, card outlines, table rows |
-| `border/control` | `#2A2F37` | Buttons, inputs, selects |
-| `border/strong` | `#2F3540` | Composer outline, dashed "future" cards |
+| Token            | Hex       | Use                                       |
+| ---------------- | --------- | ----------------------------------------- |
+| `border/subtle`  | `#23272E` | Panel dividers, card outlines, table rows |
+| `border/control` | `#2A2F37` | Buttons, inputs, selects                  |
+| `border/strong`  | `#2F3540` | Composer outline, dashed "future" cards   |
 
 ### Text
 
-| Token | Hex | Use |
-| --- | --- | --- |
-| `text/primary` | `#E8EAED` | Body and headings |
+| Token            | Hex       | Use                                        |
+| ---------------- | --------- | ------------------------------------------ |
+| `text/primary`   | `#E8EAED` | Body and headings                          |
 | `text/secondary` | `#C9CED6` | Message body, list items, secondary values |
-| `text/muted` | `#A0A8B3` | Meta, labels, timestamps |
-| `text/faint` | `#8B939E` | Uppercase section labels, disabled text |
+| `text/muted`     | `#A0A8B3` | Meta, labels, timestamps                   |
+| `text/faint`     | `#8B939E` | Uppercase section labels, disabled text    |
 
 ### Accent (blue: the app and the agent)
 
-| Token | Hex | Use |
-| --- | --- | --- |
-| `accent` | `#6EA8FE` | Primary buttons, current-item outline, progress |
-| `accent/on` | `#0B1220` | Text and icons on `accent` |
-| `accent/selected` | `#22324D` | Selected tab, segment or rail icon, with `#CFE0FF` text |
-| `accent/soft` | `#1A2333` | User chat bubble, environment chip, with `#9CC2FF` text |
+| Token                | Hex                                      | Use                                                     |
+| -------------------- | ---------------------------------------- | ------------------------------------------------------- |
+| `accent`             | `#6EA8FE`                                | Primary buttons, current-item outline, progress         |
+| `accent/on`          | `#0B1220`                                | Text and icons on `accent`                              |
+| `accent/selected`    | `#22324D`                                | Selected tab, segment or rail icon, with `#CFE0FF` text |
+| `accent/soft`        | `#1A2333`                                | User chat bubble, environment chip, with `#9CC2FF` text |
 | `accent/active-card` | `#121822` or `#131B28`, border `#2B3E5E` | Active session, running agent, live round, current task |
-| `link` | `#8AB8FF`, hover `#B3D0FF` | Links |
+| `link`               | `#8AB8FF`, hover `#B3D0FF`               | Links                                                   |
 
 ### Status
 
-| Meaning | Strong | Text on dark | Chip bg | Panel bg / border |
-| --- | --- | --- | --- | --- |
-| Human gate, needs you, changed (amber) | `#F0A247` | `#F5B862` | `#3A2A12` | `#17130D` / `#5A4120`; inner `#1E1912`; muted text `#C9B48E` |
-| Done, approved, online (green) | `#4CC38A` | `#6FD6A0` | `#16291F` | `#11201A` / `#2E5A44`; completed step dot `#3E7E5E` |
-| Blocked, error, unreachable (red) | `#F2767A` | `#F59A9D` | `#3A1A1C` | `#1A1012` / `#5A2A2C` |
+| Meaning                                | Strong    | Text on dark | Chip bg   | Panel bg / border                                            |
+| -------------------------------------- | --------- | ------------ | --------- | ------------------------------------------------------------ |
+| Human gate, needs you, changed (amber) | `#F0A247` | `#F5B862`    | `#3A2A12` | `#17130D` / `#5A4120`; inner `#1E1912`; muted text `#C9B48E` |
+| Done, approved, online (green)         | `#4CC38A` | `#6FD6A0`    | `#16291F` | `#11201A` / `#2E5A44`; completed step dot `#3E7E5E`          |
+| Blocked, error, unreachable (red)      | `#F2767A` | `#F59A9D`    | `#3A1A1C` | `#1A1012` / `#5A2A2C`                                        |
 
 Red and green never carry meaning alone: every status also has a word ("blocked", "approved", "fixed in round 2") or an icon.
 
 ### Stages and color
 
-| Stage (internal states) | Waiting on | Color |
-| --- | --- | --- |
-| Start (idle) | You: pick a source | Blue current dot |
-| Plan (planning, plan-approved) | Claude, then you for each question | Blue; amber while a question waits |
-| Spec (spec-drafted, spec-changed) | You: approve | Amber |
-| Build (spec-approved, implementing, reviewing) | You to start, then the agents | Amber until started, then blue |
-| Build paused (paused) or round limit | You: decide | Amber |
-| Review (build-done) | You: approve the result | Amber |
-| Done (closed) | Nobody | Green |
+| Stage (internal states)                        | Waiting on                         | Color                              |
+| ---------------------------------------------- | ---------------------------------- | ---------------------------------- |
+| Start (idle)                                   | You: pick a source                 | Blue current dot                   |
+| Plan (planning, plan-approved)                 | Claude, then you for each question | Blue; amber while a question waits |
+| Spec (spec-drafted, spec-changed)              | You: approve                       | Amber                              |
+| Build (spec-approved, implementing, reviewing) | You to start, then the agents      | Amber until started, then blue     |
+| Build paused (paused) or round limit           | You: decide                        | Amber                              |
+| Review (build-done)                            | You: approve the result            | Amber                              |
+| Done (closed)                                  | Nobody                             | Green                              |
 
 Done stages show a green check; future stages a grey outline with their number.
 
@@ -91,17 +91,17 @@ Done stages show a green check; future stages a grey outline with their number.
 
 Fonts: **Inter** (400, 500, 600, 700) for UI and **JetBrains Mono** (400, 500) for code. Bundle both with the app; don't load them from Google Fonts at runtime. (The PNG renders in `design/png/` fell back to system fonts; the `.dc.html` files name the intended ones.)
 
-| Role | Size / weight | Notes |
-| --- | --- | --- |
-| Page title | 20 / 600 | Settings, Projects, Build headers |
-| Feature name in the Workspace header | 17 / 600 | |
-| Section title | 15 / 600 | |
-| Body, chat messages | 14 / 400 | Line-height 1.55 |
-| Controls, list items, table cells | 13 / 400–600 | |
-| Meta, captions | 12 / 400 | |
-| Section label | 11 / 600 | Uppercase, letter-spacing .06em, `text/faint` |
-| Badges and chips | 11 / 400–500 | |
-| Activity log | 12 / 400, timestamps mono 11 | Line-height 1.6 |
+| Role                                 | Size / weight                | Notes                                         |
+| ------------------------------------ | ---------------------------- | --------------------------------------------- |
+| Page title                           | 20 / 600                     | Settings, Projects, Build headers             |
+| Feature name in the Workspace header | 17 / 600                     |                                               |
+| Section title                        | 15 / 600                     |                                               |
+| Body, chat messages                  | 14 / 400                     | Line-height 1.55                              |
+| Controls, list items, table cells    | 13 / 400–600                 |                                               |
+| Meta, captions                       | 12 / 400                     |                                               |
+| Section label                        | 11 / 600                     | Uppercase, letter-spacing .06em, `text/faint` |
+| Badges and chips                     | 11 / 400–500                 |                                               |
+| Activity log                         | 12 / 400, timestamps mono 11 | Line-height 1.6                               |
 
 Monospace is reserved for file paths, branch names, model ids, URLs, hashes, task ids and commit messages.
 
@@ -126,13 +126,13 @@ Monospace is reserved for file paths, branch names, model ids, URLs, hashes, tas
 
 ### Buttons
 
-| Variant | Style | Use |
-| --- | --- | --- |
-| Primary | `accent` fill, `accent/on` text, 600 | One per view: New feature, Add project, Start build, Test connection |
-| Gate | `#F0A247` fill, `#1A1206` text, 600 | Human-only: Approve spec, Approve and push, Update the spec, Ask for changes after the round limit |
-| Secondary | Transparent, `border/control`, `text/primary` | Everything else |
-| Ghost | Transparent, no border, `text/muted` | Low-weight alternatives: Not now, Not yet, Pause, Cancel |
-| Danger text | Transparent, `border/control`, `#F2767A` text | Remove provider |
+| Variant     | Style                                         | Use                                                                                                |
+| ----------- | --------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| Primary     | `accent` fill, `accent/on` text, 600          | One per view: New feature, Add project, Start build, Test connection                               |
+| Gate        | `#F0A247` fill, `#1A1206` text, 600           | Human-only: Approve spec, Approve and push, Update the spec, Ask for changes after the round limit |
+| Secondary   | Transparent, `border/control`, `text/primary` | Everything else                                                                                    |
+| Ghost       | Transparent, no border, `text/muted`          | Low-weight alternatives: Not now, Not yet, Pause, Cancel                                           |
+| Danger text | Transparent, `border/control`, `#F2767A` text | Remove provider                                                                                    |
 
 ### Chips and badges
 
@@ -185,14 +185,14 @@ Decisions with consequences (spec problem, round limit) use large radio cards wi
 
 A to-do list of the feature's tasks (from `tasks.md`), at the top of the Build view's side panel; the Tasks tab in the Workspace documents pane uses the same rows. Header: "Tasks", "n of m done", an All / Open switch, and a green progress bar.
 
-| Row state | Treatment |
-| --- | --- |
-| Done | Green filled circle with a check; title struck through in `text/faint`; the round it finished in |
-| Now | Card with `accent/active-card` fill and blue border, spinner in the circle, bold title, "Now" chip, and a line saying who is on it and what they are doing |
-| Paused | Same card in the amber panel colors, pause icon, "Paused" chip and the reason |
-| Issue left | Amber card, "1 issue left" chip, the measured value against the limit |
-| Proposed | Dashed blue border and circle, "proposed" chip; added only if the user approves the spec change |
-| To do | Empty grey ring; the next one says "up next" |
+| Row state  | Treatment                                                                                                                                                  |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Done       | Green filled circle with a check; title struck through in `text/faint`; the round it finished in                                                           |
+| Now        | Card with `accent/active-card` fill and blue border, spinner in the circle, bold title, "Now" chip, and a line saying who is on it and what they are doing |
+| Paused     | Same card in the amber panel colors, pause icon, "Paused" chip and the reason                                                                              |
+| Issue left | Amber card, "1 issue left" chip, the measured value against the limit                                                                                      |
+| Proposed   | Dashed blue border and circle, "proposed" chip; added only if the user approves the spec change                                                            |
+| To do      | Empty grey ring; the next one says "up next"                                                                                                               |
 
 Each row shows its id (T1, T2) in mono. A task ticks off when the reviewer confirms it, not when the writer finishes.
 
@@ -245,18 +245,18 @@ Labels above fields (12px, `text/muted`). Inputs 38–40px, `bg/app` fill, `bord
 
 ## 9. States not drawn
 
-| State | Treatment |
-| --- | --- |
-| Hover | Buttons lighten about 6%, or gain `bg/chip` behind transparent ones; list rows get `bg/raised` |
-| Focus | 2px `accent` outline, 2px offset, on every focusable element |
-| Pressed | Fill darkens about 6% |
-| Loading | Skeleton bars in `bg/chip`; spinners only inside buttons and status lines; "writing…" pill while replies stream |
-| No projects | Centered card with Add project and a line on environments |
-| No providers | Banner on every screen linking to Models and agents until one model connects |
-| Provider offline | Agent card and model button turn red; the app switches to the backup model and says so in the activity log |
-| Agent blocked by a rule | Red Rule line in the activity log; nothing shown in the chat unless the agent can't continue |
-| Environment unreachable | Project card turns red with Reconnect; sessions open read-only |
-| Documents pane collapsed | Tab row only, statuses still visible; an amber tab still pulses once when it needs the user |
+| State                    | Treatment                                                                                                       |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------- |
+| Hover                    | Buttons lighten about 6%, or gain `bg/chip` behind transparent ones; list rows get `bg/raised`                  |
+| Focus                    | 2px `accent` outline, 2px offset, on every focusable element                                                    |
+| Pressed                  | Fill darkens about 6%                                                                                           |
+| Loading                  | Skeleton bars in `bg/chip`; spinners only inside buttons and status lines; "writing…" pill while replies stream |
+| No projects              | Centered card with Add project and a line on environments                                                       |
+| No providers             | Banner on every screen linking to Models and agents until one model connects                                    |
+| Provider offline         | Agent card and model button turn red; the app switches to the backup model and says so in the activity log      |
+| Agent blocked by a rule  | Red Rule line in the activity log; nothing shown in the chat unless the agent can't continue                    |
+| Environment unreachable  | Project card turns red with Reconnect; sessions open read-only                                                  |
+| Documents pane collapsed | Tab row only, statuses still visible; an amber tab still pulses once when it needs the user                     |
 
 ## 10. Accessibility
 

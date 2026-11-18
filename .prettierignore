@@ -1,0 +1,16 @@
+# Build output and tool state
+out/
+dist/
+release/
+node_modules/
+test-results/
+playwright-report/
+coverage/
+
+# Generated lockfile
+pnpm-lock.yaml
+
+# Design tool exports and the sdd plugin's files are not ours to reformat
+docs/design/
+docs/specs/
+.claude/
