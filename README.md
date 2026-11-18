@@ -81,7 +81,7 @@ If the binary is still missing, run `node node_modules/electron/install.js` and 
    SDD_COMMIT_FORMAT={summary}
    ```
 
-   Set `SDD_TRACKER=jira` (or `github`, `youtrack`) once the tracker for this project is decided, and `SDD_TEST_CMD` once there is a test command.
+   Set `SDD_TRACKER=jira` (or `github`, `youtrack`) once the tracker for this project is decided, and `SDD_TEST_CMD="pnpm test"` for the test command (`pnpm e2e` runs in CI; see CLAUDE.md, CI).
 
 3. **Add a remote** (for example a GitHub repo) as `origin`: each sdd cycle ends by pushing a feature branch.
 

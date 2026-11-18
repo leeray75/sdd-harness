@@ -54,3 +54,23 @@ pnpm test              # Vitest unit tests
 pnpm e2e               # build, then Playwright-for-Electron smoke tests
 pnpm package           # unsigned electron-builder build for the current OS (not a test command)
 ```
+
+### CI
+
+`.github/workflows/ci.yml` runs on every push to `main`, every pull request to `main`, and on demand (`workflow_dispatch`). It runs on GitHub-hosted runners, and every job sets up the toolchain the same way: checkout, `corepack enable`, `actions/setup-node` from `.nvmrc` with the pnpm cache, then `pnpm install --frozen-lockfile`.
+
+- **`check`** (Linux): `pnpm typecheck`, `pnpm lint`, `pnpm format:check` and `pnpm test`, each as its own step.
+- **`e2e`** (matrix: Windows, macOS and Linux; `fail-fast: false`): `pnpm e2e`, then `pnpm exec electron-builder --dir` for an unsigned package build that reuses the `out/` build. On Linux, a step first sets `kernel.apparmor_restrict_unprivileged_userns=0` with sysctl, and the tests run as `xvfb-run -a pnpm e2e`. Nothing is uploaded on success. On failure, `playwright-report/` and `test-results/` are uploaded per OS.
+
+Reproduce locally:
+
+```sh
+pnpm typecheck && pnpm lint && pnpm format:check && pnpm test   # the check job
+pnpm e2e                                                       # the e2e job on Windows and macOS
+xvfb-run -a pnpm e2e                                           # the e2e job on Linux
+CI=1 pnpm e2e                                                  # CI retry, trace and HTML report behaviour
+```
+
+On this machine, run pnpm from Windows (PowerShell or Git Bash), not from WSL. In PowerShell, set the variable with `$env:CI = 1` before `pnpm e2e`.
+
+The suggested sdd test command is `SDD_TEST_CMD="pnpm test"`. `pnpm e2e` is left to CI and the build.
