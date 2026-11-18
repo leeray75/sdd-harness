@@ -192,9 +192,8 @@ Build the core headless first, then the screens. Until the Workspace works, deve
 
 1. Record all decisions in `docs/decisions.md` (done).
 2. This PRD is `docs/PRD.md`; the designs are in `docs/design/` (each `.dc.html`, a PNG of each) with `docs/design-notes.md` and `docs/workflow.md` (done).
-3. Spike (throwaway branch): an agent loop with two providers (Anthropic and one OpenAI-compatible server) and the policy enforcing one path rule. This proves F1 before anything depends on it.
-4. Build in order: F1 and F2 (headless, with tests), then F3, F4, F5, F6, F7.
-5. For each feature with the sdd plugin: plan from its PRD section and design files, approve the spec, build, approve the result, close.
+3. Follow [`roadmap.md`](roadmap.md): ten phases, each run in its own chat from a document in [`phases/`](phases/README.md). Phase 0 scaffolds the app; phase 1 starts with the agent loop spike (two providers) before the provider layer; phases 2 and 3 build F1 and F2 headless, with tests; phases 4–9 build F3–F7 and the pilot.
+4. Each phase is split into subtasks; each subtask is one sdd cycle: plan from its PRD section and design files, approve the spec, build, approve the result, close, then `/compact`.
 
 Example request when planning F4: "F4 from docs/PRD.md: the Workspace. Match docs/design/screens/Flow0Empty.dc.html to Flow6Closed.dc.html, the PNGs in docs/design/png/, and docs/design-notes.md."
 

@@ -13,6 +13,8 @@ Status: **design and requirements complete, no code yet.**
 | [`docs/design-notes.md`](docs/design-notes.md) | Design system, components, screen behaviour, states |
 | [`docs/workflow.md`](docs/workflow.md) | Workflow diagrams and who can do what |
 | [`docs/design/`](docs/design/README.md) | 16 screens: HTML source and PNG renders |
+| [`docs/roadmap.md`](docs/roadmap.md) | Ten phases from scaffold to pilot, with status |
+| [`docs/phases/`](docs/phases/README.md) | One document per phase: open it in a new Claude Code chat to run that phase |
 | `docs/specs/` | Feature specs written by the sdd plugin during development |
 
 ## Building it with Claude Code and the sdd plugin
@@ -33,18 +35,12 @@ Status: **design and requirements complete, no code yet.**
 
    Set `SDD_TRACKER=jira` (or `github`, `youtrack`) once the tracker for this project is decided, and `SDD_TEST_CMD` once there is a test command.
 
-3. **Spike first** (throwaway branch, no spec): an agent loop with Anthropic plus one OpenAI-compatible server, and the tool policy enforcing one path rule. See PRD "Delivery plan".
+3. **Add a remote** (for example a GitHub repo) as `origin`: each sdd cycle ends by pushing a feature branch.
 
-4. **Then one feature at a time**, in PRD order (F1, F2, F3 …):
+4. **Run the phases in order**, one new chat each. Start Phase 0 by sending:
 
    ```text
-   /sdd:plan
+   Read docs/phases/phase-00-scaffold.md and follow its instructions.
    ```
 
-   then describe it, for example:
-
-   > F1 from docs/PRD.md: agent runtime and tool policy. Follow docs/decisions.md D1, D3, D4 and D6, and the "What each agent can do" table in docs/design/screens/Providers.dc.html.
-
-   > F4 from docs/PRD.md: the Workspace. Match docs/design/screens/Flow0Empty.dc.html through Flow6Closed.dc.html (and Main.dc.html), the PNGs in docs/design/png/, and docs/design-notes.md.
-
-   Review the plan, `/sdd:approve <feature>`, build, approve the result, `/sdd:close`.
+   Claude proposes the phase's subtasks and gives you, for each one, the brief to paste after `/sdd:start` and the `/compact` command to run after `/sdd:close`. See [`docs/phases/README.md`](docs/phases/README.md).

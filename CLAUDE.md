@@ -16,9 +16,9 @@ This repo is itself built with the **sdd plugin** for Claude Code: every feature
 4. `docs/workflow.md`: the workflow diagrams, who can do what, and stage-to-state mapping.
 5. The screens named by the feature in `docs/design/screens/*.dc.html` (exact values) and `docs/design/png/*.png` (layout at a glance). The `<x-dc>`/`<helmet>`/`support.js` wrapper is from the design tool; ignore it.
 
-## Build order
+## Build order and phases
 
-Spike (throwaway branch: agent loop, two providers, one enforced path rule) → F1 agent runtime and tool policy → F2 workflow engine (both headless, with tests) → F3 projects → F4 workspace → F5 build view → F6 models and agents → F7 usage and cost. One sdd feature per F-number, or smaller.
+Work follows `docs/roadmap.md`: ten phases (0 scaffold → 9 pilot), each run in its own chat from `docs/phases/phase-NN-<name>.md`. A phase is split into subtasks; each subtask is one sdd feature named `pN-<slug>`. The phase's progress file, `docs/phases/phase-NN-progress.md`, records the subtask list and status; after `/compact`, read it first to know where the phase stands.
 
 ## Rules that must hold in the product code
 
