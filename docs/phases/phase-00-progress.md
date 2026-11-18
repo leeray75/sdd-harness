@@ -10,7 +10,7 @@ Toolchain (recorded as D14–D18 by `p0-toolchain-and-skeleton`): pnpm via Corep
 | --- | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | -------------------------------------------------------- | -------------------------------------------------------- |
 | 1   | p0-toolchain-and-skeleton | Toolchain decided and recorded; app boots with secure defaults and the typed preload bridge; one unit test and one e2e smoke test pass                                                          | done    | [SUMMARY](../specs/p0-toolchain-and-skeleton/SUMMARY.md) | `22d7a04` (PR #1; work in `091dd51`, close in `1258c25`) |
 | 2   | p0-process-layout         | Agent process stub (utilityProcess) with a typed message channel; main-process policy gate stub that denies everything by default, with tests                                                   | done    | [SUMMARY](../specs/p0-process-layout/SUMMARY.md)         | `bb54237` (PR #2; work in `bace5d9`, close in `51d45c2`) |
-| 3   | p0-window-chrome          | Frameless window, 40px custom title bar per OS, drag regions, window controls                                                                                                                   | pending |                                                          |                                                          |
+| 3   | p0-window-chrome          | Frameless window, 40px custom title bar per OS, drag regions, window controls                                                                                                                   | done    | [SUMMARY](../specs/p0-window-chrome/SUMMARY.md)          | `96b4c5c` (PR #3; work in `e9c40de`, close in `8dd55c5`) |
 | 4   | p0-design-tokens          | Tokens from design-notes sections 2–4 as CSS variables/TS constants; bundled Inter and JetBrains Mono; Button (primary, gate, secondary, ghost, danger) and Chip components with a gallery page | pending |                                                          |                                                          |
 | 5   | p0-ci                     | Lint, format, unit and e2e jobs on a Windows/macOS/Linux matrix; CLAUDE.md Commands section; suggested SDD_TEST_CMD                                                                             | pending |                                                          |                                                          |
 
@@ -22,13 +22,15 @@ Toolchain (recorded as D14–D18 by `p0-toolchain-and-skeleton`): pnpm via Corep
 - D17 Test runners (Vitest unit, Playwright for Electron e2e)
 - D18 Node version (Node 24 LTS)
 - D19 Agent process and channel (utilityProcess with parentPort; hand-written message guards; default-deny gate in main; log-only on unexpected exit)
+- D20 Window controls bridge shape (`window.harness.platform` constant; nested `window.harness.window`; boolean-only maximized event; sender check on every call)
 
 ## Follow-ups
 
 - Confirm or revisit the TypeScript 6.x pin (D15) when typescript-eslint supports TypeScript 7.
 - `pnpm-workspace.yaml` has a pnpm-written `minimumReleaseAgeExclude: electron@45.3.4`; update it on each Electron bump.
-- AC4 window-open and navigation blocking has no automated test; add one in `p0-window-chrome` or `p0-ci`.
-- `pnpm e2e` and `pnpm package` were only run on Windows; `p0-ci` covers macOS and Linux.
+- `pnpm e2e` and `pnpm package` were only run on Windows; `p0-ci` covers macOS and Linux, including the macOS title bar (traffic lights at `{ x: 14, y: 13 }`, 78px padding) and the skipped macOS e2e test.
+- Title-bar drag regions (`-webkit-app-region`) have no automated check; confirm by hand in `pnpm dev`.
+- `p0-design-tokens` replaces the local CSS variables in `src/renderer/titlebar.css` (including the close-hover red `#C42B1C`) with the token set.
 - The CLAUDE.md Commands section already exists; `p0-ci` only adds CI commands and the suggested `SDD_TEST_CMD`.
 - Prettier formats all Markdown under `docs/` except `docs/specs/` and `docs/design/`; run `pnpm format` after editing docs.
 - The agent process gets a full copy of the app's environment (`src/main/agent/host.ts` `agentEnv`); give it an allowlisted env before Phase 1 passes it anything real.

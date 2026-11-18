@@ -2,6 +2,26 @@
 
 All notable changes to SDD Harness are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **Frameless window** (`p0-window-chrome`, PR #3): `frame: false` on Windows and Linux, `titleBarStyle: 'hiddenInset'` with the native traffic lights on macOS. Default size 1280×800, minimum 1024×680.
+- **Custom 40px title bar** (`src/renderer/TitleBar.tsx`):
+  - it shows the app mark and an empty Location slot, and drags the window;
+  - on Windows and Linux it has Minimize, Maximize/Restore and Close buttons (46×40) with accessible names, hover styles and a visible focus ring;
+  - on macOS it leaves room for the traffic lights.
+- **Window controls bridge** (D20): `window.harness.platform` and `window.harness.window` (`minimize`, `toggleMaximize`, `close`, `isMaximized`, `onMaximizedChange`). Main answers each call only from the app's own window and sends the maximized state back as a boolean-only event.
+- **Tests:**
+  - unit and e2e tests proving `window.open` is denied and foreign navigation is blocked (the guards now live in the pure `applyNavigationGuards`);
+  - e2e tests for the title bar and the window controls;
+  - the smoke test checks the new bridge keys.
+
+### Known issues
+
+- Dragging the window by the title bar has no automated check.
+- The title bar uses local CSS variables until `p0-design-tokens` adds the token set.
+
 ## [0.1.0] - 2026-11-17
 
 The first version: the Phase 0 scaffold, as far as subtasks 1 and 2.
@@ -44,4 +64,5 @@ The first version: the Phase 0 scaffold, as far as subtasks 1 and 2.
 - Strings the agent supplies (such as the tool name) are logged without escaping newlines or control characters.
 - `pnpm e2e` and `pnpm package` have only been run on Windows. CI for macOS and Linux comes in `p0-ci`.
 
+[Unreleased]: https://github.com/leeray75/sdd-harness/commits/main
 [0.1.0]: https://github.com/leeray75/sdd-harness/commits/main
