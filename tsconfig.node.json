@@ -14,6 +14,7 @@
   },
   "include": [
     "src/main/**/*",
+    "src/agent/**/*",
     "src/preload/**/*",
     "src/shared/**/*",
     "tests/**/*",

@@ -107,3 +107,9 @@ Format: **Decision** · **Outcome** · **Why** · **Date**.
 - **Outcome:** Node 24 LTS. `package.json` `engines` requires `>=24 <25`, and `.nvmrc` names `24`.
 - **Why:** Node 24 is the current LTS line and matches the local toolchain. Node 22 was the alternative and was not chosen.
 - **Date:** 2026-11-17
+
+## D19 · Agent process, message channel and tool-call gate
+
+- **Outcome:** The agent runs as an Electron `utilityProcess`, forked by main after app ready, with no window, preload or renderer access. Main and the agent talk over the built-in `parentPort` and `postMessage` channel. Messages are typed in `src/shared` and checked by hand-written guards on both sides; main treats every agent message as untrusted and logs a rejected one without replying. Every agent tool call goes through a pure policy gate in main that denies by default and returns the denial to the agent as an error result. There is no message type, job or tool for a human-only action. If the agent exits unexpectedly, main logs the exit code and does not restart it.
+- **Why:** `utilityProcess` is Electron's own child process type: it runs in a separate OS process and its `parentPort` and `postMessage` channel is built in. `child_process.fork` was the alternative and was not chosen, because it needs its own message wiring and runtime handling in the packaged app. Hand-written guards add no dependency and keep the protocol types and their checks in one place; zod was the alternative and was not chosen. The gate lives in main, not in the agent, so the check stays outside anything an agent can change (D1, D4). Logging the exit and not restarting keeps a crash visible without hiding a loop; restart with backoff was the alternative and was not chosen.
+- **Date:** 2026-11-17
