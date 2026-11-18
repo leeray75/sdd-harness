@@ -35,6 +35,12 @@ Dark theme only in v1. Every text and background pair below meets WCAG AA (4.5:1
 | `bg/raised`   | `#161A20` | Project switcher, search field, file chips in chat |
 | `bg/chip`     | `#1A1E24` | Neutral chips, selected settings-nav item          |
 
+### Title bar
+
+| Token                  | Hex       | Use                                                                                  |
+| ---------------------- | --------- | ------------------------------------------------------------------------------------ |
+| `titlebar/close-hover` | `#C42B1C` | Close button hover, the Windows caption-button convention; text is white (`#FFFFFF`) |
+
 ### Borders
 
 | Token            | Hex       | Use                                       |
