@@ -1,0 +1,54 @@
+/* Gallery page (dev and HARNESS_GALLERY=1 only). Layout only; colours and type come from tokens. */
+
+.gallery {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-24);
+  padding: var(--space-24);
+  background: var(--bg-app);
+  color: var(--text-primary);
+}
+
+.gallery__title {
+  margin: 0;
+  font-size: var(--size-page-title);
+  font-weight: var(--weight-semibold);
+}
+
+.gallery__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+}
+
+.gallery__heading {
+  margin: 0;
+  font-size: var(--size-section-title);
+  font-weight: var(--weight-semibold);
+}
+
+.gallery__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-12);
+}
+
+.gallery__label {
+  width: 120px;
+  color: var(--text-muted);
+  font-size: var(--size-meta);
+}
+
+.gallery__sample {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--size-body);
+  line-height: var(--line-height-body);
+}
+
+.gallery__sample--mono {
+  font-family: var(--font-mono);
+  font-size: var(--size-meta);
+  line-height: var(--line-height-log);
+}

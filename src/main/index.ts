@@ -2,14 +2,21 @@ import { app, BrowserWindow, ipcMain, type IpcMainInvokeEvent } from 'electron';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { EVENT_CHANNELS, IPC_CHANNELS } from '../shared/bridge';
+import { tokens } from '../shared/tokens';
 import { startAgentHost } from './agent/host';
 import { applyNavigationGuards, isTrustedSender } from './security';
 
 // electron-vite sets ELECTRON_RENDERER_URL only under `electron-vite dev`.
 // Otherwise the app loads the built page from disk.
-const appUrl = process.env['ELECTRON_RENDERER_URL']
+const pageUrl = process.env['ELECTRON_RENDERER_URL']
   ? process.env['ELECTRON_RENDERER_URL']
   : pathToFileURL(join(__dirname, '../renderer/index.html')).href;
+
+// The design gallery loads under `pnpm dev` or with HARNESS_GALLERY=1 (D21). The fragment is
+// ignored by the navigation guards, so the app page stays the same page.
+const showGallery =
+  Boolean(process.env['ELECTRON_RENDERER_URL']) || process.env['HARNESS_GALLERY'] === '1';
+const appUrl = showGallery ? `${pageUrl}#gallery` : pageUrl;
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -24,7 +31,7 @@ function createMainWindow(): BrowserWindow {
     minWidth: 1024,
     minHeight: 680,
     title: 'SDD Harness',
-    backgroundColor: '#0B0D10',
+    backgroundColor: tokens.color['bg/titlebar'],
     ...(isMac
       ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 14, y: 13 } }
       : { frame: false }),

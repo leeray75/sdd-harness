@@ -1,0 +1,108 @@
+/* Buttons (design-notes §6 and §9). Every value is a token from styles/tokens.css. */
+
+.button {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-8);
+  height: var(--height-button);
+  padding: 0 var(--space-16);
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: var(--size-control);
+  font-weight: var(--weight-medium);
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.button--small {
+  height: var(--height-button-small);
+  padding: 0 var(--space-12);
+}
+
+/* Primary: accent fill. */
+.button--primary {
+  background: var(--accent);
+  color: var(--accent-on);
+  font-weight: var(--weight-semibold);
+}
+
+.button--primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 94%, white);
+}
+
+.button--primary:active:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 94%, black);
+}
+
+/* Gate: amber fill, for human-only decisions. */
+.button--gate {
+  background: var(--amber-strong);
+  color: var(--amber-on);
+  font-weight: var(--weight-semibold);
+}
+
+.button--gate:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--amber-strong) 94%, white);
+}
+
+.button--gate:active:not(:disabled) {
+  background: color-mix(in srgb, var(--amber-strong) 94%, black);
+}
+
+/* Secondary: transparent with a control border. */
+.button--secondary {
+  border-color: var(--border-control);
+  color: var(--text-primary);
+}
+
+.button--secondary:hover:not(:disabled) {
+  background: var(--bg-chip);
+}
+
+.button--secondary:active:not(:disabled) {
+  background: var(--bg-raised);
+}
+
+/* Ghost: transparent, no border, muted text. */
+.button--ghost {
+  color: var(--text-muted);
+}
+
+.button--ghost:hover:not(:disabled) {
+  background: var(--bg-chip);
+}
+
+.button--ghost:active:not(:disabled) {
+  background: var(--bg-raised);
+}
+
+/* Danger: transparent with a control border and red text. */
+.button--danger {
+  border-color: var(--border-control);
+  color: var(--red-strong);
+}
+
+.button--danger:hover:not(:disabled) {
+  background: var(--bg-chip);
+}
+
+.button--danger:active:not(:disabled) {
+  background: var(--bg-raised);
+}
+
+/* Disabled: no hover or pressed change. Listed after the variants so it wins on fill. */
+.button:disabled {
+  background: var(--bg-chip);
+  color: var(--text-faint);
+  cursor: not-allowed;
+}
+
+.button--ghost:disabled {
+  background: transparent;
+}

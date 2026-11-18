@@ -1,26 +1,17 @@
-/* Title bar styles. The colors are local variables until p0-design-tokens
-   provides the token set. */
+/* Title bar styles. Colours, type and sizes come from the tokens in styles/tokens.css. */
 
 .titlebar {
-  --titlebar-bg: #0b0d10;
-  --border-subtle: #23272e;
-  --text-muted: #a0a8b3;
-  --text-primary: #e8eaed;
-  --bg-chip: #1a1e24;
-  --accent: #6ea8fe;
-  --close-hover: #c42b1c;
-
   box-sizing: border-box;
   display: flex;
   align-items: center;
-  gap: 16px;
-  height: 40px;
-  padding: 0 0 0 14px;
-  background: var(--titlebar-bg);
+  gap: var(--space-16);
+  height: var(--height-titlebar);
+  padding: 0 0 0 var(--space-14);
+  background: var(--bg-titlebar);
   border-bottom: 1px solid var(--border-subtle);
   color: var(--text-primary);
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--size-control);
+  font-weight: var(--weight-semibold);
   -webkit-app-region: drag;
   user-select: none;
 }
@@ -33,7 +24,7 @@
 .titlebar__mark {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-8);
   flex: 0 0 auto;
 }
 
@@ -46,10 +37,10 @@
   -webkit-app-region: no-drag;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-6);
   min-width: 0;
-  font-size: 12px;
-  font-weight: 400;
+  font-size: var(--size-meta);
+  font-weight: var(--weight-regular);
   color: var(--text-muted);
 }
 
@@ -61,7 +52,7 @@
   -webkit-app-region: no-drag;
   display: flex;
   align-items: stretch;
-  height: 40px;
+  height: var(--height-titlebar);
   flex: 0 0 auto;
 }
 
@@ -71,7 +62,7 @@
   align-items: center;
   justify-content: center;
   width: 46px;
-  height: 40px;
+  height: var(--height-titlebar);
   margin: 0;
   padding: 0;
   border: 0;
@@ -86,16 +77,12 @@
 }
 
 .titlebar__caption-button--close:hover {
-  background: var(--close-hover);
-  color: #ffffff;
+  background: var(--titlebar-close-hover);
+  color: var(--titlebar-close-hover-on);
 }
 
-/* Focus: caption buttons use an inset ring so it is not clipped at the window edge. */
-.titlebar :focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
+/* Caption buttons use an inset focus ring so it is not clipped at the window edge.
+   The ring itself is the global :focus-visible rule in styles/base.css. */
 .titlebar .titlebar__caption-button:focus-visible {
   outline-offset: -2px;
 }
