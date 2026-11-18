@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain, type IpcMainInvokeEvent } from 'electron';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { IPC_CHANNELS } from '../shared/bridge';
+import { startAgentHost } from './agent/host';
 import { isAllowedAppUrl, isTrustedSender } from './security';
 
 // electron-vite sets ELECTRON_RENDERER_URL only under `electron-vite dev`.
@@ -63,6 +64,7 @@ function registerIpcHandlers(): void {
 void app.whenReady().then(() => {
   registerIpcHandlers();
   mainWindow = createMainWindow();
+  startAgentHost();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
