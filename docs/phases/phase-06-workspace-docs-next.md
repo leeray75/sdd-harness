@@ -39,12 +39,12 @@ Finish the Workspace: the stage stepper, the always-visible documents pane, the 
 
 A starting point. Claude adjusts it in step 2 and you confirm.
 
-| # | Feature | Delivers |
-| --- | --- | --- |
-| 1 | `p6-stepper-and-header` | Stage stepper and feature header with lock state |
-| 2 | `p6-documents-pane` | Tabs, statuses, preview, highlights, collapse/resize, ticket draft copy |
-| 3 | `p6-next-bar` | Next bar states and human-only actions |
-| 4 | `p6-flow-wiring` | Every step from plan approval to shipped, wired end to end |
+| #   | Feature                 | Delivers                                                                |
+| --- | ----------------------- | ----------------------------------------------------------------------- |
+| 1   | `p6-stepper-and-header` | Stage stepper and feature header with lock state                        |
+| 2   | `p6-documents-pane`     | Tabs, statuses, preview, highlights, collapse/resize, ticket draft copy |
+| 3   | `p6-next-bar`           | Next bar states and human-only actions                                  |
+| 4   | `p6-flow-wiring`        | Every step from plan approval to shipped, wired end to end              |
 
 ## Definition of done
 
@@ -62,7 +62,7 @@ You are running **Phase 6** of SDD Harness in this chat. The phase is split into
    - each is small enough for one build: about 3–8 tasks, testable and committable on its own;
    - ordered by dependency; together they meet the phase "Definition of done";
    - nothing outside this phase's scope.
-   Before asking, explain in one or two sentences what is being decided. Then ask the user to confirm or change the list, with choices (recommended first). Also raise any item under "Decide during planning" that the first subtask needs.
+     Before asking, explain in one or two sentences what is being decided. Then ask the user to confirm or change the list, with choices (recommended first). Also raise any item under "Decide during planning" that the first subtask needs.
 3. **Write the progress file** `docs/phases/phase-06-progress.md` from the template at the end of this document (files under `docs/` are editable without a spec). Commit it on its own with message `docs: phase 6 plan`.
 4. **Hand off the first pending subtask.** End your reply with a **Next step** block:
    1. Type `/sdd:start` (in its own code block).
@@ -82,16 +82,19 @@ You are running **Phase 6** of SDD Harness in this chat. The phase is split into
 
 Status: in progress · Started: <date>
 
-| # | Feature | Goal | Status | Spec | Commit |
-| --- | --- | --- | --- | --- | --- |
-| 1 | p6-... | ... | pending | | |
+| #   | Feature | Goal | Status  | Spec | Commit |
+| --- | ------- | ---- | ------- | ---- | ------ |
+| 1   | p6-...  | ...  | pending |      |        |
 
 ## Decisions added
+
 - (none yet)
 
 ## Follow-ups
+
 - (none yet)
 
 ## Phase summary
+
 (written when the phase is done)
 ```

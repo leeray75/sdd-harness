@@ -39,4 +39,18 @@ Work follows `docs/roadmap.md`: ten phases (0 scaffold → 9 pilot), each run in
 
 ## Commands
 
-No toolchain yet. The first feature (spike / F1) chooses the package manager, test runner and build; record the commands here when it does.
+Use Node 24 (`.nvmrc`). pnpm is pinned in `package.json` and enabled through Corepack (D14).
+
+```sh
+corepack enable        # once per machine; provides the pinned pnpm
+pnpm install           # install from pnpm-lock.yaml
+pnpm dev               # run the app with electron-vite (dev server, hot reload)
+pnpm build             # build main, preload and renderer to out/
+pnpm typecheck         # tsc for the Node side and the web side (strict)
+pnpm lint              # ESLint (flat config, TypeScript and React rules)
+pnpm format            # Prettier: rewrite files
+pnpm format:check      # Prettier: check only
+pnpm test              # Vitest unit tests
+pnpm e2e               # build, then Playwright-for-Electron smoke tests
+pnpm package           # unsigned electron-builder build for the current OS (not a test command)
+```

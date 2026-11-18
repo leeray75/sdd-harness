@@ -45,13 +45,13 @@ An Electron + TypeScript app skeleton that builds, tests and opens a window on W
 
 A starting point. Claude adjusts it in step 2 and you confirm.
 
-| # | Feature | Delivers |
-| --- | --- | --- |
-| 1 | `p0-toolchain-and-skeleton` | Toolchain decided and recorded; app boots with secure defaults and the typed preload bridge; one unit test and one e2e smoke test pass |
-| 2 | `p0-process-layout` | Agent process stub (e.g. utilityProcess) with a typed message channel; main-process policy gate stub that rejects everything by default, with tests |
-| 3 | `p0-window-chrome` | Frameless window, 40px custom title bar per OS, drag regions, window controls |
-| 4 | `p0-design-tokens` | Tokens from design-notes sections 2–4 as CSS variables/TS constants; bundled fonts; Button (primary, gate, secondary, ghost, danger) and Chip components with a gallery page |
-| 5 | `p0-ci` | Lint, format, unit and e2e jobs on a Windows/macOS/Linux matrix; CLAUDE.md Commands section; suggested SDD_TEST_CMD |
+| #   | Feature                     | Delivers                                                                                                                                                                     |
+| --- | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | `p0-toolchain-and-skeleton` | Toolchain decided and recorded; app boots with secure defaults and the typed preload bridge; one unit test and one e2e smoke test pass                                       |
+| 2   | `p0-process-layout`         | Agent process stub (e.g. utilityProcess) with a typed message channel; main-process policy gate stub that rejects everything by default, with tests                          |
+| 3   | `p0-window-chrome`          | Frameless window, 40px custom title bar per OS, drag regions, window controls                                                                                                |
+| 4   | `p0-design-tokens`          | Tokens from design-notes sections 2–4 as CSS variables/TS constants; bundled fonts; Button (primary, gate, secondary, ghost, danger) and Chip components with a gallery page |
+| 5   | `p0-ci`                     | Lint, format, unit and e2e jobs on a Windows/macOS/Linux matrix; CLAUDE.md Commands section; suggested SDD_TEST_CMD                                                          |
 
 ## Definition of done
 
@@ -71,7 +71,7 @@ You are running **Phase 0** of SDD Harness in this chat. The phase is split into
    - each is small enough for one build: about 3–8 tasks, testable and committable on its own;
    - ordered by dependency; together they meet the phase "Definition of done";
    - nothing outside this phase's scope.
-   Before asking, explain in one or two sentences what is being decided. Then ask the user to confirm or change the list, with choices (recommended first). Also raise any item under "Decide during planning" that the first subtask needs.
+     Before asking, explain in one or two sentences what is being decided. Then ask the user to confirm or change the list, with choices (recommended first). Also raise any item under "Decide during planning" that the first subtask needs.
 3. **Write the progress file** `docs/phases/phase-00-progress.md` from the template at the end of this document (files under `docs/` are editable without a spec). Commit it on its own with message `docs: phase 0 plan`.
 4. **Hand off the first pending subtask.** End your reply with a **Next step** block:
    1. Type `/sdd:start` (in its own code block).
@@ -91,16 +91,19 @@ You are running **Phase 0** of SDD Harness in this chat. The phase is split into
 
 Status: in progress · Started: <date>
 
-| # | Feature | Goal | Status | Spec | Commit |
-| --- | --- | --- | --- | --- | --- |
-| 1 | p0-... | ... | pending | | |
+| #   | Feature | Goal | Status  | Spec | Commit |
+| --- | ------- | ---- | ------- | ---- | ------ |
+| 1   | p0-...  | ...  | pending |      |        |
 
 ## Decisions added
+
 - (none yet)
 
 ## Follow-ups
+
 - (none yet)
 
 ## Phase summary
+
 (written when the phase is done)
 ```

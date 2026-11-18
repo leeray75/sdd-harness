@@ -43,13 +43,13 @@ Prove the agent loop end to end, then build the provider layer: one interface, a
 
 A starting point. Claude adjusts it in step 2 and you confirm.
 
-| # | Feature | Delivers |
-| --- | --- | --- |
-| 1 | `p1-spike-agent-loop` | Smallest working loop against one provider with one read-only tool and streaming; may be rewritten later, but kept tested |
-| 2 | `p1-provider-interface` | Provider interface and the Anthropic adapter, with streaming and usage |
-| 3 | `p1-openai-compatible` | OpenAI-compatible adapter, presets for every server type in D13, custom headers |
-| 4 | `p1-model-probes` | `/models` listing, chat probe and tool-use probe, with results a UI can show later |
-| 5 | `p1-secrets` | Keychain storage for keys, redaction in logs and errors, tests that keys never appear in output |
+| #   | Feature                 | Delivers                                                                                                                  |
+| --- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| 1   | `p1-spike-agent-loop`   | Smallest working loop against one provider with one read-only tool and streaming; may be rewritten later, but kept tested |
+| 2   | `p1-provider-interface` | Provider interface and the Anthropic adapter, with streaming and usage                                                    |
+| 3   | `p1-openai-compatible`  | OpenAI-compatible adapter, presets for every server type in D13, custom headers                                           |
+| 4   | `p1-model-probes`       | `/models` listing, chat probe and tool-use probe, with results a UI can show later                                        |
+| 5   | `p1-secrets`            | Keychain storage for keys, redaction in logs and errors, tests that keys never appear in output                           |
 
 ## Definition of done
 
@@ -67,7 +67,7 @@ You are running **Phase 1** of SDD Harness in this chat. The phase is split into
    - each is small enough for one build: about 3–8 tasks, testable and committable on its own;
    - ordered by dependency; together they meet the phase "Definition of done";
    - nothing outside this phase's scope.
-   Before asking, explain in one or two sentences what is being decided. Then ask the user to confirm or change the list, with choices (recommended first). Also raise any item under "Decide during planning" that the first subtask needs.
+     Before asking, explain in one or two sentences what is being decided. Then ask the user to confirm or change the list, with choices (recommended first). Also raise any item under "Decide during planning" that the first subtask needs.
 3. **Write the progress file** `docs/phases/phase-01-progress.md` from the template at the end of this document (files under `docs/` are editable without a spec). Commit it on its own with message `docs: phase 1 plan`.
 4. **Hand off the first pending subtask.** End your reply with a **Next step** block:
    1. Type `/sdd:start` (in its own code block).
@@ -87,16 +87,19 @@ You are running **Phase 1** of SDD Harness in this chat. The phase is split into
 
 Status: in progress · Started: <date>
 
-| # | Feature | Goal | Status | Spec | Commit |
-| --- | --- | --- | --- | --- | --- |
-| 1 | p1-... | ... | pending | | |
+| #   | Feature | Goal | Status  | Spec | Commit |
+| --- | ------- | ---- | ------- | ---- | ------ |
+| 1   | p1-...  | ...  | pending |      |        |
 
 ## Decisions added
+
 - (none yet)
 
 ## Follow-ups
+
 - (none yet)
 
 ## Phase summary
+
 (written when the phase is done)
 ```

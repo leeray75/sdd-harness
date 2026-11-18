@@ -1,0 +1,6 @@
+minimumReleaseAgeExclude:
+  - electron@45.3.4
+allowBuilds:
+  electron: true
+  esbuild: true
+  electron-winstaller: false

@@ -40,12 +40,12 @@ Usage and cost tracking, budgets, the states not drawn, an accessibility pass, a
 
 A starting point. Claude adjusts it in step 2 and you confirm.
 
-| # | Feature | Delivers |
-| --- | --- | --- |
-| 1 | `p9-usage-tracking` | Usage and cost model and display |
-| 2 | `p9-budgets` | Budgets and warnings |
-| 3 | `p9-states-and-a11y` | States not drawn and the accessibility pass |
-| 4 | `p9-pilot-builds` | Signed builds, auto-update, pilot checklist |
+| #   | Feature              | Delivers                                    |
+| --- | -------------------- | ------------------------------------------- |
+| 1   | `p9-usage-tracking`  | Usage and cost model and display            |
+| 2   | `p9-budgets`         | Budgets and warnings                        |
+| 3   | `p9-states-and-a11y` | States not drawn and the accessibility pass |
+| 4   | `p9-pilot-builds`    | Signed builds, auto-update, pilot checklist |
 
 ## Definition of done
 
@@ -63,7 +63,7 @@ You are running **Phase 9** of SDD Harness in this chat. The phase is split into
    - each is small enough for one build: about 3–8 tasks, testable and committable on its own;
    - ordered by dependency; together they meet the phase "Definition of done";
    - nothing outside this phase's scope.
-   Before asking, explain in one or two sentences what is being decided. Then ask the user to confirm or change the list, with choices (recommended first). Also raise any item under "Decide during planning" that the first subtask needs.
+     Before asking, explain in one or two sentences what is being decided. Then ask the user to confirm or change the list, with choices (recommended first). Also raise any item under "Decide during planning" that the first subtask needs.
 3. **Write the progress file** `docs/phases/phase-09-progress.md` from the template at the end of this document (files under `docs/` are editable without a spec). Commit it on its own with message `docs: phase 9 plan`.
 4. **Hand off the first pending subtask.** End your reply with a **Next step** block:
    1. Type `/sdd:start` (in its own code block).
@@ -83,16 +83,19 @@ You are running **Phase 9** of SDD Harness in this chat. The phase is split into
 
 Status: in progress · Started: <date>
 
-| # | Feature | Goal | Status | Spec | Commit |
-| --- | --- | --- | --- | --- | --- |
-| 1 | p9-... | ... | pending | | |
+| #   | Feature | Goal | Status  | Spec | Commit |
+| --- | ------- | ---- | ------- | ---- | ------ |
+| 1   | p9-...  | ...  | pending |      |        |
 
 ## Decisions added
+
 - (none yet)
 
 ## Follow-ups
+
 - (none yet)
 
 ## Phase summary
+
 (written when the phase is done)
 ```

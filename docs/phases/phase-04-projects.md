@@ -41,13 +41,13 @@ Users add repo folders on this computer, in WSL, on an SSH server or in a dev co
 
 A starting point. Claude adjusts it in step 2 and you confirm.
 
-| # | Feature | Delivers |
-| --- | --- | --- |
-| 1 | `p4-project-store` | Persisted projects and per-project rules |
-| 2 | `p4-env-local-and-wsl` | File and command backends for local and WSL |
-| 3 | `p4-env-ssh-and-container` | Backends for SSH and dev containers, with reconnect |
-| 4 | `p4-project-checks` | Automatic checks and their results |
-| 5 | `p4-projects-ui` | Projects screen, Needs you panel, Add project wizard, matching the designs |
+| #   | Feature                    | Delivers                                                                   |
+| --- | -------------------------- | -------------------------------------------------------------------------- |
+| 1   | `p4-project-store`         | Persisted projects and per-project rules                                   |
+| 2   | `p4-env-local-and-wsl`     | File and command backends for local and WSL                                |
+| 3   | `p4-env-ssh-and-container` | Backends for SSH and dev containers, with reconnect                        |
+| 4   | `p4-project-checks`        | Automatic checks and their results                                         |
+| 5   | `p4-projects-ui`           | Projects screen, Needs you panel, Add project wizard, matching the designs |
 
 ## Definition of done
 
@@ -65,7 +65,7 @@ You are running **Phase 4** of SDD Harness in this chat. The phase is split into
    - each is small enough for one build: about 3–8 tasks, testable and committable on its own;
    - ordered by dependency; together they meet the phase "Definition of done";
    - nothing outside this phase's scope.
-   Before asking, explain in one or two sentences what is being decided. Then ask the user to confirm or change the list, with choices (recommended first). Also raise any item under "Decide during planning" that the first subtask needs.
+     Before asking, explain in one or two sentences what is being decided. Then ask the user to confirm or change the list, with choices (recommended first). Also raise any item under "Decide during planning" that the first subtask needs.
 3. **Write the progress file** `docs/phases/phase-04-progress.md` from the template at the end of this document (files under `docs/` are editable without a spec). Commit it on its own with message `docs: phase 4 plan`.
 4. **Hand off the first pending subtask.** End your reply with a **Next step** block:
    1. Type `/sdd:start` (in its own code block).
@@ -85,16 +85,19 @@ You are running **Phase 4** of SDD Harness in this chat. The phase is split into
 
 Status: in progress · Started: <date>
 
-| # | Feature | Goal | Status | Spec | Commit |
-| --- | --- | --- | --- | --- | --- |
-| 1 | p4-... | ... | pending | | |
+| #   | Feature | Goal | Status  | Spec | Commit |
+| --- | ------- | ---- | ------- | ---- | ------ |
+| 1   | p4-...  | ...  | pending |      |        |
 
 ## Decisions added
+
 - (none yet)
 
 ## Follow-ups
+
 - (none yet)
 
 ## Phase summary
+
 (written when the phase is done)
 ```

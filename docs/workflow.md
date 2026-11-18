@@ -38,31 +38,31 @@ The app, never an agent, commits and pushes, and only after you approve. Asking 
 
 Only you make decisions; the app does the git work; each agent job has a fixed tool set that the app checks on every call.
 
-| Action | You | App | Plans and chats | Writes code | Reviews code | Reads big files |
-| --- | --- | --- | --- | --- | --- | --- |
-| Pick a source, answer questions | yes | | asks | | | |
-| Read project files | | | yes | yes | yes | yes |
-| Read Jira, docs, web pages | | | yes | | | yes |
-| Write the plan and spec | | | until approval | | | |
-| Approve plan, spec, result | yes | | | | | |
-| Change an approved spec | yes (Claude drafts) | | | | | |
-| Edit source files | | | | after spec approval | | |
-| Run tests and build | | | | yes | tests only | |
-| Flag a spec problem | | pauses the build | | | yes | |
-| Stop after the round limit | | yes | | | | |
-| Commit and push | | after your approval | | | | |
-| Mark as done | yes | | | | | |
+| Action                          | You                 | App                 | Plans and chats | Writes code         | Reviews code | Reads big files |
+| ------------------------------- | ------------------- | ------------------- | --------------- | ------------------- | ------------ | --------------- |
+| Pick a source, answer questions | yes                 |                     | asks            |                     |              |                 |
+| Read project files              |                     |                     | yes             | yes                 | yes          | yes             |
+| Read Jira, docs, web pages      |                     |                     | yes             |                     |              | yes             |
+| Write the plan and spec         |                     |                     | until approval  |                     |              |                 |
+| Approve plan, spec, result      | yes                 |                     |                 |                     |              |                 |
+| Change an approved spec         | yes (Claude drafts) |                     |                 |                     |              |                 |
+| Edit source files               |                     |                     |                 | after spec approval |              |                 |
+| Run tests and build             |                     |                     |                 | yes                 | tests only   |                 |
+| Flag a spec problem             |                     | pauses the build    |                 |                     | yes          |                 |
+| Stop after the round limit      |                     | yes                 |                 |                     |              |                 |
+| Commit and push                 |                     | after your approval |                 |                     |              |                 |
+| Mark as done                    | yes                 |                     |                 |                     |              |                 |
 
 ## Reference: stages, states and screens
 
-| Stage | Internal states | Waiting on | Screens (`docs/design/`) |
-| --- | --- | --- | --- |
-| Start | idle | You | `Flow0Empty` |
-| Plan | planning, plan-approved | Claude, then you for each question and the plan | `Flow1Start`, `Main` |
-| Spec | spec-drafted, spec-changed | You | `Main` |
-| Build | spec-approved, implementing, reviewing | You to start, then the agents | `Flow3Approved`, `Flow4Building`, `Build` |
-| Build, paused | paused | You | `Build2Paused` |
-| Review | build-done (or round limit reached) | You | `Flow5Done`, `Build3Limit` |
-| Done | closed | Nobody | `Flow6Closed` |
+| Stage         | Internal states                        | Waiting on                                      | Screens (`docs/design/`)                  |
+| ------------- | -------------------------------------- | ----------------------------------------------- | ----------------------------------------- |
+| Start         | idle                                   | You                                             | `Flow0Empty`                              |
+| Plan          | planning, plan-approved                | Claude, then you for each question and the plan | `Flow1Start`, `Main`                      |
+| Spec          | spec-drafted, spec-changed             | You                                             | `Main`                                    |
+| Build         | spec-approved, implementing, reviewing | You to start, then the agents                   | `Flow3Approved`, `Flow4Building`, `Build` |
+| Build, paused | paused                                 | You                                             | `Build2Paused`                            |
+| Review        | build-done (or round limit reached)    | You                                             | `Flow5Done`, `Build3Limit`                |
+| Done          | closed                                 | Nobody                                          | `Flow6Closed`                             |
 
 The internal states and events come from the sdd plugin's `hooks/machine.ts` (v0.18.0): nodes `idle`, `planning`, `plan-approved`, `spec-drafted`, `spec-approved`, `spec-changed`, `implementing`, `reviewing`, `paused`, `build-done`, `closed` and the side node `data-agent`; events `START`, `APPROVE_PLAN`, `DRAFT_SPEC`, `APPROVE_SPEC`, `EDIT_SPEC`, `START_BUILD`, `IMPLEMENTED`, `REVIEW_ISSUES`, `REVIEW_PASSED`, `SPEC_PROBLEM`, `REVISE`, `REAPPROVE`, `REQUEST_CHANGES`, `CLOSE`, `START_NEXT`, `DATA_START`, `DATA_STOP`, `DATA_STOP_BUILD`. Users only ever see the six stage names.

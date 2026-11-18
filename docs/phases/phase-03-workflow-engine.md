@@ -42,13 +42,13 @@ Run a whole feature headlessly: plan, spec lock, build and review rounds, pause,
 
 A starting point. Claude adjusts it in step 2 and you confirm.
 
-| # | Feature | Delivers |
-| --- | --- | --- |
-| 1 | `p3-state-machine` | States, events, stage mapping, legal next events |
-| 2 | `p3-spec-docs-and-lock` | Templates, specs layout, state file, hash lock, spec-changed detection, reading existing specs |
-| 3 | `p3-build-loop` | Rounds, limit, pause for spec problem, ask for changes, ledger/changes/SUMMARY |
-| 4 | `p3-ship` | Result approval, commit and push by the app, close |
-| 5 | `p3-headless-e2e` | Fake provider and an end-to-end test of a full feature on a fixture repo |
+| #   | Feature                 | Delivers                                                                                       |
+| --- | ----------------------- | ---------------------------------------------------------------------------------------------- |
+| 1   | `p3-state-machine`      | States, events, stage mapping, legal next events                                               |
+| 2   | `p3-spec-docs-and-lock` | Templates, specs layout, state file, hash lock, spec-changed detection, reading existing specs |
+| 3   | `p3-build-loop`         | Rounds, limit, pause for spec problem, ask for changes, ledger/changes/SUMMARY                 |
+| 4   | `p3-ship`               | Result approval, commit and push by the app, close                                             |
+| 5   | `p3-headless-e2e`       | Fake provider and an end-to-end test of a full feature on a fixture repo                       |
 
 ## Definition of done
 
@@ -66,7 +66,7 @@ You are running **Phase 3** of SDD Harness in this chat. The phase is split into
    - each is small enough for one build: about 3–8 tasks, testable and committable on its own;
    - ordered by dependency; together they meet the phase "Definition of done";
    - nothing outside this phase's scope.
-   Before asking, explain in one or two sentences what is being decided. Then ask the user to confirm or change the list, with choices (recommended first). Also raise any item under "Decide during planning" that the first subtask needs.
+     Before asking, explain in one or two sentences what is being decided. Then ask the user to confirm or change the list, with choices (recommended first). Also raise any item under "Decide during planning" that the first subtask needs.
 3. **Write the progress file** `docs/phases/phase-03-progress.md` from the template at the end of this document (files under `docs/` are editable without a spec). Commit it on its own with message `docs: phase 3 plan`.
 4. **Hand off the first pending subtask.** End your reply with a **Next step** block:
    1. Type `/sdd:start` (in its own code block).
@@ -86,16 +86,19 @@ You are running **Phase 3** of SDD Harness in this chat. The phase is split into
 
 Status: in progress · Started: <date>
 
-| # | Feature | Goal | Status | Spec | Commit |
-| --- | --- | --- | --- | --- | --- |
-| 1 | p3-... | ... | pending | | |
+| #   | Feature | Goal | Status  | Spec | Commit |
+| --- | ------- | ---- | ------- | ---- | ------ |
+| 1   | p3-...  | ...  | pending |      |        |
 
 ## Decisions added
+
 - (none yet)
 
 ## Follow-ups
+
 - (none yet)
 
 ## Phase summary
+
 (written when the phase is done)
 ```
