@@ -34,7 +34,7 @@ const FLAG_VARS = [SELFCHECK_FLAG, SPIKE_FLAG];
  * Spike settings for the agent. Passed only when SPIKE_FLAG is '1'. The key is not here: main
  * sends it in a `model-key` message (D25), so no key variable ever reaches the agent's env.
  */
-const SPIKE_VARS = ['HARNESS_SPIKE_BASE_URL', 'HARNESS_SPIKE_MODEL'];
+const SPIKE_VARS = ['HARNESS_SPIKE_BASE_URL', 'HARNESS_SPIKE_MODEL', 'HARNESS_SPIKE_PROVIDER'];
 
 /**
  * Runs the tools the gate can allow. Only `read_file` exists so far, and it reads inside

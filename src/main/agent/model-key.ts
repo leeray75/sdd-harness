@@ -7,7 +7,7 @@ import type { Logger } from '../log';
 import type { SecretStore } from '../secrets/store';
 
 /** The store entry the spike reads its provider key from. */
-export const SPIKE_KEY_NAME = 'spike';
+export const SPIKE_KEY_NAME = 'agentgateway';
 
 export interface ModelKeyInput {
   /** True when HARNESS_AGENT_SPIKE is '1'. With it off, no message is sent. */

@@ -28,16 +28,16 @@ function allLogLines(logger: ReturnType<typeof fakeLogger>): string {
 }
 
 describe('decideModelKey', () => {
-  it('uses the spike entry name', () => {
-    expect(SPIKE_KEY_NAME).toBe('spike');
+  it('uses the agentgateway entry name', () => {
+    expect(SPIKE_KEY_NAME).toBe('agentgateway');
   });
 
   it('sends the stored key when the entry is present', () => {
-    const store = fakeStore((name) => (name === 'spike' ? SENTINEL : null));
+    const store = fakeStore((name) => (name === 'agentgateway' ? SENTINEL : null));
     const logger = fakeLogger();
     const message = decideModelKey({ spikeFlag: true, store, logger });
     expect(message).toEqual({ type: 'model-key', key: SENTINEL });
-    expect(store.read).toHaveBeenCalledWith('spike');
+    expect(store.read).toHaveBeenCalledWith('agentgateway');
     expect(allLogLines(logger)).not.toContain(SENTINEL);
   });
 
