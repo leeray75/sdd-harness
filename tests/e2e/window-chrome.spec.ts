@@ -19,7 +19,11 @@ type DomLike = {
     activeElement: DomElement | null;
     querySelector(selector: string): { textContent: string | null } | null;
   };
-  getComputedStyle(el: DomElement): { outlineStyle: string; backgroundColor: string };
+  getComputedStyle(el: DomElement): {
+    outlineStyle: string;
+    backgroundColor: string;
+    paddingLeft: string;
+  };
   window: { open(url: string): unknown };
   location: { href: string };
 };
@@ -48,7 +52,7 @@ function windowState(app: ElectronApplication) {
 }
 
 test('window is frameless on Windows and Linux, and has the 1024x680 minimum size', async () => {
-  test.skip(isMac, 'macOS keeps a hidden-inset title bar, checked by code review and p0-ci');
+  test.skip(isMac, 'macOS keeps a hidden-inset title bar, checked by the macOS title-bar test');
   const app = await launchApp();
   try {
     await app.firstWindow();
@@ -137,6 +141,29 @@ test('macOS renders no caption buttons in the title bar', async () => {
     await page.waitForLoadState('domcontentloaded');
     await expect(page.locator('header.titlebar')).toBeVisible();
     await expect(page.locator('header.titlebar button')).toHaveCount(0);
+  } finally {
+    await app.close();
+  }
+});
+
+test('macOS traffic lights sit at { x: 14, y: 13 } and the title bar has 78px left padding', async () => {
+  test.skip(!isMac, 'the traffic lights and title-bar padding are macOS only');
+  const app = await launchApp();
+  try {
+    const page = await app.firstWindow();
+    await page.waitForLoadState('domcontentloaded');
+    await expect(page.locator('header.titlebar')).toBeVisible();
+
+    const position = await app.evaluate(({ BrowserWindow }) => {
+      return BrowserWindow.getAllWindows()[0].getWindowButtonPosition();
+    });
+    expect(position).toEqual({ x: 14, y: 13 });
+
+    const paddingLeft = await page.locator('header.titlebar').evaluate((el: unknown) => {
+      const d = globalThis as unknown as DomLike;
+      return d.getComputedStyle(el as DomElement).paddingLeft;
+    });
+    expect(paddingLeft).toBe('78px');
   } finally {
     await app.close();
   }
