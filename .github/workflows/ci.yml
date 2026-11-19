@@ -74,9 +74,31 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
-      - name: E2E tests (Linux, under a virtual display)
+      - name: Install fluxbox window manager and xprop (Linux)
         if: runner.os == 'Linux'
-        run: xvfb-run -a pnpm e2e
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends fluxbox x11-utils
+
+      - name: E2E tests (Linux, under a virtual display with a window manager)
+        if: runner.os == 'Linux'
+        run: |
+          xvfb-run -a bash -c '
+            fluxbox >/dev/null 2>&1 &
+            wm_ready=0
+            for _ in $(seq 1 20); do
+              if xprop -root _NET_SUPPORTING_WM_CHECK 2>/dev/null | grep -q "window id #"; then
+                wm_ready=1
+                break
+              fi
+              sleep 0.5
+            done
+            if [ "$wm_ready" != "1" ]; then
+              echo "fluxbox did not start within about 10 s (no _NET_SUPPORTING_WM_CHECK on the root window); not running the tests without a window manager" >&2
+              exit 1
+            fi
+            pnpm e2e
+          '
 
       - name: E2E tests
         if: runner.os != 'Linux'

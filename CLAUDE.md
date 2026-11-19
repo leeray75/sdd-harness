@@ -60,14 +60,15 @@ pnpm package           # unsigned electron-builder build for the current OS (not
 `.github/workflows/ci.yml` runs on every push to `main`, every pull request to `main`, and on demand (`workflow_dispatch`). It runs on GitHub-hosted runners, and every job sets up the toolchain the same way: checkout, `corepack enable`, `actions/setup-node` from `.nvmrc` with the pnpm cache, then `pnpm install --frozen-lockfile`.
 
 - **`check`** (Linux): `pnpm typecheck`, `pnpm lint`, `pnpm format:check` and `pnpm test`, each as its own step.
-- **`e2e`** (matrix: Windows, macOS and Linux; `fail-fast: false`): `pnpm e2e`, then `pnpm exec electron-builder --dir` for an unsigned package build that reuses the `out/` build. On Linux, a step first sets `kernel.apparmor_restrict_unprivileged_userns=0` with sysctl, and the tests run as `xvfb-run -a pnpm e2e`. Nothing is uploaded on success. On failure, `playwright-report/` and `test-results/` are uploaded per OS.
+- **`e2e`** (matrix: Windows, macOS and Linux; `fail-fast: false`): `pnpm e2e`, then `pnpm exec electron-builder --dir` for an unsigned package build that reuses the `out/` build. On Linux, a step first sets `kernel.apparmor_restrict_unprivileged_userns=0` with sysctl. A step then installs `fluxbox` and `x11-utils` (for `xprop`) with apt. The Linux e2e job runs the tests under `xvfb-run -a`, with fluxbox started in the background and waited for (up to about 10 s, via `xprop`) before `pnpm e2e` runs, so Maximize and Restore work as on a Linux desktop. Nothing is uploaded on success. On failure, `playwright-report/` and `test-results/` are uploaded per OS.
 
 Reproduce locally:
 
 ```sh
 pnpm typecheck && pnpm lint && pnpm format:check && pnpm test   # the check job
 pnpm e2e                                                       # the e2e job on Windows and macOS
-xvfb-run -a pnpm e2e                                           # the e2e job on Linux
+sudo apt-get install -y --no-install-recommends fluxbox x11-utils   # once, on Linux
+xvfb-run -a bash -c 'fluxbox >/dev/null 2>&1 & for _ in $(seq 1 20); do xprop -root _NET_SUPPORTING_WM_CHECK 2>/dev/null | grep -q "window id #" && break; sleep 0.5; done; pnpm e2e'   # the e2e job on Linux
 CI=1 pnpm e2e                                                  # CI retry, trace and HTML report behaviour
 ```
 
