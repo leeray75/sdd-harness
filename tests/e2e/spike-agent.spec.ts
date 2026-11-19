@@ -13,6 +13,14 @@ const FIXTURES = join(root, 'tests', 'fixtures', 'spike');
 const SENTINEL = 'SENTINEL-KEY-SPIKE-E2E-7319';
 const NOTE = 'Spike note: the fixture was recorded from the gateway.';
 const ELECTRON_BIN: string = createRequire(__filename)('electron');
+/**
+ * The Chromium switches that Playwright's Electron loader adds to every app it launches
+ * (playwright-core/lib/server/electron/loader.js): a mock keychain and the basic password store.
+ * The seed run passes them too. Without them the seed run encrypts with a key the app run cannot
+ * read on macOS and Linux (AC5). This makes the e2e use Playwright's mock keychain, not the real
+ * macOS keychain; the real keychain is a runtime check, not part of this test.
+ */
+const PLAYWRIGHT_KEYCHAIN_SWITCHES = ['--use-mock-keychain', '--password-store=basic'];
 
 interface ReplayServer {
   server: HttpServer;
@@ -163,6 +171,7 @@ async function seedSpikeKey(
     ELECTRON_BIN,
     [
       root,
+      ...PLAYWRIGHT_KEYCHAIN_SWITCHES,
       '--harness-secrets=set',
       '--harness-secret-name=spike',
       `--harness-secret-pipe=${address}`,
