@@ -29,14 +29,22 @@ All notable changes to SDD Harness are recorded here. The format follows [Keep a
 - **Window manager in Linux CI** (`p0-ci-linux-wm`, PR #6): the Linux e2e job runs fluxbox under `xvfb-run`, so maximize and restore work as on a Linux desktop.
 - **macOS title-bar e2e test:** checks the traffic lights at `{ x: 14, y: 13 }` and the 78px title-bar padding on the macOS runner.
 - **Docs:** a CI section in `CLAUDE.md` and the suggested `SDD_TEST_CMD="pnpm test"` in the README.
+- **Agent loop spike** (`p1-spike-agent-loop`, D23): with `HARNESS_AGENT_SPIKE=1` the agent streams a chat completion from an OpenAI-compatible server through the `openai` SDK (`HARNESS_SPIKE_BASE_URL`, `HARNESS_SPIKE_API_KEY`, `HARNESS_SPIKE_MODEL`), makes at most four model turns, and may ask for one read-only tool, `read_file`, for the reader job.
+- **`read_file` in main** (`src/main/tools/read-file.ts`): reads one regular file inside `HARNESS_SPIKE_ROOT`, after resolving real paths. It refuses absolute paths, `..` escapes, symlinks that resolve outside the root, directories, missing files and files over 64 KiB, and returns no partial text.
+- **Tool results over the channel:** `tool-call-result` carries the tool's `output` on success, and a `failed` error code beside `denied`. The gate allows only `reader` with `read_file` and args `{ path: string }`; main runs the allowed call and returns its output or failure under the request's id.
+- **Recording script** `pnpm record:spike` (dev only) and the recorded fixture in `tests/fixtures/spike/`, replayed in unit tests and in the Electron spike e2e test.
+- **Live suite** `pnpm test:live` (`tests/live`, its own Vitest config): runs the same loop against `HARNESS_SPIKE_BASE_URL` and is skipped when it is unset. CI does not run it.
 
 ### Changed
 
 - The title bar and the window's background colour now use the design tokens instead of local values.
+- The agent process gets an allowlisted environment (OS basics, the spike flags, and the spike variables only when `HARNESS_AGENT_SPIKE=1`), in place of a full copy of the app's environment. On Windows the names match case-insensitively, so `SYSTEMROOT` passes.
+- The gate's denial reason now says only the reader job may call tools, and the router runs allowed calls instead of refusing them.
 
 ### Known issues
 
 - Dragging the window by the title bar has no automated check.
+- The `read_file` symlink tests are skipped where the OS refuses to create symlinks.
 - One e2e run crashed at launch (worker exit code 3221226505) and passed on rerun; not yet reproduced.
 
 ## [0.1.0] - 2026-11-17

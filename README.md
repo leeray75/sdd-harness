@@ -19,16 +19,32 @@ pnpm install   # installs dependencies and downloads the Electron binary for thi
 pnpm dev       # opens the app with hot reload
 ```
 
-| Command          | What it does                                              |
-| ---------------- | --------------------------------------------------------- |
-| `pnpm dev`       | Run the app (electron-vite dev server, hot reload)        |
-| `pnpm build`     | Build main, preload and renderer to `out/`                |
-| `pnpm typecheck` | Strict `tsc` for the Node side and the web side           |
-| `pnpm lint`      | ESLint                                                    |
-| `pnpm format`    | Prettier: rewrite files (`pnpm format:check` checks only) |
-| `pnpm test`      | Vitest unit tests                                         |
-| `pnpm e2e`       | Build, then the Playwright-for-Electron tests             |
-| `pnpm package`   | Unsigned electron-builder build for the current OS        |
+| Command             | What it does                                                                                            |
+| ------------------- | ------------------------------------------------------------------------------------------------------- |
+| `pnpm dev`          | Run the app (electron-vite dev server, hot reload)                                                      |
+| `pnpm build`        | Build main, preload and renderer to `out/`                                                              |
+| `pnpm typecheck`    | Strict `tsc` for the Node side and the web side                                                         |
+| `pnpm lint`         | ESLint                                                                                                  |
+| `pnpm format`       | Prettier: rewrite files (`pnpm format:check` checks only)                                               |
+| `pnpm test`         | Vitest unit tests                                                                                       |
+| `pnpm e2e`          | Build, then the Playwright-for-Electron tests                                                           |
+| `pnpm test:live`    | Opt-in live suite against `HARNESS_SPIKE_BASE_URL`; skipped without it, never in CI                     |
+| `pnpm record:spike` | Dev only: records the spike fixture from agentgateway (`AGENTGATEWAY_BASE_URL`, `AGENTGATEWAY_API_KEY`) |
+| `pnpm package`      | Unsigned electron-builder build for the current OS                                                      |
+
+### Run the spike (dev only)
+
+The spike sends one prompt to an OpenAI-compatible server. The model may ask for `read_file`, main checks the call and runs it inside one folder, and the model finishes its answer. Set these before `pnpm dev`:
+
+| Variable                 | What it does                                                                                                          |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------- |
+| `HARNESS_AGENT_SPIKE=1`  | The agent runs the spike loop once after it starts. The spike variables reach the agent only when this is `1`         |
+| `HARNESS_SPIKE_BASE_URL` | The server's base URL, with `/v1` when the server needs it, for example `http://spark-8013.taileaa4a8.ts.net:4100/v1` |
+| `HARNESS_SPIKE_API_KEY`  | Optional key. Read from the environment in dev only; keychain storage comes with `p1-secrets`                         |
+| `HARNESS_SPIKE_MODEL`    | The model name. Default `qwen3.8-flash-next-nothink`                                                                  |
+| `HARNESS_SPIKE_ROOT`     | The one folder `read_file` may read inside. Absolute paths and paths that leave it are refused                        |
+
+The streamed answer is written to the agent's output. `pnpm test:live` runs the same loop against `HARNESS_SPIKE_BASE_URL` when it is set. `pnpm record:spike` records the replayed fixture from agentgateway.
 
 ### Windows and WSL
 

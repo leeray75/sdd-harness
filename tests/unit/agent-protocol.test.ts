@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   MAX_STRING_LENGTH,
+  MAX_TOOL_OUTPUT_LENGTH,
   isAgentToMainMessage,
   isMainToAgentMessage,
   validateAgentToMainMessage,
@@ -129,15 +130,76 @@ describe('human-only actions (AC5)', () => {
 describe('isMainToAgentMessage', () => {
   it('accepts ping and both kinds of tool call result', () => {
     expect(isMainToAgentMessage({ type: 'ping' })).toBe(true);
-    expect(isMainToAgentMessage({ type: 'tool-call-result', id: 'req-1', ok: true })).toBe(true);
+    expect(
+      isMainToAgentMessage({ type: 'tool-call-result', id: 'req-1', ok: true, output: 'text' }),
+    ).toBe(true);
     expect(
       isMainToAgentMessage({
         type: 'tool-call-result',
         id: 'req-1',
         ok: false,
-        error: { code: 'denied', reason: 'no tools are allowed yet' },
+        error: { code: 'denied', reason: 'not allowed by policy' },
       }),
     ).toBe(true);
+  });
+
+  it('accepts a success with empty output and with output at the cap', () => {
+    expect(isMainToAgentMessage({ type: 'tool-call-result', id: 'r', ok: true, output: '' })).toBe(
+      true,
+    );
+    expect(
+      isMainToAgentMessage({
+        type: 'tool-call-result',
+        id: 'r',
+        ok: true,
+        output: 'a'.repeat(MAX_TOOL_OUTPUT_LENGTH),
+      }),
+    ).toBe(true);
+  });
+
+  it('rejects a success without output, with non-string output, or with oversized output', () => {
+    expect(isMainToAgentMessage({ type: 'tool-call-result', id: 'r', ok: true })).toBe(false);
+    expect(isMainToAgentMessage({ type: 'tool-call-result', id: 'r', ok: true, output: 42 })).toBe(
+      false,
+    );
+    expect(
+      isMainToAgentMessage({ type: 'tool-call-result', id: 'r', ok: true, output: null }),
+    ).toBe(false);
+    expect(
+      isMainToAgentMessage({
+        type: 'tool-call-result',
+        id: 'r',
+        ok: true,
+        output: 'a'.repeat(MAX_TOOL_OUTPUT_LENGTH + 1),
+      }),
+    ).toBe(false);
+  });
+
+  it('accepts a failed error and rejects an unknown error code', () => {
+    expect(
+      isMainToAgentMessage({
+        type: 'tool-call-result',
+        id: 'r',
+        ok: false,
+        error: { code: 'failed', reason: 'file is missing' },
+      }),
+    ).toBe(true);
+    expect(
+      isMainToAgentMessage({
+        type: 'tool-call-result',
+        id: 'r',
+        ok: false,
+        error: { code: 'crashed', reason: 'x' },
+      }),
+    ).toBe(false);
+    expect(
+      isMainToAgentMessage({
+        type: 'tool-call-result',
+        id: 'r',
+        ok: false,
+        error: { code: 'failed' },
+      }),
+    ).toBe(false);
   });
 
   it('rejects a denial without the denied code or a reason', () => {

@@ -1,15 +1,38 @@
-// Agent process stub. Runs as an Electron utilityProcess started by main. It has no window,
+// Agent process. Runs as an Electron utilityProcess started by main. It has no window,
 // preload or renderer access, and it talks to main only through process.parentPort.
-// It makes no tool calls except the self-check below, which main's gate denies.
+// It makes one self-check tool call when HARNESS_AGENT_SELFCHECK is '1' (main's gate denies
+// it). When HARNESS_AGENT_SPIKE is '1' it also runs the spike loop once after the handshake:
+// a model streams a reply, asks for read_file, main checks and runs the call, and the model
+// finishes. The streamed text goes to stdout.
 
+import OpenAI, { APIError } from 'openai';
 import { validateMainToAgentMessage, type AgentToMainMessage } from '../shared/agent-protocol';
+import { runAgentLoop, type ToolCallOutcome } from './loop';
 
 /** Set by main from the app's environment. The agent sends one self-check tool call when it is '1'. */
 const SELFCHECK_FLAG = 'HARNESS_AGENT_SELFCHECK';
 const SELFCHECK_ID = 'selfcheck-1';
 
+/** Set by main from the app's environment. The agent runs the spike loop once when it is '1'. */
+const SPIKE_FLAG = 'HARNESS_AGENT_SPIKE';
+const SPIKE_TIMEOUT_MS = 30_000;
+const SPIKE_DEFAULT_MODEL = 'qwen3.8-flash-next-nothink';
+const SPIKE_PROMPT =
+  'Read the file notes.txt with the read_file tool, then answer in one sentence what it says.';
+/** Sent when no key is set, so the SDK can start. Servers that need no key ignore it. */
+const NO_KEY_PLACEHOLDER = 'no-key-set';
+
 const port = process.parentPort;
 let selfCheckSent = false;
+let spikeStarted = false;
+let spikeCalls = 0;
+
+interface WaitingCall {
+  resolve: (outcome: ToolCallOutcome) => void;
+  timer: NodeJS.Timeout;
+}
+/** Spike tool calls waiting for main's result, by request id. */
+const waiting = new Map<string, WaitingCall>();
 
 function say(line: string): void {
   process.stdout.write(`[agent] ${line}\n`);
@@ -17,6 +40,58 @@ function say(line: string): void {
 
 function send(message: AgentToMainMessage): void {
   port.postMessage(message);
+}
+
+/** Sends one read_file call to main as the reader job and waits for the result with its id. */
+function callToolViaMain(name: string, args: Record<string, unknown>): Promise<ToolCallOutcome> {
+  spikeCalls += 1;
+  const id = `spike-${spikeCalls}`;
+  return new Promise<ToolCallOutcome>((resolve) => {
+    const timer = setTimeout(() => {
+      waiting.delete(id);
+      say(`spike tool call timed out id=${id}`);
+      resolve({ ok: false, reason: 'the tool call timed out after 30 seconds' });
+    }, SPIKE_TIMEOUT_MS);
+    waiting.set(id, { resolve, timer });
+    send({ type: 'tool-call-request', id, job: 'reader', tool: name, args });
+    say(`sent spike tool call id=${id} tool=${name}`);
+  });
+}
+
+/** Names an error without its message, since messages can echo request details. */
+function describeError(error: unknown): string {
+  if (error instanceof APIError) {
+    return error.status !== undefined ? `HTTP ${error.status}` : error.name;
+  }
+  return error instanceof Error ? error.name : 'unknown error';
+}
+
+/** Runs the spike loop once, streaming text to stdout. Never throws. */
+async function runSpike(): Promise<void> {
+  const baseURL = process.env['HARNESS_SPIKE_BASE_URL'];
+  if (!baseURL) {
+    say('spike skipped: HARNESS_SPIKE_BASE_URL is not set');
+    return;
+  }
+  const key = process.env['HARNESS_SPIKE_API_KEY'];
+  const model = process.env['HARNESS_SPIKE_MODEL'] || SPIKE_DEFAULT_MODEL;
+  const client = new OpenAI({ baseURL, apiKey: key || NO_KEY_PLACEHOLDER });
+  say(`spike started model=${model}`);
+  try {
+    const result = await runAgentLoop({
+      client,
+      model,
+      prompt: SPIKE_PROMPT,
+      callTool: callToolViaMain,
+      onText: (text) => {
+        process.stdout.write(text);
+      },
+    });
+    process.stdout.write('\n');
+    say(`spike finished stopped=${result.stopped} turns=${result.turns}`);
+  } catch (error) {
+    say(`spike failed: ${describeError(error)}`);
+  }
 }
 
 port.on('message', (event: { data: unknown }) => {
@@ -42,14 +117,31 @@ port.on('message', (event: { data: unknown }) => {
         });
         say(`sent self-check tool call id=${SELFCHECK_ID}`);
       }
+      if (process.env[SPIKE_FLAG] === '1' && !spikeStarted) {
+        spikeStarted = true;
+        void runSpike();
+      }
       return;
-    case 'tool-call-result':
+    case 'tool-call-result': {
+      const call = waiting.get(message.id);
+      if (call) {
+        waiting.delete(message.id);
+        clearTimeout(call.timer);
+        call.resolve(
+          message.ok
+            ? { ok: true, output: message.output }
+            : { ok: false, reason: message.error.reason },
+        );
+        say(`received spike result id=${message.id} ok=${message.ok}`);
+        return;
+      }
       if (message.ok) {
         say(`received result id=${message.id} ok=true`);
       } else {
         say(`received denied result id=${message.id} reason=${message.error.reason}`);
       }
       return;
+    }
   }
 });
 

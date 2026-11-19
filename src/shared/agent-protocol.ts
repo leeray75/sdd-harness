@@ -16,9 +16,15 @@ export const MAX_STRING_LENGTH = 4096;
 /** Deepest nesting the guards accept inside a tool call's `args`. */
 export const MAX_ARGS_DEPTH = 8;
 
-/** Why a tool call was refused. Later phases may add codes. */
+/** Longest tool output, in characters, that main returns to the agent (the 64 KiB read cap). */
+export const MAX_TOOL_OUTPUT_LENGTH = 65_536;
+
+/**
+ * Why a tool call did not run. `denied`: the gate refused it. `failed`: the gate allowed it
+ * but the tool could not complete. Later phases may add codes.
+ */
 export interface ToolCallError {
-  code: 'denied';
+  code: 'denied' | 'failed';
   reason: string;
 }
 
@@ -37,7 +43,7 @@ export type AgentToMainMessage =
 /** Messages main sends to the agent. */
 export type MainToAgentMessage =
   | { type: 'ping' }
-  | { type: 'tool-call-result'; id: string; ok: true }
+  | { type: 'tool-call-result'; id: string; ok: true; output: string }
   | { type: 'tool-call-result'; id: string; ok: false; error: ToolCallError };
 
 /** Outcome of a guard: the checked message, or the reason it was refused. */
@@ -168,14 +174,25 @@ export function validateMainToAgentMessage(value: unknown): ValidationResult<Mai
       if (!id.ok) return fail(id.reason);
       const ok = value['ok'];
       if (ok === true) {
-        return { ok: true, message: { type: 'tool-call-result', id: id.value, ok: true } };
+        const output = value['output'];
+        if (typeof output !== 'string') {
+          return fail("field 'output' must be a string");
+        }
+        if (output.length > MAX_TOOL_OUTPUT_LENGTH) {
+          return fail(`field 'output' is longer than ${MAX_TOOL_OUTPUT_LENGTH} characters`);
+        }
+        return {
+          ok: true,
+          message: { type: 'tool-call-result', id: id.value, ok: true, output },
+        };
       }
       if (ok !== false) {
         return fail("field 'ok' must be a boolean");
       }
       const error = value['error'];
-      if (!isRecord(error) || error['code'] !== 'denied') {
-        return fail("field 'error' must be { code: 'denied', reason }");
+      const code = isRecord(error) ? error['code'] : undefined;
+      if (!isRecord(error) || (code !== 'denied' && code !== 'failed')) {
+        return fail("field 'error' must be { code: 'denied' or 'failed', reason }");
       }
       const reason = requireString(error, 'reason');
       if (!reason.ok) return fail(reason.reason);
@@ -185,7 +202,7 @@ export function validateMainToAgentMessage(value: unknown): ValidationResult<Mai
           type: 'tool-call-result',
           id: id.value,
           ok: false,
-          error: { code: 'denied', reason: reason.value },
+          error: { code, reason: reason.value },
         },
       };
     }

@@ -101,6 +101,7 @@ Format: **Decision** · **Outcome** · **Why** · **Date**.
 - **Outcome:** Vitest runs unit tests (`pnpm test`, files in `tests/unit`). Playwright for Electron runs the e2e smoke test against the built app (`pnpm e2e`, files in `tests/e2e`); `pnpm e2e` builds first.
 - **Why:** Vitest shares the Vite config and runs fast for the pure main-process helpers. Playwright drives the real Electron window, so the e2e tests check the security settings as the user gets them.
 - **Date:** 2026-11-17
+- **Amended:** 2026-11-18, p1-spike-agent-loop: a live suite runs from `tests/live` through its own Vitest config (`vitest.live.config.mts`, script `pnpm test:live`). It is outside `pnpm test` and skips unless `HARNESS_SPIKE_BASE_URL` is set; CI never runs it. The Outcome above is otherwise unchanged.
 
 ## D18 · Node version
 
@@ -113,6 +114,7 @@ Format: **Decision** · **Outcome** · **Why** · **Date**.
 - **Outcome:** The agent runs as an Electron `utilityProcess`, forked by main after app ready, with no window, preload or renderer access. Main and the agent talk over the built-in `parentPort` and `postMessage` channel. Messages are typed in `src/shared` and checked by hand-written guards on both sides; main treats every agent message as untrusted and logs a rejected one without replying. Every agent tool call goes through a pure policy gate in main that denies by default and returns the denial to the agent as an error result. There is no message type, job or tool for a human-only action. If the agent exits unexpectedly, main logs the exit code and does not restart it.
 - **Why:** `utilityProcess` is Electron's own child process type: it runs in a separate OS process and its `parentPort` and `postMessage` channel is built in. `child_process.fork` was the alternative and was not chosen, because it needs its own message wiring and runtime handling in the packaged app. Hand-written guards add no dependency and keep the protocol types and their checks in one place; zod was the alternative and was not chosen. The gate lives in main, not in the agent, so the check stays outside anything an agent can change (D1, D4). Logging the exit and not restarting keeps a crash visible without hiding a loop; restart with backoff was the alternative and was not chosen.
 - **Date:** 2026-11-17
+- **Amended:** 2026-11-18, p1-spike-agent-loop: an allowed tool call now runs in main through an injected runner. Only `read_file` exists, for the reader job, and its output returns to the agent in a success `tool-call-result`; a tool that is allowed but fails returns the new `failed` error code. The gate still denies by default, and the router still logs job, tool and outcome only, never arguments or output. The Outcome above is otherwise unchanged.
 
 ## D20 · Window controls bridge shape
 

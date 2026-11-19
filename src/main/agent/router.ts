@@ -1,16 +1,32 @@
-// Main-side router for messages from the agent. Pure: the gate and the logger are passed
-// in, so tests can replace them. Every input is untrusted and is validated first.
+// Main-side router for messages from the agent. Pure: the gate, the tool runner and the
+// logger are passed in, so tests can replace them. Every input is untrusted and is
+// validated first.
 //
-// There is no execute path here. A tool call only ever gets a result back from the gate.
-// Phase 2 adds execution after the gate allows a call; until then an allow decision is
-// refused, so no code path runs a tool.
+// A tool call runs only when the gate allows it. The router then calls the injected runner
+// and returns its output (or its failure) to the agent under the request's id. A denied
+// call never reaches the runner. The log carries job, tool and outcome; never arguments or
+// tool output.
 
-import { validateAgentToMainMessage, type MainToAgentMessage } from '../../shared/agent-protocol';
+import {
+  MAX_TOOL_OUTPUT_LENGTH,
+  validateAgentToMainMessage,
+  type MainToAgentMessage,
+} from '../../shared/agent-protocol';
 import type { Logger } from '../log';
 import type { GateDecision, ToolCallRequest } from '../policy/gate';
 
+/** What a tool runner returns: its text, or the reason it could not complete. */
+export type ToolRunResult = { ok: true; output: string } | { ok: false; reason: string };
+
+/** Runs an allowed tool call in main. Must not throw; the router catches it if it does. */
+export type ToolRunner = (call: {
+  tool: string;
+  args: Record<string, unknown>;
+}) => Promise<ToolRunResult>;
+
 export interface RouterDeps {
   checkToolCall: (request: ToolCallRequest) => GateDecision;
+  runTool: ToolRunner;
   logger: Logger;
 }
 
@@ -23,9 +39,27 @@ export interface RouterOutcome {
 const NO_REPLY: RouterOutcome = { reply: null, ready: false };
 
 const FALLBACK_DENY_REASON = 'denied by policy';
-const NOT_EXECUTABLE_REASON = 'tool execution is not available yet';
+const TOOL_THREW_REASON = 'the tool could not run';
+const OUTPUT_TOO_LONG_REASON = `the tool output is longer than ${MAX_TOOL_OUTPUT_LENGTH} characters`;
 
-export function handleAgentMessage(raw: unknown, deps: RouterDeps): RouterOutcome {
+async function runAllowed(
+  message: { job: string; tool: string; args: Record<string, unknown> },
+  deps: RouterDeps,
+): Promise<ToolRunResult> {
+  let result: ToolRunResult;
+  try {
+    result = await deps.runTool({ tool: message.tool, args: message.args });
+  } catch {
+    // The error text is not logged or returned: it may echo the arguments.
+    result = { ok: false, reason: TOOL_THREW_REASON };
+  }
+  if (result.ok && result.output.length > MAX_TOOL_OUTPUT_LENGTH) {
+    return { ok: false, reason: OUTPUT_TOO_LONG_REASON };
+  }
+  return result;
+}
+
+export async function handleAgentMessage(raw: unknown, deps: RouterDeps): Promise<RouterOutcome> {
   const parsed = validateAgentToMainMessage(raw);
   if (!parsed.ok) {
     deps.logger.error(`rejected agent message: ${parsed.reason}`);
@@ -46,20 +80,44 @@ export function handleAgentMessage(raw: unknown, deps: RouterDeps): RouterOutcom
         tool: message.tool,
         args: message.args,
       });
-      // A refusal carries the gate's reason. An allow is refused too, because execution
-      // does not exist yet (see the note at the top of this file).
-      const reason = decision.allow
-        ? NOT_EXECUTABLE_REASON
-        : decision.reason || FALLBACK_DENY_REASON;
-      deps.logger.info(
-        `tool call denied: job=${message.job} tool=${message.tool} reason=${reason}`,
-      );
+      if (!decision.allow) {
+        const reason = decision.reason || FALLBACK_DENY_REASON;
+        deps.logger.info(
+          `tool call denied: job=${message.job} tool=${message.tool} reason=${reason}`,
+        );
+        return {
+          reply: {
+            type: 'tool-call-result',
+            id: message.id,
+            ok: false,
+            error: { code: 'denied', reason },
+          },
+          ready: false,
+        };
+      }
+
+      const result = await runAllowed(message, deps);
+      if (!result.ok) {
+        deps.logger.info(
+          `tool call failed: job=${message.job} tool=${message.tool} outcome=failed`,
+        );
+        return {
+          reply: {
+            type: 'tool-call-result',
+            id: message.id,
+            ok: false,
+            error: { code: 'failed', reason: result.reason },
+          },
+          ready: false,
+        };
+      }
+      deps.logger.info(`tool call ran: job=${message.job} tool=${message.tool} outcome=ok`);
       return {
         reply: {
           type: 'tool-call-result',
           id: message.id,
-          ok: false,
-          error: { code: 'denied', reason },
+          ok: true,
+          output: result.output,
         },
         ready: false,
       };
