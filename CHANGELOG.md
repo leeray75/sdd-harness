@@ -22,6 +22,14 @@ All notable changes to SDD Harness are recorded here. The format follows [Keep a
 - **Button and Chip components:** Button (primary, gate, secondary, ghost, danger; 40px and 32px; disabled) and Chip (neutral, accent, amber, green, red; span or 28px button), with hover and pressed states. Tests check their contrast against WCAG AA.
 - **Component gallery:** every Button and Chip variant and the font weights, shown under `pnpm dev` or with `HARNESS_GALLERY=1`.
 
+- **Continuous integration** (`p0-ci`, PR #5, D22): `.github/workflows/ci.yml` runs on pushes and pull requests to `main` and on demand.
+  - a `check` job on Linux runs typecheck, lint, format:check and the unit tests;
+  - an `e2e` job on Windows, macOS and Linux runs `pnpm e2e`, then an unsigned `electron-builder --dir` build;
+  - in CI only, Playwright retries twice, keeps a trace on the first retry and writes an HTML report, which a failed job uploads.
+- **Window manager in Linux CI** (`p0-ci-linux-wm`, PR #6): the Linux e2e job runs fluxbox under `xvfb-run`, so maximize and restore work as on a Linux desktop.
+- **macOS title-bar e2e test:** checks the traffic lights at `{ x: 14, y: 13 }` and the 78px title-bar padding on the macOS runner.
+- **Docs:** a CI section in `CLAUDE.md` and the suggested `SDD_TEST_CMD="pnpm test"` in the README.
+
 ### Changed
 
 - The title bar and the window's background colour now use the design tokens instead of local values.
