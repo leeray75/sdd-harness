@@ -50,7 +50,9 @@ pnpm typecheck         # tsc for the Node side and the web side (strict)
 pnpm lint              # ESLint (flat config, TypeScript and React rules)
 pnpm format            # Prettier: rewrite files
 pnpm format:check      # Prettier: check only
-pnpm test              # Vitest unit tests
+pnpm test              # Vitest unit tests (tests/unit only)
+pnpm test:live         # opt-in live suite (tests/live): needs HARNESS_SPIKE_BASE_URL; never in CI
+pnpm record:spike      # dev only: records tests/fixtures/spike from agentgateway (AGENTGATEWAY_BASE_URL, AGENTGATEWAY_API_KEY)
 pnpm e2e               # build, then Playwright-for-Electron smoke tests
 pnpm package           # unsigned electron-builder build for the current OS (not a test command)
 ```
@@ -75,3 +77,7 @@ CI=1 pnpm e2e                                                  # CI retry, trace
 On this machine, run pnpm from Windows (PowerShell or Git Bash), not from WSL. In PowerShell, set the variable with `$env:CI = 1` before `pnpm e2e`.
 
 The suggested sdd test command is `SDD_TEST_CMD="pnpm test"`. `pnpm e2e` is left to CI and the build.
+
+### Run the spike (dev only)
+
+The agent loop spike (D23) is off unless `HARNESS_AGENT_SPIKE=1`; then the agent runs one loop after its handshake. Its variables: `HARNESS_SPIKE_BASE_URL` (the OpenAI-compatible base URL, with `/v1` when the server needs it, for example `http://spark-8013.taileaa4a8.ts.net:4100/v1`), `HARNESS_SPIKE_API_KEY` (optional, from the environment in dev only), `HARNESS_SPIKE_MODEL` (default `qwen3.8-flash-next-nothink`) and `HARNESS_SPIKE_ROOT` (the one folder `read_file` may read). The agent gets the spike variables only when the flag is `1`, and gets no other app variables. `pnpm test:live` runs the loop against `HARNESS_SPIKE_BASE_URL` and skips when it is unset; `pnpm record:spike` re-records the fixture in `tests/fixtures/spike`.

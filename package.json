@@ -16,7 +16,9 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "vitest run",
+    "test:live": "vitest run --config vitest.live.config.mts",
     "e2e": "pnpm build && playwright test",
+    "record:spike": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/record-spike-fixture.ts",
     "package": "pnpm build && electron-builder --dir"
   },
   "devDependencies": {
@@ -42,5 +44,8 @@
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.73.0",
     "vitest": "^5.1.0"
+  },
+  "dependencies": {
+    "openai": "^7.59.0"
   }
 }

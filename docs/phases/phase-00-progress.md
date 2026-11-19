@@ -39,9 +39,9 @@ Toolchain (recorded as D14–D18 by `p0-toolchain-and-skeleton`): pnpm via Corep
 - One e2e run crashed at launch in the untouched smoke test (worker exit code 3221226505); the rerun passed. If it recurs, investigate it; CI now retries twice and keeps a trace, so a recurrence shows as a flaky test in the report.
 - The component gallery opens under `pnpm dev`, or in a built app with `HARNESS_GALLERY=1`; check its look by hand (the tests check computed values, not appearance).
 - Prettier formats all Markdown under `docs/` except `docs/specs/` and `docs/design/`; run `pnpm format` after editing docs.
-- The agent process gets a full copy of the app's environment (`src/main/agent/host.ts` `agentEnv`); give it an allowlisted env before Phase 1 passes it anything real.
+- ~~The agent process gets a full copy of the app's environment (`src/main/agent/host.ts` `agentEnv`); give it an allowlisted env before Phase 1 passes it anything real.~~: done in `p1-spike-agent-loop`; the agent gets an allowlisted environment.
 - Agent-supplied strings (e.g. the tool name) are logged without escaping newlines or control characters; escape them in Phase 2.
-- The router refuses a gate `allow` ("tool execution is not available yet"); Phase 2 replaces that branch with real execution.
+- ~~The router refuses a gate `allow` ("tool execution is not available yet"); Phase 2 replaces that branch with real execution.~~: done in `p1-spike-agent-loop` for `read_file`; the router runs allowed calls. Phase 2 adds the write tools and the per-job policy table.
 
 ## Phase summary
 

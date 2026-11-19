@@ -45,13 +45,15 @@ test('agent runs in its own process, its tool call is denied by main, and it exi
     await expect
       .poll(() => output, { timeout: 20_000 })
       .toMatch(
-        /\[harness\] tool call denied: job=writer tool=write_file reason=no tools are allowed yet/,
+        /\[harness\] tool call denied: job=writer tool=write_file reason=not allowed: only the reader job/,
       );
 
     // The agent receives the denied result for the same id.
     await expect
       .poll(() => output, { timeout: 20_000 })
-      .toMatch(/\[agent\] received denied result id=selfcheck-1 reason=no tools are allowed yet/);
+      .toMatch(
+        /\[agent\] received denied result id=selfcheck-1 reason=not allowed: only the reader job/,
+      );
 
     // The arguments of the self-check call never reach the log.
     expect(output).not.toContain('selfcheck.txt');

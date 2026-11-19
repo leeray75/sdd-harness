@@ -7,20 +7,79 @@ import { createInterface } from 'node:readline';
 import type { MainToAgentMessage } from '../../shared/agent-protocol';
 import { log } from '../log';
 import { checkToolCall } from '../policy/gate';
-import { handleAgentMessage } from './router';
+import { readFileInRoot } from '../tools/read-file';
+import { handleAgentMessage, type ToolRunner } from './router';
 
 const SELFCHECK_FLAG = 'HARNESS_AGENT_SELFCHECK';
+const SPIKE_FLAG = 'HARNESS_AGENT_SPIKE';
+const SPIKE_ROOT_VAR = 'HARNESS_SPIKE_ROOT';
+
+/** OS basics the agent needs to run. Nothing else from the app's environment is passed. */
+const OS_VARS = [
+  'PATH',
+  'Path',
+  'SystemRoot',
+  'WINDIR',
+  'TEMP',
+  'TMP',
+  'HOME',
+  'USERPROFILE',
+  'LANG',
+];
+/** Dev flags for the agent. */
+const FLAG_VARS = [SELFCHECK_FLAG, SPIKE_FLAG];
+/** Spike settings for the agent. Passed only when SPIKE_FLAG is '1'. */
+const SPIKE_VARS = ['HARNESS_SPIKE_BASE_URL', 'HARNESS_SPIKE_API_KEY', 'HARNESS_SPIKE_MODEL'];
 
 /**
- * The environment the agent gets. It is the app's environment, and the self-check flag
- * is passed through only when it is set in the app's environment.
+ * Runs the tools the gate can allow. Only `read_file` exists so far, and it reads inside
+ * the one root given to main. Any other name is refused.
  */
-export function agentEnv(parent: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...parent };
-  delete env[SELFCHECK_FLAG];
-  const flag = parent[SELFCHECK_FLAG];
-  if (flag !== undefined) {
-    env[SELFCHECK_FLAG] = flag;
+export function makeToolRunner(root: string | undefined): ToolRunner {
+  return ({ tool, args }) => {
+    if (tool === 'read_file') {
+      return readFileInRoot(root, args['path']);
+    }
+    return Promise.resolve({ ok: false, reason: 'no such tool' });
+  };
+}
+
+/**
+ * The name used to compare two variable names. On win32 names are case-insensitive, so the
+ * comparison key is upper-cased; elsewhere the name is compared as it is.
+ */
+function compareKey(name: string, platform: NodeJS.Platform): string {
+  return platform === 'win32' ? name.toUpperCase() : name;
+}
+
+/**
+ * The environment the agent gets: an allowlist of the app's variables. On win32 names match
+ * case-insensitively (the parent's spelling is kept, and a name is passed once); on other
+ * platforms they match exactly. The spike variables are included only when the spike flag
+ * is '1'. Everything else (API keys for other providers, the root, COMSPEC and the rest of
+ * the app's environment) is dropped.
+ */
+export function agentEnv(parent: NodeJS.ProcessEnv, platform: NodeJS.Platform): NodeJS.ProcessEnv {
+  const allowedNames = [...OS_VARS, ...FLAG_VARS];
+  const parentNames = Object.keys(parent).filter((name) => parent[name] !== undefined);
+
+  // The spike flag is read with the same matching rule as the other names.
+  const spikeFlagKey = parentNames.find(
+    (name) => compareKey(name, platform) === compareKey(SPIKE_FLAG, platform),
+  );
+  if (spikeFlagKey !== undefined && parent[spikeFlagKey] === '1') {
+    allowedNames.push(...SPIKE_VARS);
+  }
+
+  const allowed = new Set(allowedNames.map((name) => compareKey(name, platform)));
+  const env: NodeJS.ProcessEnv = {};
+  const passed = new Set<string>();
+  for (const name of parentNames) {
+    const key = compareKey(name, platform);
+    if (allowed.has(key) && !passed.has(key)) {
+      passed.add(key);
+      env[name] = parent[name];
+    }
   }
   return env;
 }
@@ -45,21 +104,28 @@ export function startAgentHost(): void {
   const child: UtilityProcess = utilityProcess.fork(join(__dirname, 'agent.js'), [], {
     serviceName: 'SDD Harness agent',
     stdio: 'pipe',
-    env: agentEnv(process.env),
+    env: agentEnv(process.env, process.platform),
   });
 
   forwardLines(child.stdout, false);
   forwardLines(child.stderr, true);
 
+  const runTool = makeToolRunner(process.env[SPIKE_ROOT_VAR]);
+
   child.on('message', (message: unknown) => {
-    const outcome = handleAgentMessage(message, { checkToolCall, logger: log });
-    if (outcome.reply) {
-      child.postMessage(outcome.reply);
-    }
-    if (outcome.ready) {
-      const ping: MainToAgentMessage = { type: 'ping' };
-      child.postMessage(ping);
-    }
+    handleAgentMessage(message, { checkToolCall, runTool, logger: log })
+      .then((outcome) => {
+        if (outcome.reply) {
+          child.postMessage(outcome.reply);
+        }
+        if (outcome.ready) {
+          const ping: MainToAgentMessage = { type: 'ping' };
+          child.postMessage(ping);
+        }
+      })
+      .catch(() => {
+        log.error('agent message could not be handled');
+      });
   });
 
   child.on('exit', (code: number) => {
