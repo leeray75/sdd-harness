@@ -7,10 +7,10 @@
 // The key arrives only in that message and is held in memory; it is never read from the
 // environment and never written to stdout or stderr.
 
-import OpenAI from 'openai';
 import { validateMainToAgentMessage, type AgentToMainMessage } from '../shared/agent-protocol';
 import { describeError } from './errors';
 import { runAgentLoop, type ToolCallOutcome } from './loop';
+import { chooseSpikeProvider } from './spike-provider';
 
 /** Set by main from the app's environment. The agent sends one self-check tool call when it is '1'. */
 const SELFCHECK_FLAG = 'HARNESS_AGENT_SELFCHECK';
@@ -19,11 +19,8 @@ const SELFCHECK_ID = 'selfcheck-1';
 /** Set by main from the app's environment. The agent runs the spike loop once when it is '1'. */
 const SPIKE_FLAG = 'HARNESS_AGENT_SPIKE';
 const SPIKE_TIMEOUT_MS = 30_000;
-const SPIKE_DEFAULT_MODEL = 'qwen3.8-flash-next-nothink';
 const SPIKE_PROMPT =
   'Read the file notes.txt with the read_file tool, then answer in one sentence what it says.';
-/** Sent when no key is set, so the SDK can start. Servers that need no key ignore it. */
-const NO_KEY_PLACEHOLDER = 'no-key-set';
 
 const port = process.parentPort;
 let selfCheckSent = false;
@@ -71,13 +68,23 @@ async function runSpike(key: string | null): Promise<void> {
     say('spike skipped: HARNESS_SPIKE_BASE_URL is not set');
     return;
   }
-  const model = process.env['HARNESS_SPIKE_MODEL'] || SPIKE_DEFAULT_MODEL;
-  const client = new OpenAI({ baseURL, apiKey: key || NO_KEY_PLACEHOLDER });
-  say(`spike started model=${model}`);
+  const choice = chooseSpikeProvider(
+    {
+      provider: process.env['HARNESS_SPIKE_PROVIDER'],
+      model: process.env['HARNESS_SPIKE_MODEL'],
+      baseURL,
+    },
+    key,
+  );
+  if (!choice.ok) {
+    say(`spike skipped: ${choice.reason}`);
+    return;
+  }
+  say(`spike started provider=${choice.format} model=${choice.model}`);
   try {
     const result = await runAgentLoop({
-      client,
-      model,
+      provider: choice.provider,
+      model: choice.model,
       prompt: SPIKE_PROMPT,
       callTool: callToolViaMain,
       onText: (text) => {
@@ -85,7 +92,9 @@ async function runSpike(key: string | null): Promise<void> {
       },
     });
     process.stdout.write('\n');
-    say(`spike finished stopped=${result.stopped} turns=${result.turns}`);
+    const total = result.usage.total;
+    const usage = total ? `input=${total.inputTokens} output=${total.outputTokens}` : 'usage=none';
+    say(`spike finished stopped=${result.stopped} turns=${result.turns} ${usage}`);
   } catch (error) {
     say(`spike failed: ${describeError(error)}`);
   }

@@ -38,7 +38,15 @@ Subtask 1 runs against the user's agentgateway (OpenAI-compatible, `openai` SDK)
 - PR #8 (`p1-secrets`) was merged while CI was red on Linux and macOS; `p1-secrets-ci` (PR #9) fixed it and was merged only after green CI on all three OSes (`main` green again at `d9ca80d`).
 - Electron warns that the sync `safeStorage.decryptString` is deprecated; move the store to the async calls in a later subtask.
 - Open `p1-secrets` notes: `secrets:delete` of a missing name exits 1; escaped-quote JSON header forms are not redacted; the spike e2e duplicates the socket server.
-- The e2e uses Playwright's mock keychain, so the real macOS keychain (and any unsigned-app keychain prompt) is a runtime check, not covered by CI. Check it by hand on a Mac before a release that ships the secret store.
+- The e2e uses Playwright's mock keychain, so the real macOS keychain (and any unsigned-app keychain prompt) is a runtime check, not covered
+- `p1-provider-interface` follow-ups:
+  - The Anthropic adapter is Bearer only. `@anthropic-ai/sdk` 1.10.0 sends `Authorization: Bearer` for `apiKey` too and never sends `x-api-key`, so the `x-api-key` mode was dropped (revision 1, D26). Recheck if the SDK changes.
+  - The adapter sends the SDK's default `anthropic-version` (`2026-10-21`); the recorder uses the same constant, and a unit test checks it. The gateway accepted it, so the `2023-06-01` fallback was not needed.
+  - The `anthropic` fixtures were re-recorded under the new version, and the user ran the recording. The `pnpm test:live` run for both formats is the user's, before result approval.
+  - The base URL differs by format: the openai adapter adds `/v1`, the anthropic adapter adds `/v1/messages` itself. `HARNESS_SPIKE_BASE_URL` is the gateway root without `/v1` in the docs.
+  - The spike e2e checks the openai fixture's wording ("The file notes.txt contains") and waits on the app's close event after `app.close()` (15 s). The "agent exited unexpectedly" check is gone, so the note above about it is closed.
+  - The openai adapter sends `max_tokens` only when a request sets `maxTokens`; the spike sets none. Revisit when the cost display needs it.
+  - `p1-openai-compatible` should add the agentgateway preset with both formats (D26). by CI. Check it by hand on a Mac before a release that ships the secret store.
 
 ## Phase summary
 

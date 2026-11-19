@@ -52,8 +52,9 @@ pnpm format            # Prettier: rewrite files
 pnpm format:check      # Prettier: check only
 pnpm test              # Vitest unit tests (tests/unit only)
 pnpm test:live         # opt-in live suite (tests/live): needs HARNESS_SPIKE_BASE_URL (and reads HARNESS_SPIKE_API_KEY from its environment); never in CI
-pnpm record:spike      # dev only: records tests/fixtures/spike from agentgateway (AGENTGATEWAY_BASE_URL, AGENTGATEWAY_API_KEY)
-pnpm secrets:set spike # dev only: stores a value in the secret store (hidden prompt, or piped stdin); unpackaged runs only
+pnpm record:spike      # dev only: records tests/fixtures/spike/openai from agentgateway (AGENTGATEWAY_BASE_URL without /v1, AGENTGATEWAY_API_KEY)
+pnpm record:spike anthropic # dev only: records tests/fixtures/spike/anthropic in the Anthropic format (same variables; model claude-haiku-5-5)
+pnpm secrets:set agentgateway # dev only: stores a value in the secret store (hidden prompt, or piped stdin); unpackaged runs only
 pnpm secrets:list      # dev only: lists the stored names (never values)
 pnpm secrets:delete spike # dev only: removes a stored entry
 pnpm e2e               # build, then Playwright-for-Electron smoke tests
@@ -83,4 +84,4 @@ The suggested sdd test command is `SDD_TEST_CMD="pnpm test"`. `pnpm e2e` is left
 
 ### Run the spike (dev only)
 
-The agent loop spike (D23) is off unless `HARNESS_AGENT_SPIKE=1`; then the agent runs one loop when main sends its `model-key` message after the handshake. The key is not an environment variable: store it with `pnpm secrets:set spike` (dev only), and main reads the `spike` entry and sends it to the agent in memory (D25). Its variables: `HARNESS_SPIKE_BASE_URL` (the OpenAI-compatible base URL, with `/v1` when the server needs it, for example `http://spark-8013.taileaa4a8.ts.net:4100/v1`), `HARNESS_SPIKE_MODEL` (default `qwen3.8-flash-next-nothink`) and `HARNESS_SPIKE_ROOT` (the one folder `read_file` may read). The agent gets the spike variables only when the flag is `1`, and gets no other app variables. `pnpm test:live` runs the loop against `HARNESS_SPIKE_BASE_URL` and skips when it is unset; `pnpm record:spike` re-records the fixture in `tests/fixtures/spike`.
+The agent loop spike (D23) is off unless `HARNESS_AGENT_SPIKE=1`; then the agent runs one loop when main sends its `model-key` message after the handshake. The key is not an environment variable: store it with `pnpm secrets:set agentgateway` (dev only), and main reads the `agentgateway` entry and sends it to the agent in memory (D25). Its variables: `HARNESS_SPIKE_BASE_URL` (the gateway root without `/v1`, for example `http://spark-8013.taileaa4a8.ts.net:4100`; the openai format adds `/v1`, the anthropic format adds `/v1/messages`), `HARNESS_SPIKE_PROVIDER` (`openai`, the default, or `anthropic`; any other value skips the spike), `HARNESS_SPIKE_MODEL` (default `qwen3.8-flash-next-nothink` for openai, `claude-haiku-5-5` for anthropic) and `HARNESS_SPIKE_ROOT` (the one folder `read_file` may read). The agent gets the spike variables only when the flag is `1`, and gets no other app variables. `pnpm test:live` runs the loop against `HARNESS_SPIKE_BASE_URL` and skips when it is unset; `pnpm record:spike [anthropic]` re-records the fixture in `tests/fixtures/spike/<format>`.

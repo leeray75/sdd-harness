@@ -38,9 +38,16 @@ All notable changes to SDD Harness are recorded here. The format follows [Keep a
 - **Redaction** (D25): `src/main/secrets/redact.ts` replaces every value the store has handed out, Bearer tokens, `Authorization` and `x-api-key` values, and `sk-` or `sk-ant-` strings with `[redacted]`. Every line main writes, including forwarded agent output, goes through it.
 - **Dev secrets commands:** `pnpm secrets:set <name>`, `pnpm secrets:list` and `pnpm secrets:delete <name>` (unpackaged runs only). `set` reads the value with hidden input or from piped stdin, and hands it to the app over a one-shot local socket, so it is never on the command line.
 - **`model-key` message** (D19, D25): main sends the spike key to the agent once per run, after its pong. The agent holds it in memory only.
+- **Provider interface** (`p1-provider-interface`, D23, D26): `src/agent/provider/` has the provider-neutral types (messages, tool calls, stream events, usage, `ProviderError`), an OpenAI-compatible adapter and an Anthropic Messages adapter (Bearer auth). No SDK type crosses the interface. Errors are sorted into auth, rate-limit, bad-request, server, network, aborted and unknown, with the SDK's retries.
+- **Spike provider choice:** `HARNESS_SPIKE_PROVIDER` (`openai`, the default, or `anthropic`) picks the adapter; the default model is per format and `HARNESS_SPIKE_MODEL` overrides it.
+- **Anthropic and OpenAI fixtures:** recorded through agentgateway for both formats (`tests/fixtures/spike/<format>/`); `pnpm record:spike anthropic` records the Anthropic format. The fixture tests replay both formats at adapter and loop level.
+- **Live suite for both formats** (`tests/live/spike.live.test.ts`, `pnpm test:live`) against `HARNESS_SPIKE_BASE_URL`, without `/v1`.
 
 ### Changed
 
+- The spike loop runs on the provider interface instead of the `openai` SDK. The finished line adds `input=<n> output=<n>` (or `usage=none`), and `LoopResult` gains per-turn and total usage.
+- The spike's stored key is the `agentgateway` entry (`pnpm secrets:set agentgateway`), replacing `spike`.
+- The old `tests/fixtures/spike/*.sse` files are removed; the spike e2e replays the `openai/` fixtures at `/v1/chat/completions`, with the app given the base URL without `/v1`.
 - The title bar and the window's background colour now use the design tokens instead of local values.
 - The agent process gets an allowlisted environment (OS basics, the spike flags, and the spike variables only when `HARNESS_AGENT_SPIKE=1`), in place of a full copy of the app's environment. On Windows the names match case-insensitively, so `SYSTEMROOT` passes.
 - The gate's denial reason now says only the reader job may call tools, and the router runs allowed calls instead of refusing them.

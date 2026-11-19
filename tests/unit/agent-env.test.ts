@@ -142,6 +142,19 @@ describe('agentEnv: the spike variables', () => {
     expect(env).toEqual({ ...OS_BASICS, HARNESS_AGENT_SPIKE: '1', ...SPIKE });
   });
 
+  it('passes HARNESS_SPIKE_PROVIDER only with the spike flag on', () => {
+    const on = agentEnv(
+      { ...OS_BASICS, HARNESS_AGENT_SPIKE: '1', ...SPIKE, HARNESS_SPIKE_PROVIDER: 'anthropic' },
+      'linux',
+    );
+    expect(on).toHaveProperty('HARNESS_SPIKE_PROVIDER', 'anthropic');
+    const off = agentEnv(
+      { ...OS_BASICS, HARNESS_AGENT_SPIKE: '0', HARNESS_SPIKE_PROVIDER: 'anthropic' },
+      'linux',
+    );
+    expect(off).not.toHaveProperty('HARNESS_SPIKE_PROVIDER');
+  });
+
   it('drops HARNESS_SPIKE_API_KEY with the spike flag off', () => {
     const env = agentEnv({ ...OS_BASICS, HARNESS_AGENT_SPIKE: '0', ...SPIKE_KEY }, 'linux');
     expect(env).not.toHaveProperty('HARNESS_SPIKE_API_KEY');

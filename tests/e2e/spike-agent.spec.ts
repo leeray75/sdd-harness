@@ -30,12 +30,13 @@ interface ReplayServer {
 }
 
 /**
- * A local stand-in for the gateway: the first chat request gets the recorded tool-call
- * stream, the request that carries the tool result gets the recorded final stream.
+ * A local stand-in for the gateway: the first chat request gets the recorded openai tool-call
+ * stream, the request that carries the tool result gets the recorded final stream. It serves the
+ * openai/ fixtures at /v1/chat/completions (AC11).
  */
 function startReplayServer(): Promise<ReplayServer> {
-  const toolTurn = readFileSync(join(FIXTURES, 'turn1-tool-call.sse'), 'utf8');
-  const finalTurn = readFileSync(join(FIXTURES, 'turn2-final.sse'), 'utf8');
+  const toolTurn = readFileSync(join(FIXTURES, 'openai', 'turn1-tool-call.sse'), 'utf8');
+  const finalTurn = readFileSync(join(FIXTURES, 'openai', 'turn2-final.sse'), 'utf8');
   const authorizations: (string | undefined)[] = [];
   const server = createHttpServer((req, res) => {
     let body = '';
@@ -61,7 +62,8 @@ function startReplayServer(): Promise<ReplayServer> {
         reject(new Error('replay server has no port'));
         return;
       }
-      resolve({ server, baseUrl: `http://127.0.0.1:${address.port}/v1`, authorizations });
+      // The app gets the base URL without /v1; the openai adapter adds it (AC11).
+      resolve({ server, baseUrl: `http://127.0.0.1:${address.port}`, authorizations });
     });
   });
 }
@@ -128,7 +130,7 @@ function baseEnv(): Record<string, string> {
 }
 
 /**
- * Seeds the `spike` entry the way `pnpm secrets:set` does (AC12, revision 1): a one-shot server
+ * Seeds the `agentgateway` entry the way `pnpm secrets:set` does (AC11, D25): a one-shot server
  * at a fresh address hands the value to the app started in the secrets mode. Only the address
  * is on the command line; the value is sent on the socket and is never in argv or the env.
  */
@@ -173,7 +175,7 @@ async function seedSpikeKey(
       root,
       ...PLAYWRIGHT_KEYCHAIN_SWITCHES,
       '--harness-secrets=set',
-      '--harness-secret-name=spike',
+      '--harness-secret-name=agentgateway',
       `--harness-secret-pipe=${address}`,
       `--user-data-dir=${userDataDir}`,
     ],
@@ -213,6 +215,8 @@ test('the agent gets the spike key from the store, and the key is in no output o
   writeFileSync(join(spikeRoot, 'notes.txt'), `${NOTE}\n`);
 
   let appOutput = '';
+  let appClosed = false;
+  let shutdownOk = false;
   let app: Awaited<ReturnType<typeof electron.launch>> | undefined;
 
   try {
@@ -223,8 +227,8 @@ test('the agent gets the spike key from the store, and the key is in no output o
       `the seed run exited with code ${seed.code}; expected 0\n${outputReport('seed run', seed.output)}`,
     ).toBe(0);
     expect(
-      seed.output.includes('[harness] secrets set spike ok'),
-      `the seed run did not print "[harness] secrets set spike ok"\n${outputReport('seed run', seed.output)}`,
+      seed.output.includes('[harness] secrets set agentgateway ok'),
+      `the seed run did not print "[harness] secrets set agentgateway ok"\n${outputReport('seed run', seed.output)}`,
     ).toBe(true);
 
     // Start the app on the temp user-data dir, with the spike and no key variable.
@@ -235,12 +239,17 @@ test('the agent gets the spike key from the store, and the key is in no output o
     env['HARNESS_AGENT_SPIKE'] = '1';
     env['HARNESS_SPIKE_BASE_URL'] = baseUrl;
     env['HARNESS_SPIKE_MODEL'] = 'qwen3.8-flash-next-nothink';
+    env['HARNESS_SPIKE_PROVIDER'] = 'openai';
     env['HARNESS_SPIKE_ROOT'] = spikeRoot;
 
     app = await electron.launch({
       args: [root, `--user-data-dir=${userDataDir}`],
       cwd: root,
       env,
+    });
+    // Playwright's ElectronApplication emits 'close' when the app has closed (T9 close check).
+    app.once('close', () => {
+      appClosed = true;
     });
 
     // Collect stdout and stderr as they arrive. Playwright cannot read them after exit.
@@ -267,9 +276,10 @@ test('the agent gets the spike key from the store, and the key is in no output o
       `the spike did not finish with stopped=answered turns=2\n${outputReport('app run', appOutput)}`,
     ).toBe(true);
     // The streamed answer reached the agent's stdout.
+    // The text is the openai fixture's answer (the anthropic fixture has its own wording).
     expect(
-      appOutput.includes('The file says'),
-      `the streamed answer ("The file says") did not reach the agent's stdout\n${outputReport('app run', appOutput)}`,
+      appOutput.includes('The file notes.txt contains'),
+      `the streamed answer ("The file notes.txt contains") did not reach the agent's stdout\n${outputReport('app run', appOutput)}`,
     ).toBe(true);
 
     // Every chat request carried the stored key, so it came from the store. The classes are
@@ -291,17 +301,24 @@ test('the agent gets the spike key from the store, and the key is in no output o
     expectNoSentinel('secrets.json', secretsFile);
     expect(JSON.parse(secretsFile)).toMatchObject({
       version: 1,
-      entries: { spike: expect.any(String) },
+      entries: { agentgateway: expect.any(String) },
     });
   } finally {
-    await app?.close();
+    if (app) {
+      const proc = app.process();
+      await app.close();
+      // Wait for the app's close event, or the process exit, with a timeout (T9 close check).
+      shutdownOk = await waitUntil(
+        () => appClosed || proc.exitCode !== null || proc.signalCode !== null,
+        15_000,
+      );
+    }
     server.close();
     rmSync(scratch, { recursive: true, force: true });
   }
 
-  // The agent is stopped on quit, so no unexpected exit was logged.
   expect(
-    /agent exited unexpectedly/.test(appOutput),
-    `the agent exited unexpectedly\n${outputReport('app run', appOutput)}`,
-  ).toBe(false);
+    shutdownOk,
+    `the app did not close or exit within 15 s after app.close()\n${outputReport('app run', appOutput)}`,
+  ).toBe(true);
 });
