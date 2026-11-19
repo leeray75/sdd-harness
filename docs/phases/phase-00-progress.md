@@ -1,6 +1,6 @@
 # Phase 0 progress: Project scaffold
 
-Status: in progress · Started: 2026-11-17
+Status: done · Started: 2026-11-17 · Finished: 2026-11-18
 
 Remote: `origin` = https://github.com/leeray75/sdd-harness.git. Feature branches come into `main` through pull requests; `gh` is available through WSL.
 
@@ -32,7 +32,7 @@ Toolchain (recorded as D14–D18 by `p0-toolchain-and-skeleton`): pnpm via Corep
 - Confirm or revisit the TypeScript 6.x pin (D15) when typescript-eslint supports TypeScript 7.
 - `pnpm-workspace.yaml` has a pnpm-written `minimumReleaseAgeExclude: electron@45.3.4`; update it on each Electron bump.
 - ~~`pnpm e2e` and `pnpm package` were only run on Windows~~: CI now runs both on Windows, macOS and Linux; the macOS title-bar test passed on the macOS runner.
-- PR #5 was merged while its Ubuntu e2e job was red (no window manager); PR #6 (`p0-ci-linux-wm`) was merged before its e2e jobs finished. The fluxbox fix is confirmed only once a `main` CI run is green on Ubuntu.
+- PR #5 was merged while its Ubuntu e2e job was red, and PR #6 before its e2e jobs finished; the `main` run after PR #6 (run 44429353486) is green on all jobs, so the fluxbox fix is confirmed. Wait for green checks before merging from now on.
 - GitHub warns that `actions/checkout@v4` and `actions/setup-node@v4` target the deprecated Node 20 runtime; bump them to the next major when convenient.
 - Title-bar drag regions (`-webkit-app-region`) have no automated check; confirm by hand in `pnpm dev`.
 - ~~`p0-design-tokens` replaces the local CSS variables in `src/renderer/titlebar.css`~~: done; the title bar uses the tokens.
@@ -45,4 +45,14 @@ Toolchain (recorded as D14–D18 by `p0-toolchain-and-skeleton`): pnpm via Corep
 
 ## Phase summary
 
-(written when the phase is done)
+Phase 0 delivered the scaffold in six subtasks (PRs #1–#6): the toolchain and a secure Electron skeleton with a typed preload bridge; an agent `utilityProcess` with a typed channel and a default-deny policy gate in main; the frameless window with the 40px custom title bar and window controls; the design tokens, bundled fonts and the Button and Chip components; and CI on Windows, macOS and Linux (with fluxbox under xvfb on Linux). Decisions D14–D22 were added.
+
+Definition of done:
+
+- [x] Install, test and e2e pass locally (Windows) and in CI on all three OSes: `main` run 44429353486 is green for `check` and for `e2e and package` on Windows, macOS and Ubuntu.
+- [x] The app opens a frameless window with the title bar from the designs (`p0-window-chrome`; e2e tests per OS, including the macOS title-bar test on the macOS runner).
+- [x] The renderer cannot reach Node or the filesystem; the e2e smoke test proves `require`, `process` and `module` are absent (`p0-toolchain-and-skeleton`).
+- [x] The policy gate exists and denies by default, with unit tests and an e2e test of a denied tool call (`p0-process-layout`).
+- [x] New decisions are recorded (D14–D22 in `docs/decisions.md`); `CLAUDE.md` lists the commands and the CI section.
+
+Carried into later phases: the follow-ups above (allowlisted agent env before Phase 1; escaping agent strings and real tool execution in Phase 2; the TypeScript 6 pin; the Electron release-age exclusion; the Node 20 action warning; manual checks of drag regions and the gallery).
