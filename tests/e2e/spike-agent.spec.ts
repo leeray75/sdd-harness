@@ -229,6 +229,9 @@ test('the agent gets the spike key from the store, and the key is in no output o
 
     // Start the app on the temp user-data dir, with the spike and no key variable.
     const env = baseEnv();
+    // Both runs must set up encryption the same way on Linux: the override makes main call
+    // setUsePlainTextEncryption(true), and the seed run already sets it (AC5, round 1 finding U1).
+    env['HARNESS_ALLOW_WEAK_SECRETS'] = '1';
     env['HARNESS_AGENT_SPIKE'] = '1';
     env['HARNESS_SPIKE_BASE_URL'] = baseUrl;
     env['HARNESS_SPIKE_MODEL'] = 'qwen3.8-flash-next-nothink';

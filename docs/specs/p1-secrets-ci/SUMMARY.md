@@ -58,6 +58,11 @@ Covers every revision, copied from `docs/specs/p1-secrets-ci/build-ledger.md`.
 
 No review ran in revision 0; the build paused at the planned CI checkpoint before review.
 
+### User change round 1 (after approval; PASS)
+| Finding | Severity | Location | Implementor decision | Reasoning | Action |
+| --- | --- | --- | --- | --- | --- |
+| U1: CI run 44470122631 on 545f13f passed on macOS and Windows but failed on Linux: the app run lacked `HARNESS_ALLOW_WEAK_SECRETS=1`, so it set up encryption differently from the seed run | major | tests/e2e/spike-agent.spec.ts | ACCEPT | AC5: both runs must use the same key source | App-run env sets the override, with a comment; CHANGELOG sentence. Review: PASS, no findings |
+
 ## Spec revisions
 - Revision 1: the planned CI checkpoint (AC4) ran on draft PR #9 (run 44468929994). The Linux seed succeeded, but on Linux and macOS the app run could not read the key, because Playwright adds `--use-mock-keychain` and `--password-store=basic` only to the app it launches. The user chose **Revise the spec**: the seed run passes the same switches (AC5, T5). Not chosen: seeding through Playwright's `electron.launch`; stopping the build. Re-approved by the user.
 

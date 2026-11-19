@@ -28,3 +28,12 @@ T5–T7 done (T7 on local checks; CI checked after commit). typecheck, lint, for
 | (none) | | | | | |
 
 Reviewer runtime notes (not defects): Linux and macOS CI after T5 must confirm the app run decrypts the seeded key (T7's CI half); setUsePlainTextEncryption is called in secrets mode after app ready (earlier Linux CI seed succeeded); the real macOS keychain is not covered by the e2e.
+
+## User change round 1 (after approval; not counted against the cap)
+CI run 44470122631 on 545f13f: macOS, Windows and check pass; Linux fails with both headers placeholder ("the spike key could not be read"). User asked for a change round: the app run also gets HARNESS_ALLOW_WEAK_SECRETS=1 so both runs set up encryption the same way (AC5).
+| Finding | Severity | Location | Implementor decision | Reasoning | Action |
+| --- | --- | --- | --- | --- | --- |
+| U1: app run lacks HARNESS_ALLOW_WEAK_SECRETS=1, so Linux runs set up encryption differently | major | tests/e2e/spike-agent.spec.ts | ACCEPT | AC5: seed and app runs use the same key source; product code switches only on the override | App-run env sets the override with a comment; CHANGELOG sentence; changes.md rows. spike e2e (Windows), typecheck, lint, format:check pass |
+
+### User change round 1 review (PASS)
+No findings. Reviewer: matches the seed run, weakens no AC13 check, override not in the agent env allowlist. Runtime check: Linux CI on the next push.
