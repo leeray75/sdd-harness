@@ -46,6 +46,12 @@ All notable changes to SDD Harness are recorded here. The format follows [Keep a
 - The gate's denial reason now says only the reader job may call tools, and the router runs allowed calls instead of refusing them.
 - The spike's key comes from the secret store (the `spike` entry, set with `pnpm secrets:set spike`), not from `HARNESS_SPIKE_API_KEY`. The variable is no longer passed to the agent and is read only by the live suite (`pnpm test:live`).
 
+### Fixed
+
+- **Linux e2e seed run** (`p1-secrets-ci`, D25): with no keyring, Electron 45 reported encryption as unavailable, so the test-only `HARNESS_ALLOW_WEAK_SECRETS=1` had no effect and the spike e2e's seed run exited 1. On Linux the override now also calls `safeStorage.setUsePlainTextEncryption(true)`, once per process and before the store's first use. Without the override nothing changes, and a weak Linux backend is still refused.
+- **Spike e2e seed run on macOS and Linux** (`p1-secrets-ci`, AC5): the seed run now passes Playwright's `--use-mock-keychain` and `--password-store=basic`, the same switches the app run gets, so the stored key can be read back. The app run also sets `HARNESS_ALLOW_WEAK_SECRETS=1`, so both runs set up encryption the same way on Linux. The e2e therefore uses Playwright's mock keychain; the real macOS keychain is a runtime check.
+- **Spike e2e failure output** (`p1-secrets-ci`): every seed and app-run assertion in `tests/e2e/spike-agent.spec.ts` now prints that run's captured output on failure (withheld if the sentinel appears in it), and the chat `Authorization` headers are reported as classes only, never as values.
+
 ### Known issues
 
 - Dragging the window by the title bar has no automated check.

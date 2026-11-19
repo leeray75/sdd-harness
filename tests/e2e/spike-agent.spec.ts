@@ -13,12 +13,20 @@ const FIXTURES = join(root, 'tests', 'fixtures', 'spike');
 const SENTINEL = 'SENTINEL-KEY-SPIKE-E2E-7319';
 const NOTE = 'Spike note: the fixture was recorded from the gateway.';
 const ELECTRON_BIN: string = createRequire(__filename)('electron');
+/**
+ * The Chromium switches that Playwright's Electron loader adds to every app it launches
+ * (playwright-core/lib/server/electron/loader.js): a mock keychain and the basic password store.
+ * The seed run passes them too. Without them the seed run encrypts with a key the app run cannot
+ * read on macOS and Linux (AC5). This makes the e2e use Playwright's mock keychain, not the real
+ * macOS keychain; the real keychain is a runtime check, not part of this test.
+ */
+const PLAYWRIGHT_KEYCHAIN_SWITCHES = ['--use-mock-keychain', '--password-store=basic'];
 
 interface ReplayServer {
   server: HttpServer;
   baseUrl: string;
-  /** The Authorization header of each chat request, in order. */
-  authorizations: string[];
+  /** The Authorization header of each chat request, in order; undefined when there was none. */
+  authorizations: (string | undefined)[];
 }
 
 /**
@@ -28,7 +36,7 @@ interface ReplayServer {
 function startReplayServer(): Promise<ReplayServer> {
   const toolTurn = readFileSync(join(FIXTURES, 'turn1-tool-call.sse'), 'utf8');
   const finalTurn = readFileSync(join(FIXTURES, 'turn2-final.sse'), 'utf8');
-  const authorizations: string[] = [];
+  const authorizations: (string | undefined)[] = [];
   const server = createHttpServer((req, res) => {
     let body = '';
     req.on('data', (chunk: Buffer) => {
@@ -36,7 +44,7 @@ function startReplayServer(): Promise<ReplayServer> {
     });
     req.on('end', () => {
       if (req.method === 'POST' && req.url === '/v1/chat/completions') {
-        authorizations.push(req.headers.authorization ?? '<none>');
+        authorizations.push(req.headers.authorization);
         res.writeHead(200, { 'content-type': 'text/event-stream' });
         res.end(body.includes('"role":"tool"') ? finalTurn : toolTurn);
         return;
@@ -56,6 +64,56 @@ function startReplayServer(): Promise<ReplayServer> {
       resolve({ server, baseUrl: `http://127.0.0.1:${address.port}/v1`, authorizations });
     });
   });
+}
+
+/** The Authorization value the agent sends when no key is set (src/agent/index.ts). */
+const PLACEHOLDER_HEADER = 'Bearer no-key-set';
+
+type HeaderClass = 'missing' | 'placeholder' | 'sentinel' | 'other';
+
+/** Reduces an Authorization header to a class, so no failure message ever prints a header value. */
+function classifyAuthorization(header: string | undefined): HeaderClass {
+  if (header === undefined) {
+    return 'missing';
+  }
+  if (header === `Bearer ${SENTINEL}`) {
+    return 'sentinel';
+  }
+  if (header === PLACEHOLDER_HEADER) {
+    return 'placeholder';
+  }
+  return 'other';
+}
+
+/**
+ * What a failure message may say about one run's captured output (AC1): the output itself, or,
+ * when the sentinel is in it, only a note that it leaked. The sentinel is never printed.
+ */
+function outputReport(label: string, output: string): string {
+  if (output.includes(SENTINEL)) {
+    return `${label} output: the sentinel appeared in it, so the output is withheld`;
+  }
+  return `${label} output (stdout and stderr):\n${output.length > 0 ? output : '(no output)'}`;
+}
+
+/** Polls a condition until it holds or the time runs out. Returns whether it held. */
+async function waitUntil(condition: () => boolean, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (!condition()) {
+    if (Date.now() >= deadline) {
+      return false;
+    }
+    await new Promise<void>((resolve) => setTimeout(resolve, 100));
+  }
+  return true;
+}
+
+/** Asserts the sentinel is absent from a text. The message names the place, never the value. */
+function expectNoSentinel(place: string, text: string): void {
+  expect(
+    text.includes(SENTINEL),
+    `the sentinel appeared in ${place}; it must never be printed or written`,
+  ).toBe(false);
 }
 
 /** The environment for a run: the parent's, minus the dev-server URL and any spike key variable. */
@@ -113,6 +171,7 @@ async function seedSpikeKey(
     ELECTRON_BIN,
     [
       root,
+      ...PLAYWRIGHT_KEYCHAIN_SWITCHES,
       '--harness-secrets=set',
       '--harness-secret-name=spike',
       `--harness-secret-pipe=${address}`,
@@ -159,11 +218,20 @@ test('the agent gets the spike key from the store, and the key is in no output o
   try {
     // Seed the store through the secrets mode, with the test-only weak-backend override.
     const seed = await seedSpikeKey(userDataDir, SENTINEL, scratch);
-    expect(seed.code).toBe(0);
-    expect(seed.output).toContain('[harness] secrets set spike ok');
+    expect(
+      seed.code,
+      `the seed run exited with code ${seed.code}; expected 0\n${outputReport('seed run', seed.output)}`,
+    ).toBe(0);
+    expect(
+      seed.output.includes('[harness] secrets set spike ok'),
+      `the seed run did not print "[harness] secrets set spike ok"\n${outputReport('seed run', seed.output)}`,
+    ).toBe(true);
 
     // Start the app on the temp user-data dir, with the spike and no key variable.
     const env = baseEnv();
+    // Both runs must set up encryption the same way on Linux: the override makes main call
+    // setUsePlainTextEncryption(true), and the seed run already sets it (AC5, round 1 finding U1).
+    env['HARNESS_ALLOW_WEAK_SECRETS'] = '1';
     env['HARNESS_AGENT_SPIKE'] = '1';
     env['HARNESS_SPIKE_BASE_URL'] = baseUrl;
     env['HARNESS_SPIKE_MODEL'] = 'qwen3.8-flash-next-nothink';
@@ -183,25 +251,44 @@ test('the agent gets the spike key from the store, and the key is in no output o
     proc.stderr?.on('data', (chunk: Buffer) => {
       appOutput += chunk.toString('utf8');
     });
-    await expect.poll(() => appOutput, { timeout: 60_000 }).toMatch(/\[agent\] spike finished/);
+    const finished = await waitUntil(() => /\[agent\] spike finished/.test(appOutput), 60_000);
+    expect(
+      finished,
+      `the spike did not print "[agent] spike finished" within 60 s\n${outputReport('app run', appOutput)}`,
+    ).toBe(true);
 
     // Main ran the one read_file call the gate allowed, for the reader job.
-    expect(appOutput).toMatch(/\[harness\] tool call ran: job=reader tool=read_file outcome=ok/);
-    expect(appOutput).toMatch(/\[agent\] spike finished stopped=answered turns=2/);
+    expect(
+      /\[harness\] tool call ran: job=reader tool=read_file outcome=ok/.test(appOutput),
+      `the reader job's read_file call did not run with outcome=ok\n${outputReport('app run', appOutput)}`,
+    ).toBe(true);
+    expect(
+      /\[agent\] spike finished stopped=answered turns=2/.test(appOutput),
+      `the spike did not finish with stopped=answered turns=2\n${outputReport('app run', appOutput)}`,
+    ).toBe(true);
     // The streamed answer reached the agent's stdout.
-    expect(appOutput).toContain('The file says');
+    expect(
+      appOutput.includes('The file says'),
+      `the streamed answer ("The file says") did not reach the agent's stdout\n${outputReport('app run', appOutput)}`,
+    ).toBe(true);
 
-    // Every chat request carried the stored key, so it came from the store.
-    expect(authorizations.length).toBeGreaterThan(0);
-    for (const header of authorizations) {
-      expect(header).toBe(`Bearer ${SENTINEL}`);
-    }
+    // Every chat request carried the stored key, so it came from the store. The classes are
+    // printed, never the header values.
+    const classes = authorizations.map(classifyAuthorization);
+    expect(
+      classes.length > 0,
+      `no chat request reached the replay server\n${outputReport('app run', appOutput)}`,
+    ).toBe(true);
+    expect(
+      classes.every((item) => item === 'sentinel'),
+      `chat request Authorization classes, in order: [${classes.join(', ')}]; every request must be "sentinel"\n${outputReport('app run', appOutput)}`,
+    ).toBe(true);
 
     // The sentinel is in neither run's output and not in the secrets file.
-    expect(appOutput).not.toContain(SENTINEL);
-    expect(seed.output).not.toContain(SENTINEL);
+    expectNoSentinel('the app run output', appOutput);
+    expectNoSentinel('the seed run output', seed.output);
     const secretsFile = readFileSync(join(userDataDir, 'secrets.json'), 'utf8');
-    expect(secretsFile).not.toContain(SENTINEL);
+    expectNoSentinel('secrets.json', secretsFile);
     expect(JSON.parse(secretsFile)).toMatchObject({
       version: 1,
       entries: { spike: expect.any(String) },
@@ -213,5 +300,8 @@ test('the agent gets the spike key from the store, and the key is in no output o
   }
 
   // The agent is stopped on quit, so no unexpected exit was logged.
-  expect(appOutput).not.toMatch(/agent exited unexpectedly/);
+  expect(
+    /agent exited unexpectedly/.test(appOutput),
+    `the agent exited unexpectedly\n${outputReport('app run', appOutput)}`,
+  ).toBe(false);
 });

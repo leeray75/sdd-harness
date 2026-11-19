@@ -32,6 +32,8 @@ Subtask 1 runs against the user's agentgateway (OpenAI-compatible, `openai` SDK)
 - `p1-provider-interface` should move `src/agent/loop.ts` onto the interface, add the Anthropic adapter, and re-run the same fixture and live tests on both providers (the phase "Definition of done").
 - ~~`p1-secrets` replaces the spike's environment-variable key (`HARNESS_SPIKE_API_KEY`) with keychain storage in main; decide then whether main passes the key to the agent per request or makes the model calls itself.~~ Done in `p1-secrets`: the key lives in the secret store and reaches the agent in a per-run `model-key` message (D25); main makes no model calls.
 - Agent-supplied strings are still logged without escaping control characters (Phase 0 follow-up, Phase 2).
+- `p1-secrets-ci` fixed the spike e2e on Linux and macOS in two parts. (1) On Linux with no keyring, `HARNESS_ALLOW_WEAK_SECRETS=1` now also calls `safeStorage.setUsePlainTextEncryption(true)`, once per process, through the pure `shouldUsePlainTextEncryption` (D25). (2) The seed run in the spike e2e passes Playwright's `--use-mock-keychain` and `--password-store=basic`, so it encrypts with the same key source as the app run. Keep the two in step if either changes.
+- The e2e uses Playwright's mock keychain, so the real macOS keychain (and any unsigned-app keychain prompt) is a runtime check, not covered by CI. Check it by hand on a Mac before a release that ships the secret store.
 
 ## Phase summary
 
