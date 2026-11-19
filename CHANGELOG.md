@@ -34,12 +34,17 @@ All notable changes to SDD Harness are recorded here. The format follows [Keep a
 - **Tool results over the channel:** `tool-call-result` carries the tool's `output` on success, and a `failed` error code beside `denied`. The gate allows only `reader` with `read_file` and args `{ path: string }`; main runs the allowed call and returns its output or failure under the request's id.
 - **Recording script** `pnpm record:spike` (dev only) and the recorded fixture in `tests/fixtures/spike/`, replayed in unit tests and in the Electron spike e2e test.
 - **Live suite** `pnpm test:live` (`tests/live`, its own Vitest config): runs the same loop against `HARNESS_SPIKE_BASE_URL` and is skipped when it is unset. CI does not run it.
+- **Secret store** (`p1-secrets`, D25): `src/main/secrets/store.ts` keeps provider keys as `safeStorage` ciphertext in `userData/secrets.json` (mode `0o600`, written atomically). It refuses to save when encryption is unavailable, or on Linux with a `basic_text` or `unknown` backend unless `HARNESS_ALLOW_WEAK_SECRETS=1` is set. Its errors never contain a value.
+- **Redaction** (D25): `src/main/secrets/redact.ts` replaces every value the store has handed out, Bearer tokens, `Authorization` and `x-api-key` values, and `sk-` or `sk-ant-` strings with `[redacted]`. Every line main writes, including forwarded agent output, goes through it.
+- **Dev secrets commands:** `pnpm secrets:set <name>`, `pnpm secrets:list` and `pnpm secrets:delete <name>` (unpackaged runs only). `set` reads the value with hidden input or from piped stdin, and hands it to the app over a one-shot local socket, so it is never on the command line.
+- **`model-key` message** (D19, D25): main sends the spike key to the agent once per run, after its pong. The agent holds it in memory only.
 
 ### Changed
 
 - The title bar and the window's background colour now use the design tokens instead of local values.
 - The agent process gets an allowlisted environment (OS basics, the spike flags, and the spike variables only when `HARNESS_AGENT_SPIKE=1`), in place of a full copy of the app's environment. On Windows the names match case-insensitively, so `SYSTEMROOT` passes.
 - The gate's denial reason now says only the reader job may call tools, and the router runs allowed calls instead of refusing them.
+- The spike's key comes from the secret store (the `spike` entry, set with `pnpm secrets:set spike`), not from `HARNESS_SPIKE_API_KEY`. The variable is no longer passed to the agent and is read only by the live suite (`pnpm test:live`).
 
 ### Known issues
 

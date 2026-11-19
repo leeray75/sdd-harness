@@ -43,6 +43,7 @@ export type AgentToMainMessage =
 /** Messages main sends to the agent. */
 export type MainToAgentMessage =
   | { type: 'ping' }
+  | { type: 'model-key'; key: string | null }
   | { type: 'tool-call-result'; id: string; ok: true; output: string }
   | { type: 'tool-call-result'; id: string; ok: false; error: ToolCallError };
 
@@ -169,6 +170,21 @@ export function validateMainToAgentMessage(value: unknown): ValidationResult<Mai
   switch (value['type']) {
     case 'ping':
       return { ok: true, message: { type: 'ping' } };
+    case 'model-key': {
+      // The key is the provider key for this run (D25). A missing or non-string key is refused,
+      // and so is an oversized one. The reasons never echo the key.
+      const key = value['key'];
+      if (key === null) {
+        return { ok: true, message: { type: 'model-key', key: null } };
+      }
+      if (typeof key !== 'string') {
+        return fail("field 'key' must be a string or null");
+      }
+      if (key.length > MAX_STRING_LENGTH) {
+        return fail(`field 'key' is longer than ${MAX_STRING_LENGTH} characters`);
+      }
+      return { ok: true, message: { type: 'model-key', key } };
+    }
     case 'tool-call-result': {
       const id = requireString(value, 'id');
       if (!id.ok) return fail(id.reason);

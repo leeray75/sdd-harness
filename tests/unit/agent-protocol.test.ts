@@ -5,6 +5,7 @@ import {
   isAgentToMainMessage,
   isMainToAgentMessage,
   validateAgentToMainMessage,
+  validateMainToAgentMessage,
 } from '../../src/shared/agent-protocol';
 
 const validRequest = {
@@ -224,5 +225,64 @@ describe('isMainToAgentMessage', () => {
 
   it('rejects a result whose ok field is not a boolean', () => {
     expect(isMainToAgentMessage({ type: 'tool-call-result', id: 'r', ok: 'no' })).toBe(false);
+  });
+});
+
+describe('model-key messages (AC7)', () => {
+  const SENTINEL = 'SENTINEL-PROTOCOL-KEY-3381';
+
+  it('accepts a key string and a null key', () => {
+    expect(isMainToAgentMessage({ type: 'model-key', key: SENTINEL })).toBe(true);
+    expect(isMainToAgentMessage({ type: 'model-key', key: null })).toBe(true);
+  });
+
+  it('accepts a key at the length limit and refuses one over it', () => {
+    expect(isMainToAgentMessage({ type: 'model-key', key: 'k'.repeat(MAX_STRING_LENGTH) })).toBe(
+      true,
+    );
+    expect(
+      isMainToAgentMessage({ type: 'model-key', key: 'k'.repeat(MAX_STRING_LENGTH + 1) }),
+    ).toBe(false);
+  });
+
+  it('refuses a message with no key field', () => {
+    const result = validateMainToAgentMessage({ type: 'model-key' });
+    expect(result.ok).toBe(false);
+  });
+
+  it('refuses a key that is not a string or null, without echoing it', () => {
+    for (const key of [42, true, { value: SENTINEL }, [SENTINEL], undefined]) {
+      const result = validateMainToAgentMessage({ type: 'model-key', key });
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.reason).not.toContain(SENTINEL);
+        expect(result.reason).toBe("field 'key' must be a string or null");
+      }
+    }
+  });
+
+  it('refuses an oversized key with a reason that names no value', () => {
+    const result = validateMainToAgentMessage({
+      type: 'model-key',
+      key: `${SENTINEL}${'k'.repeat(MAX_STRING_LENGTH)}`,
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).not.toContain(SENTINEL);
+      expect(result.reason).toBe(`field 'key' is longer than ${MAX_STRING_LENGTH} characters`);
+    }
+  });
+
+  it('does not put the sentinel in any rejection reason of the other guards', () => {
+    const reasons = [
+      validateMainToAgentMessage({ type: 'model-key', key: 7 }),
+      validateMainToAgentMessage({ type: 'tool-call-result', id: 'r', ok: 'no', output: SENTINEL }),
+    ];
+    for (const result of reasons) {
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.reason).not.toContain(SENTINEL);
+      }
+    }
   });
 });

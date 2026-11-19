@@ -4,6 +4,15 @@ import { pathToFileURL } from 'node:url';
 import { EVENT_CHANNELS, IPC_CHANNELS } from '../shared/bridge';
 import { tokens } from '../shared/tokens';
 import { startAgentHost } from './agent/host';
+import { log } from './log';
+import {
+  parseSecretsArgs,
+  runSecretsCommand,
+  type SecretsCommand,
+  type SecretsOutcome,
+} from './secrets/dev-mode';
+import { createElectronSecretStore } from './secrets/electron';
+import { readSecretFromPipe } from './secrets/pipe';
 import { applyNavigationGuards, isTrustedSender } from './security';
 
 // electron-vite sets ELECTRON_RENDERER_URL only under `electron-vite dev`.
@@ -117,17 +126,64 @@ function registerIpcHandlers(): void {
   });
 }
 
-void app.whenReady().then(() => {
-  registerIpcHandlers();
-  mainWindow = createMainWindow();
-  startAgentHost();
+/**
+ * The dev-only secrets command (D25, AC12). Set only for an unpackaged run with the switches;
+ * a packaged app ignores them.
+ */
+const secretsCommand: SecretsCommand | null = app.isPackaged
+  ? null
+  : parseSecretsArgs(process.argv);
 
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      mainWindow = createMainWindow();
-    }
+/** Quits with the code once pending writes to stdout and stderr have gone out. */
+function quitSecretsMode(code: number): void {
+  process.stdout.write('', () => {
+    process.stderr.write('', () => app.exit(code));
   });
-});
+}
+
+/** Runs one secrets command, prints only its lines through the redacting log, and quits. */
+async function runSecretsMode(command: SecretsCommand): Promise<void> {
+  let outcome: SecretsOutcome;
+  try {
+    // For `set` the value comes over the one-shot socket; it is never logged or echoed.
+    const value = command.op === 'set' ? await readSecretFromPipe(command.address) : null;
+    outcome = runSecretsCommand(createElectronSecretStore(), command, value);
+  } catch (error) {
+    // The reasons from the pipe read and the store name no value.
+    const reason = error instanceof Error ? error.message : 'unknown error';
+    const prefix =
+      command.op === 'invalid'
+        ? 'secrets'
+        : command.op === 'list'
+          ? 'secrets list'
+          : `secrets ${command.op} ${command.name}`;
+    outcome = { ok: false, lines: [`${prefix} failed: ${reason}`] };
+  }
+  for (const line of outcome.lines) {
+    if (outcome.ok) {
+      log.info(line);
+    } else {
+      log.error(line);
+    }
+  }
+  quitSecretsMode(outcome.ok ? 0 : 1);
+}
+
+if (secretsCommand) {
+  void app.whenReady().then(() => runSecretsMode(secretsCommand));
+} else {
+  void app.whenReady().then(() => {
+    registerIpcHandlers();
+    mainWindow = createMainWindow();
+    startAgentHost();
+
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) {
+        mainWindow = createMainWindow();
+      }
+    });
+  });
+}
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {

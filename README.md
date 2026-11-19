@@ -36,13 +36,22 @@ pnpm dev       # opens the app with hot reload
 
 The spike sends one prompt to an OpenAI-compatible server. The model may ask for `read_file`, main checks the call and runs it inside one folder, and the model finishes its answer. Set these before `pnpm dev`:
 
-| Variable                 | What it does                                                                                                          |
-| ------------------------ | --------------------------------------------------------------------------------------------------------------------- |
-| `HARNESS_AGENT_SPIKE=1`  | The agent runs the spike loop once after it starts. The spike variables reach the agent only when this is `1`         |
-| `HARNESS_SPIKE_BASE_URL` | The server's base URL, with `/v1` when the server needs it, for example `http://spark-8013.taileaa4a8.ts.net:4100/v1` |
-| `HARNESS_SPIKE_API_KEY`  | Optional key. Read from the environment in dev only; keychain storage comes with `p1-secrets`                         |
-| `HARNESS_SPIKE_MODEL`    | The model name. Default `qwen3.8-flash-next-nothink`                                                                  |
-| `HARNESS_SPIKE_ROOT`     | The one folder `read_file` may read inside. Absolute paths and paths that leave it are refused                        |
+| Variable                 | What it does                                                                                                                   |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
+| `HARNESS_AGENT_SPIKE=1`  | The agent runs the spike loop once, when main sends its key message. The spike variables reach the agent only when this is `1` |
+| `HARNESS_SPIKE_BASE_URL` | The server's base URL, with `/v1` when the server needs it, for example `http://spark-8013.taileaa4a8.ts.net:4100/v1`          |
+| `HARNESS_SPIKE_MODEL`    | The model name. Default `qwen3.8-flash-next-nothink`                                                                           |
+| `HARNESS_SPIKE_ROOT`     | The one folder `read_file` may read inside. Absolute paths and paths that leave it are refused                                 |
+
+The provider key is not an environment variable. Store it in the app's secret store first (dev only; the value is never on the command line, and the script builds the app first when `out/` is missing):
+
+```sh
+pnpm secrets:set spike     # hidden prompt, or piped stdin: echo value | pnpm secrets:set spike
+pnpm secrets:list          # names only
+pnpm secrets:delete spike
+```
+
+Main sends the stored `spike` key to the agent once per run, in memory only (D25). With no stored key, the agent sends no key.
 
 The streamed answer is written to the agent's output. `pnpm test:live` runs the same loop against `HARNESS_SPIKE_BASE_URL` when it is set. `pnpm record:spike` records the replayed fixture from agentgateway.
 

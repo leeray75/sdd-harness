@@ -30,7 +30,7 @@ Subtask 1 runs against the user's agentgateway (OpenAI-compatible, `openai` SDK)
 - The spike e2e test checks for no "agent exited unexpectedly" line after `app.close()` instead of waiting on the close event (lint removed the unused promise); tighten it when the spike moves onto the provider interface.
 - On win32, if the parent env holds two spellings of one variable, `agentEnv` keeps the first seen.
 - `p1-provider-interface` should move `src/agent/loop.ts` onto the interface, add the Anthropic adapter, and re-run the same fixture and live tests on both providers (the phase "Definition of done").
-- `p1-secrets` replaces the spike's environment-variable key (`HARNESS_SPIKE_API_KEY`) with keychain storage in main; decide then whether main passes the key to the agent per request or makes the model calls itself.
+- ~~`p1-secrets` replaces the spike's environment-variable key (`HARNESS_SPIKE_API_KEY`) with keychain storage in main; decide then whether main passes the key to the agent per request or makes the model calls itself.~~ Done in `p1-secrets`: the key lives in the secret store and reaches the agent in a per-run `model-key` message (D25); main makes no model calls.
 - Agent-supplied strings are still logged without escaping control characters (Phase 0 follow-up, Phase 2).
 
 ## Phase summary

@@ -34,9 +34,13 @@ const WIN_BASICS = {
 
 const SPIKE = {
   HARNESS_SPIKE_BASE_URL: 'http://gateway.example:4100/v1',
-  HARNESS_SPIKE_API_KEY: 'spike-key-value',
   HARNESS_SPIKE_MODEL: 'some-model',
 };
+
+// The spike key is no longer an environment variable (D25). The parent may still have one set
+// from older runs; the agent env must drop it either way.
+const SPIKE_KEY = { HARNESS_SPIKE_API_KEY: 'spike-key-value' };
+const WEAK_OVERRIDE = { HARNESS_ALLOW_WEAK_SECRETS: '1' };
 
 const APP_SECRETS = {
   ANTHROPIC_API_KEY: 'anthropic-secret',
@@ -126,6 +130,42 @@ describe('agentEnv: the spike variables', () => {
   it('passes the spike variables only when HARNESS_AGENT_SPIKE is 1', () => {
     const env = agentEnv({ ...OS_BASICS, HARNESS_AGENT_SPIKE: '1', ...SPIKE }, 'linux');
     expect(env).toEqual({ ...OS_BASICS, HARNESS_AGENT_SPIKE: '1', ...SPIKE });
+  });
+
+  it('drops HARNESS_SPIKE_API_KEY with the spike flag on, and never passes a key variable', () => {
+    const env = agentEnv(
+      { ...OS_BASICS, HARNESS_AGENT_SPIKE: '1', ...SPIKE, ...SPIKE_KEY },
+      'linux',
+    );
+    expect(env).not.toHaveProperty('HARNESS_SPIKE_API_KEY');
+    expect(Object.values(env)).not.toContain('spike-key-value');
+    expect(env).toEqual({ ...OS_BASICS, HARNESS_AGENT_SPIKE: '1', ...SPIKE });
+  });
+
+  it('drops HARNESS_SPIKE_API_KEY with the spike flag off', () => {
+    const env = agentEnv({ ...OS_BASICS, HARNESS_AGENT_SPIKE: '0', ...SPIKE_KEY }, 'linux');
+    expect(env).not.toHaveProperty('HARNESS_SPIKE_API_KEY');
+  });
+
+  it('drops HARNESS_SPIKE_API_KEY in any case on win32 with the flag on', () => {
+    const env = agentEnv(
+      { ...WIN_BASICS, HARNESS_AGENT_SPIKE: '1', harness_spike_api_key: 'spike-key-value' },
+      'win32',
+    );
+    expect(env).not.toHaveProperty('harness_spike_api_key');
+    expect(env).not.toHaveProperty('HARNESS_SPIKE_API_KEY');
+    expect(Object.values(env)).not.toContain('spike-key-value');
+  });
+
+  it('drops HARNESS_ALLOW_WEAK_SECRETS with the spike flag on and off, on both platforms', () => {
+    for (const platform of ['linux', 'win32'] as const) {
+      const basics = platform === 'win32' ? WIN_BASICS : OS_BASICS;
+      for (const flag of ['1', '0']) {
+        const env = agentEnv({ ...basics, HARNESS_AGENT_SPIKE: flag, ...WEAK_OVERRIDE }, platform);
+        expect(env).not.toHaveProperty('HARNESS_ALLOW_WEAK_SECRETS');
+        expect(env).toEqual({ ...basics, HARNESS_AGENT_SPIKE: flag });
+      }
+    }
   });
 
   it('drops the spike variables when the spike flag is 0', () => {
