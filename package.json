@@ -19,6 +19,9 @@
     "test:live": "vitest run --config vitest.live.config.mts",
     "e2e": "pnpm build && playwright test",
     "record:spike": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/record-spike-fixture.ts",
+    "secrets:set": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/secrets.ts set",
+    "secrets:list": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/secrets.ts list",
+    "secrets:delete": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/secrets.ts delete",
     "package": "pnpm build && electron-builder --dir"
   },
   "devDependencies": {

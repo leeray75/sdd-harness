@@ -4,10 +4,12 @@
 import { app, utilityProcess, type UtilityProcess } from 'electron';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
-import type { MainToAgentMessage } from '../../shared/agent-protocol';
+import { validateAgentToMainMessage, type MainToAgentMessage } from '../../shared/agent-protocol';
 import { log } from '../log';
 import { checkToolCall } from '../policy/gate';
+import { createElectronSecretStore } from '../secrets/electron';
 import { readFileInRoot } from '../tools/read-file';
+import { decideModelKey } from './model-key';
 import { handleAgentMessage, type ToolRunner } from './router';
 
 const SELFCHECK_FLAG = 'HARNESS_AGENT_SELFCHECK';
@@ -28,8 +30,11 @@ const OS_VARS = [
 ];
 /** Dev flags for the agent. */
 const FLAG_VARS = [SELFCHECK_FLAG, SPIKE_FLAG];
-/** Spike settings for the agent. Passed only when SPIKE_FLAG is '1'. */
-const SPIKE_VARS = ['HARNESS_SPIKE_BASE_URL', 'HARNESS_SPIKE_API_KEY', 'HARNESS_SPIKE_MODEL'];
+/**
+ * Spike settings for the agent. Passed only when SPIKE_FLAG is '1'. The key is not here: main
+ * sends it in a `model-key` message (D25), so no key variable ever reaches the agent's env.
+ */
+const SPIKE_VARS = ['HARNESS_SPIKE_BASE_URL', 'HARNESS_SPIKE_MODEL'];
 
 /**
  * Runs the tools the gate can allow. Only `read_file` exists so far, and it reads inside
@@ -112,7 +117,15 @@ export function startAgentHost(): void {
 
   const runTool = makeToolRunner(process.env[SPIKE_ROOT_VAR]);
 
+  // The key is sent once per agent process, after its pong (D25). The store is built here,
+  // which is after app ready; it reads the disk only when a key is asked for.
+  const store = createElectronSecretStore();
+  const spikeFlag = process.env[SPIKE_FLAG] === '1';
+  let modelKeySent = false;
+
   child.on('message', (message: unknown) => {
+    const parsed = validateAgentToMainMessage(message);
+    const isPong = parsed.ok && parsed.message.type === 'pong';
     handleAgentMessage(message, { checkToolCall, runTool, logger: log })
       .then((outcome) => {
         if (outcome.reply) {
@@ -121,6 +134,13 @@ export function startAgentHost(): void {
         if (outcome.ready) {
           const ping: MainToAgentMessage = { type: 'ping' };
           child.postMessage(ping);
+        }
+        if (isPong && !modelKeySent) {
+          modelKeySent = true;
+          const keyMessage = decideModelKey({ spikeFlag, store, logger: log });
+          if (keyMessage) {
+            child.postMessage(keyMessage);
+          }
         }
       })
       .catch(() => {

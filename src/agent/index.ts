@@ -1,12 +1,15 @@
 // Agent process. Runs as an Electron utilityProcess started by main. It has no window,
 // preload or renderer access, and it talks to main only through process.parentPort.
 // It makes one self-check tool call when HARNESS_AGENT_SELFCHECK is '1' (main's gate denies
-// it). When HARNESS_AGENT_SPIKE is '1' it also runs the spike loop once after the handshake:
-// a model streams a reply, asks for read_file, main checks and runs the call, and the model
-// finishes. The streamed text goes to stdout.
+// it). When HARNESS_AGENT_SPIKE is '1' it also runs the spike loop once: the loop starts when
+// main sends the run's `model-key` message (D25). A model streams a reply, asks for read_file,
+// main checks and runs the call, and the model finishes. The streamed text goes to stdout.
+// The key arrives only in that message and is held in memory; it is never read from the
+// environment and never written to stdout or stderr.
 
-import OpenAI, { APIError } from 'openai';
+import OpenAI from 'openai';
 import { validateMainToAgentMessage, type AgentToMainMessage } from '../shared/agent-protocol';
+import { describeError } from './errors';
 import { runAgentLoop, type ToolCallOutcome } from './loop';
 
 /** Set by main from the app's environment. The agent sends one self-check tool call when it is '1'. */
@@ -58,22 +61,16 @@ function callToolViaMain(name: string, args: Record<string, unknown>): Promise<T
   });
 }
 
-/** Names an error without its message, since messages can echo request details. */
-function describeError(error: unknown): string {
-  if (error instanceof APIError) {
-    return error.status !== undefined ? `HTTP ${error.status}` : error.name;
-  }
-  return error instanceof Error ? error.name : 'unknown error';
-}
-
-/** Runs the spike loop once, streaming text to stdout. Never throws. */
-async function runSpike(): Promise<void> {
+/**
+ * Runs the spike loop once, streaming text to stdout. Never throws. The key is the one main
+ * sent for this run, or null; it lives only in the client built here.
+ */
+async function runSpike(key: string | null): Promise<void> {
   const baseURL = process.env['HARNESS_SPIKE_BASE_URL'];
   if (!baseURL) {
     say('spike skipped: HARNESS_SPIKE_BASE_URL is not set');
     return;
   }
-  const key = process.env['HARNESS_SPIKE_API_KEY'];
   const model = process.env['HARNESS_SPIKE_MODEL'] || SPIKE_DEFAULT_MODEL;
   const client = new OpenAI({ baseURL, apiKey: key || NO_KEY_PLACEHOLDER });
   say(`spike started model=${model}`);
@@ -117,11 +114,21 @@ port.on('message', (event: { data: unknown }) => {
         });
         say(`sent self-check tool call id=${SELFCHECK_ID}`);
       }
-      if (process.env[SPIKE_FLAG] === '1' && !spikeStarted) {
-        spikeStarted = true;
-        void runSpike();
-      }
       return;
+    case 'model-key': {
+      // Only the spike uses a key. Without the flag the message is ignored; the key is never logged.
+      if (process.env[SPIKE_FLAG] !== '1') {
+        say('model-key ignored: the spike flag is off');
+        return;
+      }
+      if (spikeStarted) {
+        say('model-key ignored: the spike already started in this process');
+        return;
+      }
+      spikeStarted = true;
+      void runSpike(message.key);
+      return;
+    }
     case 'tool-call-result': {
       const call = waiting.get(message.id);
       if (call) {

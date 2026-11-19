@@ -1,6 +1,9 @@
 // Main-process log helper. Lines go to stdout and stderr only; there are no log files and
 // no logging library. Callers must never pass tool arguments: log the job, the tool name
-// and the reason only.
+// and the reason only. Every line passes through the process-wide redactor first (D25), so
+// a known secret value or a credential-shaped string never reaches stdout or stderr.
+
+import { redactor } from './secrets/redact';
 
 const PREFIX = '[harness]';
 
@@ -11,17 +14,17 @@ export interface Logger {
 }
 
 export const log: Logger & {
-  /** Writes a line from the agent's own output unchanged, to stdout or stderr. */
+  /** Writes a line from the agent's own output, redacted, to stdout or stderr. */
   forward(line: string, toStderr: boolean): void;
 } = {
   info(message: string): void {
-    process.stdout.write(`${PREFIX} ${message}\n`);
+    process.stdout.write(redactor.redact(`${PREFIX} ${message}`) + '\n');
   },
   error(message: string): void {
-    process.stderr.write(`${PREFIX} ${message}\n`);
+    process.stderr.write(redactor.redact(`${PREFIX} ${message}`) + '\n');
   },
   forward(line: string, toStderr: boolean): void {
     const stream = toStderr ? process.stderr : process.stdout;
-    stream.write(`${line}\n`);
+    stream.write(redactor.redact(line) + '\n');
   },
 };

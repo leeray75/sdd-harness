@@ -3,7 +3,9 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import OpenAI from 'openai';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describeError } from '../../src/agent/errors';
 import { MAX_TURNS, runAgentLoop, type CallTool } from '../../src/agent/loop';
+import { redactor, REDACTED } from '../../src/main/secrets/redact';
 
 const FIXTURE_DIR = fileURLToPath(new URL('../fixtures/spike/', import.meta.url));
 const TOOL_CALL_BODY = readFileSync(join(FIXTURE_DIR, 'turn1-tool-call.sse'), 'utf8');
@@ -268,5 +270,68 @@ describe('runAgentLoop: nothing sensitive is written', () => {
       expect(body).not.toContain('Authorization');
       expect(body).not.toContain(SENTINEL);
     }
+  });
+});
+
+describe('runAgentLoop: SDK errors with a sentinel key (AC11)', () => {
+  /** Runs the loop and returns the error it throws, plus what the agent's error naming and main's redactor make of it. */
+  async function failingRun(fetchFn: typeof fetch): Promise<{
+    error: unknown;
+    named: string;
+    redacted: string;
+  }> {
+    redactor.register(SENTINEL);
+    const callTool = vi.fn<CallTool>(async () => ({ ok: true, output: 'unused' }));
+    let error: unknown;
+    try {
+      await runAgentLoop({
+        client: makeClient(fetchFn),
+        model: MODEL,
+        prompt: PROMPT,
+        callTool,
+        onText: () => undefined,
+      });
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toBeDefined();
+    const named = describeError(error);
+    return { error, named, redacted: redactor.redact(named) };
+  }
+
+  it('a 401 whose body and Authorization header echo the sentinel leaks nothing through naming or redaction', async () => {
+    const echoBody = JSON.stringify({
+      error: { message: `invalid key ${SENTINEL}; got Bearer ${SENTINEL}` },
+    });
+    const fetchFn = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      const sent = new Headers(init?.headers).get('authorization') ?? '';
+      expect(sent).toContain(SENTINEL);
+      return new Response(`${echoBody} ${sent}`, {
+        status: 401,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+
+    const { named, redacted } = await failingRun(fetchFn as unknown as typeof fetch);
+    expect(named).toBe('HTTP 401');
+    expect(named).not.toContain(SENTINEL);
+    expect(redacted).not.toContain(SENTINEL);
+    expect(redacted).toBe('HTTP 401');
+  });
+
+  it('a fetch that throws an Error with the sentinel in its message leaks nothing through naming or redaction', async () => {
+    const fetchFn = vi.fn(async () => {
+      throw new Error(`socket reset while sending ${SENTINEL}`);
+    });
+
+    const { named, redacted } = await failingRun(fetchFn as unknown as typeof fetch);
+    expect(named).not.toContain(SENTINEL);
+    expect(redacted).not.toContain(SENTINEL);
+    expect(named.length).toBeGreaterThan(0);
+  });
+
+  it('redaction masks the sentinel in any text it is given, so a stray copy would not leak', () => {
+    redactor.register(SENTINEL);
+    expect(redactor.redact(`stray ${SENTINEL}`)).toBe(`stray ${REDACTED}`);
   });
 });

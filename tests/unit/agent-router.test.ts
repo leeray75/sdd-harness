@@ -212,3 +212,31 @@ describe('handleAgentMessage: invalid and other messages', () => {
     expect(deps.logger.info).toHaveBeenCalledWith('agent pong');
   });
 });
+
+describe('handleAgentMessage: a sentinel key through a failing tool (AC11)', () => {
+  const SENTINEL = 'SENTINEL-ROUTER-KEY-2026';
+
+  it('keeps the sentinel out of the log lines when the runner throws with it in the message', async () => {
+    const deps = makeDeps(undefined, () =>
+      Promise.reject(new Error(`request for ${SENTINEL} failed: Bearer ${SENTINEL}`)),
+    );
+    const outcome = await handleAgentMessage(readRequest, deps);
+    const logged = [...deps.logger.info.mock.calls, ...deps.logger.error.mock.calls]
+      .map((call) => String(call[0]))
+      .join('\n');
+    expect(logged).toContain('outcome=failed');
+    expect(logged).not.toContain(SENTINEL);
+    expect(JSON.stringify(outcome.reply)).not.toContain(SENTINEL);
+  });
+
+  it('keeps the sentinel out of the log lines when the runner returns it as a failure reason', async () => {
+    const deps = makeDeps(undefined, () =>
+      Promise.resolve({ ok: false, reason: `refused with ${SENTINEL}` }),
+    );
+    await handleAgentMessage(readRequest, deps);
+    const logged = [...deps.logger.info.mock.calls, ...deps.logger.error.mock.calls]
+      .map((call) => String(call[0]))
+      .join('\n');
+    expect(logged).not.toContain(SENTINEL);
+  });
+});
