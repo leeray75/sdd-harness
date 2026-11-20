@@ -34,6 +34,11 @@ The subtasks follow the suggested list in `phase-02-tool-policy.md`. Subtask 1 w
   - The host passes `DEFAULT_POLICY_CONTEXT` (no feature, spec `none`). Phase 3 supplies the real feature and spec state from the workflow, and Phase 4 the project's tightening, through `parseTightening`.
   - Rule events are only logged so far. The build view's Rule lines (Phase 7) will read them.
   - The symlink re-check cases need a platform that allows folder links. Check that they run in macOS and Linux CI.
+- From `p2-command-allowlist`:
+  - The real network block (Linux `unshare` with loopback, macOS `sandbox-exec`) is tested only for its arguments here. Its real-OS tests skip on Windows. Check that they run and pass in Linux and macOS CI.
+  - Main runs git with the minimal environment to find ignored files. On a real repo it may stop on "dubious ownership" or a missing HOME and fall back, which would revert the reviewer's changes to ignored files. Check this once on a real project.
+  - A restore that only partly succeeds adds a result line but no Rule event (a CHANGELOG known issue).
+  - The host's command detection runs once at start. Phase 4's settings file can let users edit the allowlist.
 - Still to decide during planning (from the phase doc):
   - ~~how "no network for the writer" is enforced on each OS (`p2-command-allowlist`);~~ Settled in `p2-command-allowlist` (D31): unshare on Linux, sandbox-exec on macOS, proxy variables and offline flags elsewhere, reported per command as best effort;
   - how a user gesture is verified (`p2-human-only-channel`).
