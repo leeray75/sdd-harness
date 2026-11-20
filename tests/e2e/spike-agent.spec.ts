@@ -27,6 +27,8 @@ interface ReplayServer {
   baseUrl: string;
   /** The Authorization header of each chat request, in order; undefined when there was none. */
   authorizations: (string | undefined)[];
+  /** The X-Harness-Test header of each chat request, in order (AC9); undefined when there was none. */
+  testHeaders: (string | undefined)[];
 }
 
 /**
@@ -38,6 +40,7 @@ function startReplayServer(): Promise<ReplayServer> {
   const toolTurn = readFileSync(join(FIXTURES, 'openai', 'turn1-tool-call.sse'), 'utf8');
   const finalTurn = readFileSync(join(FIXTURES, 'openai', 'turn2-final.sse'), 'utf8');
   const authorizations: (string | undefined)[] = [];
+  const testHeaders: (string | undefined)[] = [];
   const server = createHttpServer((req, res) => {
     let body = '';
     req.on('data', (chunk: Buffer) => {
@@ -46,6 +49,8 @@ function startReplayServer(): Promise<ReplayServer> {
     req.on('end', () => {
       if (req.method === 'POST' && req.url === '/v1/chat/completions') {
         authorizations.push(req.headers.authorization);
+        const harnessTest = req.headers['x-harness-test'];
+        testHeaders.push(Array.isArray(harnessTest) ? harnessTest.join(', ') : harnessTest);
         res.writeHead(200, { 'content-type': 'text/event-stream' });
         res.end(body.includes('"role":"tool"') ? finalTurn : toolTurn);
         return;
@@ -63,7 +68,12 @@ function startReplayServer(): Promise<ReplayServer> {
         return;
       }
       // The app gets the base URL without /v1; the openai adapter adds it (AC11).
-      resolve({ server, baseUrl: `http://127.0.0.1:${address.port}`, authorizations });
+      resolve({
+        server,
+        baseUrl: `http://127.0.0.1:${address.port}`,
+        authorizations,
+        testHeaders,
+      });
     });
   });
 }
@@ -206,7 +216,7 @@ async function seedSpikeKey(
 
 test('the agent gets the spike key from the store, and the key is in no output or file', async () => {
   test.setTimeout(120_000);
-  const { server, baseUrl, authorizations } = await startReplayServer();
+  const { server, baseUrl, authorizations, testHeaders } = await startReplayServer();
   const scratch = mkdtempSync(join(tmpdir(), 'spike-e2e-'));
   const spikeRoot = join(scratch, 'root');
   const userDataDir = join(scratch, 'user-data');
@@ -240,6 +250,9 @@ test('the agent gets the spike key from the store, and the key is in no output o
     env['HARNESS_SPIKE_BASE_URL'] = baseUrl;
     env['HARNESS_SPIKE_MODEL'] = 'qwen3.8-flash-next-nothink';
     env['HARNESS_SPIKE_PROVIDER'] = 'openai';
+    // The spike runs through the agentgateway preset with one extra header (AC9).
+    env['HARNESS_SPIKE_PRESET'] = 'agentgateway';
+    env['HARNESS_SPIKE_HEADERS'] = 'X-Harness-Test: e2e';
     env['HARNESS_SPIKE_ROOT'] = spikeRoot;
 
     app = await electron.launch({
@@ -292,6 +305,12 @@ test('the agent gets the spike key from the store, and the key is in no output o
     expect(
       classes.every((item) => item === 'sentinel'),
       `chat request Authorization classes, in order: [${classes.join(', ')}]; every request must be "sentinel"\n${outputReport('app run', appOutput)}`,
+    ).toBe(true);
+
+    // Every chat request carried the extra header from HARNESS_SPIKE_HEADERS (AC9).
+    expect(
+      testHeaders.length > 0 && testHeaders.every((value) => value === 'e2e'),
+      `chat request X-Harness-Test values, in order: [${testHeaders.map((value) => value ?? 'missing').join(', ')}]; every request must carry "e2e"\n${outputReport('app run', appOutput)}`,
     ).toBe(true);
 
     // The sentinel is in neither run's output and not in the secrets file.

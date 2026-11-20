@@ -26,6 +26,8 @@ export interface OpenAIProviderOptions {
   baseURL: string;
   /** The key, or null when none is set (the placeholder is sent). */
   key: string | null;
+  /** Extra headers sent on every request, as defaultHeaders. The factory validates them (D27). */
+  headers?: Record<string, string>;
   /** SDK retries for 429, 5xx and connection failures. Default 2. */
   maxRetries?: number;
   /** Replaces the global fetch. Tests inject a fake here. */
@@ -42,8 +44,10 @@ export function normalizeOpenAIBaseUrl(baseURL: string): string {
 export function createOpenAIProvider(options: OpenAIProviderOptions): Provider {
   const client = new OpenAI({
     baseURL: normalizeOpenAIBaseUrl(options.baseURL),
-    apiKey: options.key ?? NO_KEY_PLACEHOLDER,
+    // An empty key counts as no key, so the placeholder is sent (AC3).
+    apiKey: options.key || NO_KEY_PLACEHOLDER,
     maxRetries: options.maxRetries ?? DEFAULT_MAX_RETRIES,
+    ...(options.headers ? { defaultHeaders: options.headers } : {}),
     ...(options.fetch ? { fetch: options.fetch } : {}),
   });
   return {

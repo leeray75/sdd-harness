@@ -2,7 +2,10 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { createAnthropicProvider } from '../../src/agent/provider/anthropic';
+import {
+  createAnthropicProvider,
+  normalizeAnthropicBaseUrl,
+} from '../../src/agent/provider/anthropic';
 import {
   ProviderError,
   type ProviderRequest,
@@ -173,10 +176,16 @@ describe('anthropic adapter requests', () => {
     expect(fake.calls[0]?.headers.get('authorization')).toBe('Bearer no-key-set');
   });
 
-  it('passes the base URL unchanged', async () => {
+  it('posts to the root address with the port kept', async () => {
     const fake = recordingFetch(() => sseResponse(FINAL_BODY));
     await drain(bearerProvider(fake, { baseURL: 'http://gateway.test:4100' }).stream(REQUEST));
     expect(fake.calls[0]?.url).toBe('http://gateway.test:4100/v1/messages');
+  });
+
+  it('sends the placeholder as the Bearer token when the key is an empty string', async () => {
+    const fake = recordingFetch(() => sseResponse(FINAL_BODY));
+    await drain(bearerProvider(fake, { key: '' }).stream(REQUEST));
+    expect(fake.calls[0]?.headers.get('authorization')).toBe('Bearer no-key-set');
   });
 
   it('uses the request maxTokens first, then the factory maxTokens, then 1024', async () => {
@@ -222,6 +231,55 @@ describe('anthropic adapter requests', () => {
         ],
       },
     ]);
+  });
+});
+
+describe('normalizeAnthropicBaseUrl (AC4)', () => {
+  it('strips trailing slashes, then one /v1, then trailing slashes again', () => {
+    expect(normalizeAnthropicBaseUrl('http://h:4100')).toBe('http://h:4100');
+    expect(normalizeAnthropicBaseUrl('http://h:4100/')).toBe('http://h:4100');
+    expect(normalizeAnthropicBaseUrl('http://h:4100/v1')).toBe('http://h:4100');
+    expect(normalizeAnthropicBaseUrl('http://h:4100/v1/')).toBe('http://h:4100');
+    expect(normalizeAnthropicBaseUrl('http://h:4100/v1//')).toBe('http://h:4100');
+    expect(normalizeAnthropicBaseUrl('http://h:4100/v1/v1')).toBe('http://h:4100/v1');
+  });
+});
+
+describe('anthropic adapter /v1 forms (AC4)', () => {
+  it('posts to /v1/messages for each of the four forms of one address', async () => {
+    for (const base of [
+      'http://h:4100',
+      'http://h:4100/',
+      'http://h:4100/v1',
+      'http://h:4100/v1/',
+    ]) {
+      const fake = recordingFetch(() => sseResponse(FINAL_BODY));
+      await drain(bearerProvider(fake, { baseURL: base }).stream(REQUEST));
+      expect(fake.calls[0]?.url, base).toBe('http://h:4100/v1/messages');
+    }
+  });
+});
+
+describe('anthropic adapter extra headers (AC4)', () => {
+  it('sends the extra headers on the request, with the Bearer auth and anthropic-version intact', async () => {
+    const fake = recordingFetch(() => sseResponse(FINAL_BODY));
+    await drain(bearerProvider(fake, { headers: { 'X-Team': 'platform' } }).stream(REQUEST));
+    const [call] = fake.calls;
+    expect(call?.headers.get('x-team')).toBe('platform');
+    expect(call?.headers.get('authorization')).toBe(`Bearer ${SENTINEL}`);
+    expect(call?.headers.get('anthropic-version')).toBe(recorderVersion());
+    expect(call?.headers.has('x-api-key')).toBe(false);
+  });
+
+  it('sends the headers on every request of a run', async () => {
+    const fake = recordingFetch((index) => sseResponse(index === 0 ? TOOL_CALL_BODY : FINAL_BODY));
+    const provider = bearerProvider(fake, { headers: { 'X-Team': 'platform' } });
+    await drain(provider.stream(REQUEST));
+    await drain(provider.stream(REQUEST));
+    expect(fake.calls).toHaveLength(2);
+    for (const call of fake.calls) {
+      expect(call.headers.get('x-team')).toBe('platform');
+    }
   });
 });
 

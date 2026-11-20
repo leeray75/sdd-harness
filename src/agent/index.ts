@@ -63,16 +63,13 @@ function callToolViaMain(name: string, args: Record<string, unknown>): Promise<T
  * sent for this run, or null; it lives only in the client built here.
  */
 async function runSpike(key: string | null): Promise<void> {
-  const baseURL = process.env['HARNESS_SPIKE_BASE_URL'];
-  if (!baseURL) {
-    say('spike skipped: HARNESS_SPIKE_BASE_URL is not set');
-    return;
-  }
   const choice = chooseSpikeProvider(
     {
+      preset: process.env['HARNESS_SPIKE_PRESET'],
       provider: process.env['HARNESS_SPIKE_PROVIDER'],
       model: process.env['HARNESS_SPIKE_MODEL'],
-      baseURL,
+      baseURL: process.env['HARNESS_SPIKE_BASE_URL'],
+      headers: process.env['HARNESS_SPIKE_HEADERS'],
     },
     key,
   );
@@ -80,7 +77,7 @@ async function runSpike(key: string | null): Promise<void> {
     say(`spike skipped: ${choice.reason}`);
     return;
   }
-  say(`spike started provider=${choice.format} model=${choice.model}`);
+  say(`spike started preset=${choice.preset} provider=${choice.format} model=${choice.model}`);
   try {
     const result = await runAgentLoop({
       provider: choice.provider,
