@@ -50,6 +50,24 @@ All notable changes to SDD Harness are recorded here. The format follows [Keep a
 - **Model probes** (`src/agent/probes/`, D28): a chat probe and a two-step tool-use probe (`lookup_code`), each run three times by default. Each probe is passed, unreliable or failed, with median latency and speed and one failure code per failed run. The results are plain data for the Phase 8 "Test and assign" screen; no protocol message or UI yet.
 - **Probe recorder and fixtures** (`pnpm record:probes [anthropic]`, `scripts/record-probe-fixtures.ts`, dev only): records `models.json`, `chat.sse`, `tool-turn1.sse` and `tool-turn2.sse` from agentgateway into `tests/fixtures/probes/<format>/`, with starter fixtures committed until the user's recording.
 - **Probe tests:** fixture replays through `createProvider` for both formats (listing, passing probes, mixed runs, derived failure codes, fake-clock timing, sentinel leak checks), unit tests for the checks and the runner, and the opt-in live suite `tests/live/probes.live.test.ts` (`pnpm test:live`).
+- **Tool registry** (`p2-tools`, D29): `src/shared/tools.ts` lists the seven agent tools (`TOOL_NAMES`, `isToolName`). Each tool has a `ToolSpec` (name, description and a strict JSON schema with `additionalProperties: false`) and a hand-written args guard. The schema and the guard are built from one field table, so they can't drift apart.
+  - The guards reject unknown keys, missing keys, wrong types and over-long strings, and their reasons never echo a value.
+  - File content and edit texts are capped at 1 MiB.
+- **Agent tools in main** (`src/main/tools/`, D29). Every tool works inside one root and uses the shared path rules in `paths.ts`:
+  - `list_files`: `*`, `**` and `?` globs. It skips `.git` and `node_modules` and never follows symlinks. It stops at 1,000 entries or 64 KiB of output, with a note.
+  - `search_text`: a JavaScript regex over the same files. It skips binary files and files over 1 MiB. It stops at 200 matches or 64 KiB of output, and cuts each line at 500 characters.
+  - `write_file`: creates or overwrites one file, creating missing parent folders. It writes through a temporary file and a rename, with a short retry, and leaves no temporary file behind.
+  - `edit_file`: an exact text replacement. `old_text` must occur exactly once, unless `replace_all` is set. A `$` in the new text stays literal.
+  - `run_command`: runs a program with an argument array and no shell, in a folder inside the root.
+    - The environment is minimal: `PATH` plus what each OS needs to start a process.
+    - After a timeout (10 minutes by default, set only by main) it kills the whole process tree.
+    - It keeps the last 64 KiB of output and reports the exit code, the signal or the timeout.
+  - `read_ticket`: an interface only (`TicketSource`, `makeReadTicket`). The default source says no tracker is configured. Ticket text comes back inside a `BEGIN`/`END UNTRUSTED TICKET DATA` frame, and any marker inside the ticket text is escaped.
+- **Git refused by the tools themselves** (D29), underneath the policy engine:
+  - every file tool refuses any `.git` path segment, ignoring case, with trailing dots or spaces, or as a Windows 8.3 short name;
+  - `run_command` refuses the `git` program, whatever the case or extension.
+- **Tool dispatch:** `makeToolRunner` checks each call against the registry and its guard, then sends it to the tool's runner. It takes `ToolRunnerOptions` (`commandTimeoutMs`, `ticketSource`), which only main sets.
+- **Tool tests:** registry, path rule, file, write, command, ticket and reachability tests. The reachability test runs through the real gate and shows that every new tool is denied for every job, while reader + `read_file` still runs.
 
 ### Changed
 
@@ -64,6 +82,8 @@ All notable changes to SDD Harness are recorded here. The format follows [Keep a
 - The agent process gets an allowlisted environment (OS basics, the spike flags, and the spike variables only when `HARNESS_AGENT_SPIKE=1`), in place of a full copy of the app's environment. On Windows the names match case-insensitively, so `SYSTEMROOT` passes.
 - The gate's denial reason now says only the reader job may call tools, and the router runs allowed calls instead of refusing them.
 - The spike's key comes from the secret store (the `spike` entry, set with `pnpm secrets:set spike`), not from `HARNESS_SPIKE_API_KEY`. The variable is no longer passed to the agent and is read only by the live suite (`pnpm test:live`).
+- `read_file` resolves its path through the shared path rules (`p2-tools`). It now also refuses paths inside `.git`. Its root and path refusals use the shared reason texts (for example "no root is configured"). Its 64 KiB cap and its read behaviour are unchanged.
+- The gate is unchanged: it still allows only `reader` with `read_file`. The new tools exist in main but can't be reached until `p2-policy-engine` adds the per-job table, and the agent loop still offers models only `read_file`.
 
 ### Fixed
 
@@ -74,7 +94,10 @@ All notable changes to SDD Harness are recorded here. The format follows [Keep a
 ### Known issues
 
 - Dragging the window by the title bar has no automated check.
-- The `read_file` symlink tests are skipped where the OS refuses to create symlinks.
+- The `read_file` symlink tests are skipped where the OS refuses to create symlinks. So are the 8 file-symlink tests of the `p2-tools` path rules and walker; macOS and Linux CI run them.
+- On Windows, `run_command` refuses `.cmd` and `.bat` programs: Node won't spawn them without a shell. That includes shims such as `pnpm.cmd`. How detected commands run on Windows is settled in `p2-command-allowlist`.
+- `list_files`, given a path inside `node_modules`, lists that folder: only folders below the given path are skipped.
+- The POSIX process-group kill on a `run_command` timeout has only run in macOS and Linux CI.
 - One e2e run crashed at launch (worker exit code 3221226505) and passed on rerun; not yet reproduced.
 
 ## [0.1.0] - 2026-11-17
