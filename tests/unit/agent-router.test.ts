@@ -186,11 +186,15 @@ describe('handleAgentMessage: AC8 each gate step denies and the runner is never 
 });
 
 describe('handleAgentMessage: allowed tool calls', () => {
-  it('runs the allowed call once, with the tool name and args, and returns the output', async () => {
+  it('runs the allowed call once, with the job, tool name and args, and returns the output', async () => {
     const deps = makeDeps();
     const outcome = await handleAgentMessage(readRequest, deps);
     expect(deps.runTool).toHaveBeenCalledTimes(1);
-    expect(deps.runTool).toHaveBeenCalledWith({ tool: 'read_file', args: { path: 'notes.txt' } });
+    expect(deps.runTool).toHaveBeenCalledWith({
+      job: 'reader',
+      tool: 'read_file',
+      args: { path: 'notes.txt' },
+    });
     expect(outcome).toEqual({
       reply: { type: 'tool-call-result', id: 'read-7', ok: true, output: 'OUTPUT-TEXT' },
       ready: false,
@@ -287,7 +291,11 @@ describe('handleAgentMessage: AC7 rule events', () => {
     await handleAgentMessage(readRequest, deps);
     await handleAgentMessage(request, deps);
     expect(deps.onRuleEvent).toHaveBeenCalledTimes(2);
-    expect(deps.onRuleEvent.mock.calls.map((call) => call[0]?.decision)).toEqual(['allow', 'deny']);
+    expect(
+      deps.onRuleEvent.mock.calls.map((call) =>
+        call[0]?.kind === 'rule' ? call[0].decision : null,
+      ),
+    ).toEqual(['allow', 'deny']);
   });
 
   it('emits no event for a message that fails protocol validation', async () => {

@@ -20,21 +20,22 @@ The subtasks follow the suggested list in `phase-02-tool-policy.md`. Subtask 1 w
 - D19 amended by `p2-tools`: the runner dispatches every registry tool through its guard; the gate is unchanged
 - D30 Agent tool policy: per-job table, path areas, tightening and Rule events (`p2-policy-engine`)
 - D19 amended by `p2-policy-engine`: the reader-only gate is replaced by the per-job policy, and the router emits a Rule event for every decision
+- D31 Agent commands: allowlist, Windows shims, file lock and revert, network limit (`p2-command-allowlist`); settles D29's open question on `.cmd`/`.bat`
 
 ## Follow-ups
 
 - From `p2-tools`:
-  - `run_command` refuses `.cmd`/`.bat` on Windows, so `pnpm test` can't run through it yet. Settle how in `p2-command-allowlist`.
+  - ~~`run_command` refuses `.cmd`/`.bat` on Windows, so `pnpm test` can't run through it yet. Settle how in `p2-command-allowlist`.~~ Settled in `p2-command-allowlist` (D31): an allowlisted `.cmd` or `.bat` runs through `cmd.exe`, with safe tokens only; every other script stays refused.
   - The 8 file-symlink tests and the POSIX process-group kill have only run in macOS and Linux CI. Check the first CI run.
   - ~~`list_files` given a path inside `node_modules` lists it.~~ Settled in `p2-policy-engine`: `list_files` and `search_text` refuse such paths.
   - The agent loop still advertises only `read_file`. `p2-jobs-and-prompts` advertises each job's tools from `TOOL_SPECS`.
 - From `p2-policy-engine`:
-  - `run_command` reaches the context's command check, which refuses everything. `p2-command-allowlist` replaces it with the detected allowlist, for the writer (tests and build) and the reviewer (tests only).
+  - ~~`run_command` reaches the context's command check, which refuses everything. `p2-command-allowlist` replaces it with the detected allowlist, for the writer (tests and build) and the reviewer (tests only).~~ Settled in `p2-command-allowlist` (D31): the host builds the check from the detected commands, and the gate and the runner both use it. With no root, it still refuses everything.
   - The host passes `DEFAULT_POLICY_CONTEXT` (no feature, spec `none`). Phase 3 supplies the real feature and spec state from the workflow, and Phase 4 the project's tightening, through `parseTightening`.
   - Rule events are only logged so far. The build view's Rule lines (Phase 7) will read them.
   - The symlink re-check cases need a platform that allows folder links. Check that they run in macOS and Linux CI.
 - Still to decide during planning (from the phase doc):
-  - how "no network for the writer" is enforced on each OS (`p2-command-allowlist`);
+  - ~~how "no network for the writer" is enforced on each OS (`p2-command-allowlist`);~~ Settled in `p2-command-allowlist` (D31): unshare on Linux, sandbox-exec on macOS, proxy variables and offline flags elsewhere, reported per command as best effort;
   - how a user gesture is verified (`p2-human-only-channel`).
 
 ## Phase summary

@@ -1,9 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  makeNetworkEvent,
+  makeRevertEvent,
   makeRuleEvent,
   formatRuleEvent,
   logRuleEvent,
+  REVERT_REASON,
   sanitizeTarget,
+  type RuleEvent,
 } from '../../src/main/policy/rule-event';
 
 const SENTINEL_CONTENT = 'SENTINEL-CONTENT-7a1';
@@ -215,7 +219,8 @@ describe('formatRuleEvent and logRuleEvent', () => {
   it('logs an allow with info and a deny with error, in the formatted line', () => {
     const info = vi.fn<(message: string) => void>();
     const error = vi.fn<(message: string) => void>();
-    const sink = logRuleEvent({ info, error });
+    const warn = vi.fn<(message: string) => void>();
+    const sink = logRuleEvent({ info, error, warn });
     const allow = makeRuleEvent(
       { job: 'reader', tool: 'read_file', args: { path: 'n.txt' } },
       true,
@@ -237,7 +242,8 @@ describe('formatRuleEvent and logRuleEvent', () => {
   it('logs no argument value through the sink', () => {
     const info = vi.fn<(message: string) => void>();
     const error = vi.fn<(message: string) => void>();
-    const sink = logRuleEvent({ info, error });
+    const warn = vi.fn<(message: string) => void>();
+    const sink = logRuleEvent({ info, error, warn });
     sink(
       makeRuleEvent(
         {
@@ -252,5 +258,97 @@ describe('formatRuleEvent and logRuleEvent', () => {
     const logged = String(error.mock.calls[0]?.[0]);
     expect(logged).not.toContain(SENTINEL_CONTENT);
     expect(logged).not.toContain(SENTINEL_NEW);
+  });
+});
+
+describe('revert events (D31)', () => {
+  it('builds the revert event with the job, the path, the action and the fixed reason', () => {
+    expect(makeRevertEvent('writer', 'docs/specs/f/SPECS.md', 'restored')).toEqual({
+      kind: 'revert',
+      job: 'writer',
+      tool: 'run_command',
+      target: 'docs/specs/f/SPECS.md',
+      action: 'restored',
+      reason: 'a command changed a protected file',
+    });
+    expect(REVERT_REASON).toBe('a command changed a protected file');
+  });
+
+  it('sanitizes and cuts the path like any other target', () => {
+    const event = makeRevertEvent('reviewer', `bad\u0001${'p'.repeat(300)}`, 'deleted');
+    expect(event.target).toBe(`bad\\u0001${'p'.repeat(191)}…`);
+  });
+
+  it('formats a revert as rule reverted, with the action', () => {
+    const event = makeRevertEvent('writer', '.git/HEAD', 're-created');
+    expect(formatRuleEvent(event)).toBe(
+      'rule reverted: job=writer tool=run_command target=.git/HEAD action=re-created reason=a command changed a protected file',
+    );
+  });
+
+  it('logs a revert with error', () => {
+    const info = vi.fn<(message: string) => void>();
+    const error = vi.fn<(message: string) => void>();
+    const warn = vi.fn<(message: string) => void>();
+    logRuleEvent({ info, error, warn })(makeRevertEvent('writer', 'src/a.ts', 'restored'));
+    expect(error).toHaveBeenCalledTimes(1);
+    expect(error.mock.calls[0]?.[0]).toMatch(/^rule reverted: /);
+    expect(info).not.toHaveBeenCalled();
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('keeps the content of a changed file out of the revert event', () => {
+    const event = makeRevertEvent('writer', 'docs/specs/f/SPECS.md', 'restored');
+    expect(JSON.stringify(event) + formatRuleEvent(event)).not.toContain(SENTINEL_CONTENT);
+  });
+});
+
+describe('network events (D31)', () => {
+  it('builds the network event for a writer command, with the program and the level', () => {
+    expect(makeNetworkEvent('node', 'os')).toEqual({
+      kind: 'network',
+      job: 'writer',
+      tool: 'run_command',
+      target: 'node',
+      level: 'os',
+    });
+  });
+
+  it('formats a network event as rule network, with the level', () => {
+    expect(formatRuleEvent(makeNetworkEvent('pnpm', 'proxy-only'))).toBe(
+      'rule network: job=writer tool=run_command target=pnpm level=proxy-only',
+    );
+  });
+
+  it('logs an OS-level network event with info and a proxy-only one with warn', () => {
+    const info = vi.fn<(message: string) => void>();
+    const error = vi.fn<(message: string) => void>();
+    const warn = vi.fn<(message: string) => void>();
+    const sink = logRuleEvent({ info, error, warn });
+    sink(makeNetworkEvent('node', 'os'));
+    sink(makeNetworkEvent('node', 'proxy-only'));
+    expect(info).toHaveBeenCalledWith(
+      'rule network: job=writer tool=run_command target=node level=os',
+    );
+    expect(warn).toHaveBeenCalledWith(
+      'rule network: job=writer tool=run_command target=node level=proxy-only',
+    );
+    expect(error).not.toHaveBeenCalled();
+  });
+
+  it('sanitizes the program in a network event', () => {
+    expect(makeNetworkEvent('no\nde', 'os').target).toBe('no\\u000ade');
+  });
+});
+
+describe('RuleEvent union', () => {
+  it('keeps the decision events as they were: kind rule, with decision and job', () => {
+    const event: RuleEvent = makeRuleEvent(
+      { job: 'reader', tool: 'read_file', args: { path: 'a' } },
+      true,
+      'allowed',
+    );
+    expect(event.kind).toBe('rule');
+    if (event.kind === 'rule') expect(event.decision).toBe('allow');
   });
 });

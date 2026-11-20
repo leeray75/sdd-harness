@@ -11,6 +11,7 @@ import {
   type SpecState,
 } from '../../src/main/policy/context';
 import { BASE_TOOLS } from '../../src/main/policy/policy-table';
+import { makeCommandCheck } from '../../src/main/policy/command-allowlist';
 
 const SPEC_STATES: SpecState[] = ['none', 'draft', 'approved'];
 const FEATURES: Array<string | null> = [null, 'f'];
@@ -434,5 +435,66 @@ describe('checkToolCall: rule events', () => {
       target: 'notes.txt',
       reason: 'allowed',
     });
+  });
+});
+
+describe('checkToolCall: AC3 gate with a detected allowlist', () => {
+  const detectedCheck = makeCommandCheck({
+    test: [{ program: 'npm', args: ['test'] }],
+    build: [{ program: 'pnpm', args: ['build'] }],
+  });
+  const detectedContext = context({ commandCheck: detectedCheck });
+
+  it('gives an allow event for an allowed run_command', () => {
+    const decision = call(
+      'writer',
+      'run_command',
+      { program: 'npm', args: ['test'] },
+      detectedContext,
+    );
+    expect(decision.allow).toBe(true);
+    expect(decision.event).toEqual({
+      kind: 'rule',
+      decision: 'allow',
+      job: 'writer',
+      tool: 'run_command',
+      target: 'npm',
+      reason: 'allowed',
+    });
+  });
+
+  it('gives a deny event with the check reason for a denied run_command', () => {
+    const decision = call(
+      'writer',
+      'run_command',
+      { program: 'curl', args: ['x'] },
+      detectedContext,
+    );
+    expect(decision.allow).toBe(false);
+    expect(decision.reason).toBe("this command is not on the project's allowlist");
+    expect(decision.event).toEqual({
+      kind: 'rule',
+      decision: 'deny',
+      job: 'writer',
+      tool: 'run_command',
+      target: 'curl',
+      reason: "this command is not on the project's allowlist",
+    });
+  });
+
+  it('gives the reviewer the tests-only reason for a detected build form', () => {
+    const decision = call(
+      'reviewer',
+      'run_command',
+      { program: 'pnpm', args: ['build'] },
+      detectedContext,
+    );
+    expect(decision.reason).toBe('the reviewer may run tests only');
+    expect(decision.event.decision).toBe('deny');
+  });
+
+  it('keeps the deny-all default when no allowlist is set', () => {
+    const decision = call('writer', 'run_command', { program: 'npm', args: ['test'] });
+    expect(decision.reason).toBe('commands are not allowed yet: no allowlist is configured');
   });
 });

@@ -16,9 +16,16 @@ import {
   isToolName,
 } from '../../shared/tools';
 import { log } from '../log';
-import { DEFAULT_POLICY_CONTEXT } from '../policy/context';
+import { detectCommands, rootMarkerFiles } from '../commands/detect';
+import { makeCommandCheck } from '../policy/command-allowlist';
+import {
+  DEFAULT_POLICY_CONTEXT,
+  denyAllCommands,
+  type CommandCheck,
+  type PolicyContext,
+} from '../policy/context';
 import { checkToolCall } from '../policy/gate';
-import { logRuleEvent } from '../policy/rule-event';
+import { logRuleEvent, type RuleEvent } from '../policy/rule-event';
 import { createElectronSecretStore } from '../secrets/electron';
 import { editFileInRoot } from '../tools/edit-file';
 import { listFilesInRoot } from '../tools/list-files';
@@ -66,6 +73,25 @@ export interface ToolRunnerOptions {
   commandTimeoutMs?: number;
   /** Where read_ticket reads from. Unset means the default source, which says none is configured. */
   ticketSource?: TicketSource;
+  /** The command check run_command calls are checked against again. Unset means deny every command. */
+  commandCheck?: CommandCheck;
+  /** Receives the network and revert events of run_command. Unset means none are reported. */
+  onRuleEvent?: (event: RuleEvent) => void;
+}
+
+/**
+ * The command policy for a root (D31): the allowlist detected from the root's markers, used by
+ * the gate and by the runner. With no root, the default context stays deny-all.
+ */
+export function commandPolicyFor(root: string | undefined): {
+  policyContext: PolicyContext;
+  commandCheck: CommandCheck;
+} {
+  if (!root) {
+    return { policyContext: DEFAULT_POLICY_CONTEXT, commandCheck: denyAllCommands };
+  }
+  const commandCheck = makeCommandCheck(detectCommands(rootMarkerFiles(root)));
+  return { policyContext: { ...DEFAULT_POLICY_CONTEXT, commandCheck }, commandCheck };
 }
 
 const NO_SUCH_TOOL = 'no such tool';
@@ -87,8 +113,10 @@ export function makeToolRunner(
 ): ToolRunner {
   const readTicket = makeReadTicket(options.ticketSource ?? defaultTicketSource);
   const commandOptions = { timeoutMs: options.commandTimeoutMs };
+  const commandCheck = options.commandCheck ?? denyAllCommands;
+  const onRuleEvent = options.onRuleEvent ?? (() => undefined);
 
-  return ({ tool, args }) => {
+  return ({ job, tool, args }) => {
     if (!isToolName(tool)) {
       return refused(NO_SUCH_TOOL);
     }
@@ -116,7 +144,12 @@ export function makeToolRunner(
       case 'run_command': {
         const checked = checkRunCommandArgs(args);
         return checked.ok
-          ? runCommandInRoot(root, checked.args, commandOptions)
+          ? runCommandInRoot(
+              root,
+              checked.args,
+              { job, check: commandCheck, onRuleEvent },
+              commandOptions,
+            )
           : refused(checked.reason);
       }
       case 'read_ticket': {
@@ -195,9 +228,12 @@ export function startAgentHost(): void {
   forwardLines(child.stdout, false);
   forwardLines(child.stderr, true);
 
-  const runTool = makeToolRunner(process.env[SPIKE_ROOT_VAR]);
+  // The command policy is built once from the root's markers (D31); with no root it stays deny-all.
+  const root = process.env[SPIKE_ROOT_VAR];
+  const { policyContext, commandCheck } = commandPolicyFor(root);
+  const runTool = makeToolRunner(root, { commandCheck, onRuleEvent: logRuleEvent(log) });
   const routerDeps: RouterDeps = {
-    checkToolCall: (request) => checkToolCall(request, DEFAULT_POLICY_CONTEXT),
+    checkToolCall: (request) => checkToolCall(request, policyContext),
     runTool,
     onRuleEvent: logRuleEvent(log),
     logger: log,

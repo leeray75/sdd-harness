@@ -5,8 +5,11 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { JOB_IDS, type JobId } from '../../src/shared/agent-protocol';
 import { TOOL_NAMES, type ToolName } from '../../src/shared/tools';
 import { handleAgentMessage, type RouterDeps, type ToolRunner } from '../../src/main/agent/router';
-import { makeToolRunner } from '../../src/main/agent/host';
-import { DEFAULT_POLICY_CONTEXT } from '../../src/main/policy/context';
+import {
+  makeToolRunner as makeHostRunner,
+  type ToolRunnerOptions,
+} from '../../src/main/agent/host';
+import { DEFAULT_POLICY_CONTEXT, type CommandCheck } from '../../src/main/policy/context';
 import { checkToolCall } from '../../src/main/policy/gate';
 
 // host.ts imports Electron for the fork and the quit hook. The runner does not use it.
@@ -14,6 +17,22 @@ vi.mock('electron', () => ({
   app: { once: vi.fn() },
   utilityProcess: { fork: vi.fn() },
 }));
+
+/** Lets run_command reach the stub. The gate, not the runner, is what these tests check. */
+const ALLOW_ANY_COMMAND: CommandCheck = () => ({ allow: true });
+
+/**
+ * The runner as these tests use it. A call from the router carries its own job; a direct call
+ * with no job acts as the writer, so the runner-level tests need no job of their own.
+ */
+type DirectRunner = (
+  call: Omit<Parameters<ToolRunner>[0], 'job'> & { job?: JobId },
+) => ReturnType<ToolRunner>;
+
+function makeToolRunner(root?: string, options: ToolRunnerOptions = {}): DirectRunner {
+  const runner = makeHostRunner(root, { commandCheck: ALLOW_ANY_COMMAND, ...options });
+  return (call) => runner({ job: 'writer', ...call });
+}
 
 /** A valid argument object for each new tool. Running any of them would leave a visible trace. */
 const NEW_TOOL_CALLS: Array<{ tool: ToolName; args: Record<string, unknown> }> = [

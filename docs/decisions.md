@@ -223,7 +223,7 @@ Format: **Decision** · **Outcome** · **Why** · **Date**.
     - a bundled ripgrep;
     - schemas next to each runner in main;
     - git rules in the policy engine only.
-- **Open:** How `run_command` runs `.cmd`/`.bat` commands such as `pnpm test` on Windows is decided in `p2-command-allowlist`.
+- **Open:** Settled by D31 (how `run_command` runs `.cmd`/`.bat` commands such as `pnpm test` on Windows).
 - **Date:** 2026-11-20
 
 ## D30 · Agent tool policy: per-job table, path areas, tightening and Rule events
@@ -256,4 +256,32 @@ Format: **Decision** · **Outcome** · **Why** · **Date**.
     - a gate-only lexical check;
     - taking the plugin's state ids as input now;
     - silently ignoring bad tightening.
+- **Date:** 2026-11-20
+
+## D31 · Agent commands: allowlist, Windows shims, file lock and revert, network limit
+
+- **Outcome:** `run_command` runs only what the project's markers say, under the limits of D6. Settles D29's open question and is the command part of D6.
+  - **Detection** (`src/main/commands/detect.ts`): test and build forms come from the project's markers, read once when the host starts. Node (`package.json` scripts `test` and `build`; the package manager from `packageManager`, else the lockfile, else npm), Python (`pytest.ini`, a root `conftest.py` or `[tool.pytest` for tests; `[build-system]` for `python -m build`), Go (`go test ./...`, `go build ./...`) and Rust (`cargo test`, `cargo build`). A missing, unreadable or unparseable marker gives nothing and never throws. A TOML marker is checked structurally, not with a full parser.
+  - **The check** (`src/main/policy/command-allowlist.ts`): the writer may run every detected test and build form, the reviewer only the test forms, and only from the root. Program and arguments must equal a form exactly, ignoring case and a `.exe`, `.cmd` or `.bat` on the base name. A path as the program, extra or changed arguments, and planner or reader calls are denied with fixed reasons. The gate and the runner both run this check (D30, `makeCommandCheck`).
+  - **Windows** (`src/main/commands/lookup.ts`): main finds the program on `PATH` with `PATHEXT`, and never with a shell. A `.cmd` or `.bat` it resolves to runs through `cmd.exe /d /s /c` only when the check allowed the call and every argument is a safe token (letters, digits and `:_./-`). The resolved path may not hold a cmd metacharacter or a line break. Any other script stays refused, and git stays refused by name. No agent-chosen text reaches cmd's parser.
+  - **Lock, snapshot and revert per job** (`src/main/commands/protect.ts`): before a command runs, main snapshots the protected set and makes `docs/specs/` read-only (write bits off on POSIX; the read-only attribute on Windows). Both jobs protect `docs/specs/` and the `.git` key files (`HEAD`, `config`, `packed-refs`, `hooks/`, `refs/`); `.git/index` is not protected. The reviewer also protects every other file in the root that is not git-ignored, and skips `.git` and `node_modules`. Over 256 MiB of protected files, the command is refused before it starts. After the run, the restore puts back the modes and contents of `docs/specs/` first, then deletes the files and folders the command created in the protected set, and re-creates the ones it deleted. Each path changed is one revert Rule event (`restored`, `re-created` or `deleted`), and the result says which areas were reverted. The restore runs in a `finally`, after a timeout, a start failure or a failed lock alike.
+  - **Main's read-only git query:** the reviewer's ignored set comes from `git -C <root> ls-files -z --others --ignored --exclude-standard --directory`, run by main with an argument array, no shell and the minimal environment. The restore reads the ignore rules again, after `.gitignore` is back, so a file the command created that git ignores is kept. If git is missing or the root is not a repository, only `node_modules` and `.git` are skipped.
+  - **Network** (`src/main/commands/network.ts`): the writer's commands get the dead proxy variables and the offline flags on every OS. On Linux, a command that passes a one-time `unshare --user --map-root-user --net true` probe runs in its own network namespace with loopback brought up, at level `os`. On macOS, a command runs under `sandbox-exec` with outbound network to non-loopback addresses denied, at level `os`. Everywhere else, including Windows, the level is `proxy-only`. Each writer command gives one network Rule event with its level. The reviewer's commands get no network limit.
+  - **Rule events:** the revert and network kinds are added next to the decision events (D30). A revert carries the path and its action; a network event carries the program and the level. Both are sanitized like other targets and never carry content.
+  - **Best effort:** the proxy variables and offline flags only help tools that read them. The `proxy-only` level does not stop a program from opening a connection. The Linux namespace needs unprivileged user namespaces, which some distributions disable; then the level is `proxy-only`.
+  - **Crash note:** if the app crashes while a command runs, the spec folder can be left read-only and a revert can be left half done. The recovery steps are in `docs/agent-commands.md`.
+- **Why:**
+  - The allowlist is exact and detected, so a project's own test and build commands work without the agent writing a command string; anything else is refused in code, which keeps the policy of D4 and D6 hard.
+  - Keeping the reviewer to test forms makes a review round unable to change the build output it reviews.
+  - No agent-chosen string reaches `cmd.exe`'s parser: a shim runs only with safe tokens, so the Windows case cannot be used for injection.
+  - The lock stops the command editing a spec, and the revert is the second line, because a command running as the same user can clear a read-only bit. The `.git` key files are reverted to stop a command from moving HEAD, a ref or a hook; `.git/index` is left alone, because git rewrites it on normal use.
+  - Reading the ignore rules at restore time, after `.gitignore` is restored, keeps the reviewer from being able to make its own edits invisible by editing the ignore file.
+  - The OS network methods are the strongest that need no container (D6's later option); the proxy variables are the common floor on every OS, and the level reported in the event says which one held.
+  - Alternatives not chosen (from the `p2-command-allowlist` plan):
+    - a shell string or a shell-based runner for Windows;
+    - allowing every script on Windows, or refusing every shim (the old D29 rule);
+    - reverting `.git/index` as well;
+    - a container or an OS sandbox per build (D6's later option);
+    - a network block for the reviewer;
+    - a restore that trusts the snapshot's ignore set only.
 - **Date:** 2026-11-20

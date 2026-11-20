@@ -10,6 +10,7 @@
 import {
   MAX_TOOL_OUTPUT_LENGTH,
   validateAgentToMainMessage,
+  type JobId,
   type MainToAgentMessage,
 } from '../../shared/agent-protocol';
 import type { Logger } from '../log';
@@ -19,8 +20,9 @@ import type { RuleEvent } from '../policy/rule-event';
 /** What a tool runner returns: its text, or the reason it could not complete. */
 export type ToolRunResult = { ok: true; output: string } | { ok: false; reason: string };
 
-/** Runs an allowed tool call in main. Must not throw; the router catches it if it does. */
+/** Runs an allowed tool call in main, for the job that asked. Must not throw; the router catches it if it does. */
 export type ToolRunner = (call: {
+  job: JobId;
   tool: string;
   args: Record<string, unknown>;
 }) => Promise<ToolRunResult>;
@@ -47,12 +49,12 @@ const TOOL_THREW_REASON = 'the tool could not run';
 const OUTPUT_TOO_LONG_REASON = `the tool output is longer than ${MAX_TOOL_OUTPUT_LENGTH} characters`;
 
 async function runAllowed(
-  message: { job: string; tool: string; args: Record<string, unknown> },
+  message: { job: JobId; tool: string; args: Record<string, unknown> },
   deps: RouterDeps,
 ): Promise<ToolRunResult> {
   let result: ToolRunResult;
   try {
-    result = await deps.runTool({ tool: message.tool, args: message.args });
+    result = await deps.runTool({ job: message.job, tool: message.tool, args: message.args });
   } catch {
     // The error text is not logged or returned: it may echo the arguments.
     result = { ok: false, reason: TOOL_THREW_REASON };

@@ -14,11 +14,16 @@ export interface Logger {
 }
 
 export const log: Logger & {
+  /** A warning: written to stderr, like an error, with the same prefix. */
+  warn(message: string): void;
   /** Writes a line from the agent's own output, redacted, to stdout or stderr. */
   forward(line: string, toStderr: boolean): void;
 } = {
   info(message: string): void {
     process.stdout.write(redactor.redact(`${PREFIX} ${message}`) + '\n');
+  },
+  warn(message: string): void {
+    process.stderr.write(redactor.redact(`${PREFIX} ${message}`) + '\n');
   },
   error(message: string): void {
     process.stderr.write(redactor.redact(`${PREFIX} ${message}`) + '\n');

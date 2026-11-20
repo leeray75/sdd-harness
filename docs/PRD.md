@@ -78,7 +78,7 @@ Design: the "What each agent can do" table on `design/screens/Providers.dc.html`
 
 - Four jobs: plans and chats, writes code, reviews code, reads big files. Each has a fixed tool set from the policy table.
 - Path rules: the spec folder is writable only by the planner and only before approval; source files only by the code writer and only after approval; no agent can run git, commit, push or approve.
-- Commands: per-project allowlist (D6). The writer has no network.
+- Commands: per-project allowlist of the detected test and build commands (D6, D31). The writer's commands get no network where the OS allows it (Linux and macOS); elsewhere that is best effort, and the level each command ran with is logged.
 - Every tool call is checked in the app's main process, not in the prompt. A blocked call is logged as a Rule event and returned to the agent as an error it can recover from.
 - A project can remove tools from a job, never add them.
 
