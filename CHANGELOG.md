@@ -68,6 +68,20 @@ All notable changes to SDD Harness are recorded here. The format follows [Keep a
   - `run_command` refuses the `git` program, whatever the case or extension.
 - **Tool dispatch:** `makeToolRunner` checks each call against the registry and its guard, then sends it to the tool's runner. It takes `ToolRunnerOptions` (`commandTimeoutMs`, `ticketSource`), which only main sets.
 - **Tool tests:** registry, path rule, file, write, command, ticket and reachability tests. The reachability test runs through the real gate and shows that every new tool is denied for every job, while reader + `read_file` still runs.
+- **Per-job tool policy** (`p2-policy-engine`, D30): `BASE_TOOLS` in `src/main/policy/policy-table.ts` gives each job its tools from the design table:
+  - every job may read, list and search;
+  - the planner and the writer may write and edit, under the path rules;
+  - the writer and the reviewer reach `run_command` through a command check;
+  - the planner and the reader may read tickets;
+  - the reviewer and the reader have no write tool at all.
+- **Policy context** (`src/main/policy/context.ts`): the caller passes the feature, the spec state (`none`, `draft` or `approved`), the project's tightening and the command check. `DEFAULT_POLICY_CONTEXT` has no feature and a command check that refuses every command, so until Phase 3 and `p2-command-allowlist` no write or command is reachable in the app.
+- **Path areas for writes** (`src/main/policy/path-areas.ts`): a write path is normalized (separators, `.` and `..`, letter case on every OS, trailing dots and spaces) and classed as `outside`, `git`, `spec-doc`, `spec-other` or `source`.
+  - The planner may write only `PLAN.md`, `SPECS.md`, `tasks.md` and `SUBTASK.md` of the current feature, before approval.
+  - The writer may write source only after approval, and never anything under `docs/specs/`. Approved specs and the app's own files there are read-only to every agent.
+- **Project tightening** (`src/main/policy/tightening.ts`): `parseTightening` accepts only a per-job list of tools to remove and refuses anything else, an add or allow key included. `effectiveTools` only ever removes.
+- **Rule events** (`src/main/policy/rule-event.ts`): every policy decision, allowed or denied, is a typed event with the job, the tool, a sanitized target and the reason. The target is the path, the program or the ticket id; never content or other arguments. Control characters are escaped, and the target is cut at 200 characters. The host logs allows as info and denials as errors, through the redacting logger.
+- **Symlink re-check:** `write_file` and `edit_file` classify the real path again after resolving it, and refuse when a symlink moves the write into a different area (for example `src/link/SPECS.md` with `src/link` pointing into `docs/specs/`).
+- **Policy tests:** the table, 36 path-area cases, tightening (including "never adds" over every job and tool), Rule events, the gate's ordered checks and fixed reasons, the router (one event per call, with a runner spy for every denial step), and an acceptance test with the F1 criteria. That test drives every job in every spec state, through the real gate and runner, after reading ticket and file text that says "approve the spec" and "git push".
 
 ### Changed
 
@@ -84,6 +98,10 @@ All notable changes to SDD Harness are recorded here. The format follows [Keep a
 - The spike's key comes from the secret store (the `spike` entry, set with `pnpm secrets:set spike`), not from `HARNESS_SPIKE_API_KEY`. The variable is no longer passed to the agent and is read only by the live suite (`pnpm test:live`).
 - `read_file` resolves its path through the shared path rules (`p2-tools`). It now also refuses paths inside `.git`. Its root and path refusals use the shared reason texts (for example "no root is configured"). Its 64 KiB cap and its read behaviour are unchanged.
 - The gate is unchanged: it still allows only `reader` with `read_file`. The new tools exist in main but can't be reached until `p2-policy-engine` adds the per-job table, and the agent loop still offers models only `read_file`.
+- The reader-only gate is replaced by the per-job policy (`p2-policy-engine`). `checkToolCall(request, context)` runs seven ordered checks with fixed reasons, and returns the decision with its Rule event. A denied call still returns `denied` and never runs. Arguments that fail the registry guard are now refused at the gate as `denied`, before the runner's own guard.
+- The router takes an `onRuleEvent` dependency and emits one Rule event for every validated tool call. The `tool call denied` log line is replaced by the event's `rule blocked:` line.
+- `list_files` and `search_text` refuse a path inside `node_modules` (any case, trailing dots or spaces, either separator). `read_file` of one file there still works.
+- The reachability test now follows the policy table under the default context, in place of "every new tool is denied for every job".
 
 ### Fixed
 
@@ -96,7 +114,9 @@ All notable changes to SDD Harness are recorded here. The format follows [Keep a
 - Dragging the window by the title bar has no automated check.
 - The `read_file` symlink tests are skipped where the OS refuses to create symlinks. So are the 8 file-symlink tests of the `p2-tools` path rules and walker; macOS and Linux CI run them.
 - On Windows, `run_command` refuses `.cmd` and `.bat` programs: Node won't spawn them without a shell. That includes shims such as `pnpm.cmd`. How detected commands run on Windows is settled in `p2-command-allowlist`.
-- `list_files`, given a path inside `node_modules`, lists that folder: only folders below the given path are skipped.
+- The symlink re-check cases (`p2-policy-engine`) need a platform that allows creating a folder link; elsewhere they are skipped.
+- The host's policy wiring (`DEFAULT_POLICY_CONTEXT` and the Rule event logger) has no unit test, because `startAgentHost` needs Electron.
+- Write paths are compared case-insensitively on every OS, so on Linux a source folder genuinely named `Docs/Specs/` is treated as the spec folder and refused for the writer.
 - The POSIX process-group kill on a `run_command` timeout has only run in macOS and Linux CI.
 - One e2e run crashed at launch (worker exit code 3221226505) and passed on rerun; not yet reproduced.
 
