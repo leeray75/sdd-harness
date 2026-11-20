@@ -13,7 +13,7 @@ Subtask 1 runs against the user's agentgateway (OpenAI-compatible, `openai` SDK)
 | 1   | p1-spike-agent-loop   | Smallest streaming loop in the agent process against an OpenAI-compatible server (agentgateway), with one read-only tool round trip checked by main's gate; allowlisted agent env; fixture-tested | done    | [SUMMARY](../specs/p1-spike-agent-loop/SUMMARY.md)                                          | `36f5542` (PR #7; work in `0f40119`, close in `844bb44`)                     |
 | 2   | p1-secrets            | API keys in the OS keychain via safeStorage, kept in main; redaction in logs and errors; tests that keys never appear in logs, errors or test output                                              | done    | [SUMMARY](../specs/p1-secrets/SUMMARY.md); fix [SUMMARY](../specs/p1-secrets-ci/SUMMARY.md) | `afaf22d` (PR #8; work `c871c28`, close `1ec6235`); CI fix `d9ca80d` (PR #9) |
 | 3   | p1-provider-interface | Provider interface (messages, tool calls, streaming, token usage, errors, retries) and the Anthropic adapter; the spike loop moves onto it and runs on both providers                             | done    | [SUMMARY](../specs/p1-provider-interface/SUMMARY.md)                                        | `5d030ef` (PR #10; work `0995dbe`, close `a70723f`)                          |
-| 4   | p1-openai-compatible  | OpenAI-compatible adapter: base URL, optional key, extra headers, presets for vLLM, Ollama, LM Studio, llama.cpp, TGI/SGLang, LiteLLM, agentgateway and Other; same loop runs                     | pending |                                                                                             |                                                                              |
+| 4   | p1-openai-compatible  | OpenAI-compatible adapter: base URL, optional key, extra headers, presets for vLLM, Ollama, LM Studio, llama.cpp, TGI/SGLang, LiteLLM, agentgateway and Other; same loop runs                     | done    | [SUMMARY](../specs/p1-openai-compatible/SUMMARY.md)                                         | `84e2409` (PR #11; work `2d1816b`, close `2957757`)                          |
 | 5   | p1-model-probes       | `/models` listing, chat probe and tool-use probe per model, with results (passed, unreliable, failed; latency; speed) a UI can show later                                                         | pending |                                                                                             |                                                                              |
 
 ## Decisions added
@@ -25,6 +25,7 @@ Subtask 1 runs against the user's agentgateway (OpenAI-compatible, `openai` SDK)
 - D25 Provider key storage, delivery and redaction (`p1-secrets`; on Linux the test-only override also turns on plain-text encryption, `p1-secrets-ci`)
 - D19 amended by `p1-secrets`: main sends the spike key to the agent in a per-run `model-key` message after its pong
 - D26 Every model through agentgateway in development and the pilot (Bearer for Anthropic-format calls, base URL plus `/v1` for OpenAI-format calls) (`p1-provider-interface`); D23 and D25 notes added
+- D27 Server presets, one address for both formats, and extra headers (`p1-openai-compatible`); D23 note on `defaultHeaders`
 
 ## Follow-ups
 
@@ -51,6 +52,13 @@ Subtask 1 runs against the user's agentgateway (OpenAI-compatible, `openai` SDK)
   - The old `spike` store entry is no longer read; run `pnpm secrets:set agentgateway` before using the spike in the app.
   - ~~The adapters use `key ?? 'no-key-set'`, so an empty-string key would send an empty token (likely unreachable: the store returns null or a non-empty value).~~ Done in `p1-openai-compatible`: both adapters use `key || 'no-key-set'`.
   - PR #10 was merged while its CI run was still in progress; the `main` run 44535131364 then passed on all three OSes (`main` green at `5d030ef`). Wait for green checks before merging.
+- `p1-openai-compatible` follow-ups:
+  - The live suite was not seen run against this build: the newest `pnpm test:live` run in the Terminal panel predates it. Run it once with a base URL ending in `/v1` to check the new address rule for both formats.
+  - The reviewer did not open the test files, the e2e, the live suite or the docs other than `decisions.md`; AC7 to AC9 rest on the implementor's notes and its passing runs.
+  - A header name that fails the HTTP-token rule is not echoed in the refusal (it could be a pasted value); reserved and duplicate names are.
+  - `HARNESS_SPIKE_HEADERS` takes one `Name: value` per line (in PowerShell, separate lines with `` `n ``).
+  - Header values are configuration, not secrets (D27). If a server needs a token header other than `Authorization` or `x-api-key`, revisit the reserved list and the redactor.
+  - PR #11 was merged while its CI run was still in progress; the `main` run 44647948765 then passed on all three OSes, including the spike e2e header check on Linux and macOS (`main` green at `84e2409`). Wait for green checks before merging.
 
 ## Phase summary
 
