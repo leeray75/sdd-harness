@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -7,8 +7,23 @@ import {
   commandEnv,
   COMMAND_DEFAULT_TIMEOUT_MS,
   programRefusal,
-  runCommandInRoot,
+  runCommandInRoot as runWithContext,
+  type CommandContext,
+  type RunCommandOptions,
 } from '../../src/main/tools/run-command';
+import type { ToolRunResult } from '../../src/main/agent/router';
+
+/** A check that allows every call, for the tests that are about running, not about the check. */
+const ALLOW_CONTEXT: CommandContext = { job: 'writer', check: () => ({ allow: true }) };
+
+/** The runner with the allowing context, so each test names only the call and its options. */
+function runCommandInRoot(
+  root: unknown,
+  args: { program: string; args: string[]; cwd?: string },
+  options?: RunCommandOptions,
+): Promise<ToolRunResult> {
+  return runWithContext(root, args, ALLOW_CONTEXT, options);
+}
 
 // Small Node scripts the tests run through process.execPath. They are CommonJS and live in
 // their own folder, outside the root.
@@ -100,15 +115,12 @@ describe('programRefusal: git', () => {
     '/usr/bin/git',
     'C:\\Program Files\\Git\\bin\\git.exe',
     'bin/Git.EXE',
-  ])('refuses %s on every platform', (program) => {
-    for (const platform of ['linux', 'darwin', 'win32'] as const) {
-      expect(programRefusal(program, platform)).toContain('git');
-    }
+  ])('refuses %s', (program) => {
+    expect(programRefusal(program)).toContain('git');
   });
 
   it.each(['gitk', 'github', 'mygit', 'git-lfs', 'legit.exe'])('does not refuse %s', (program) => {
-    expect(programRefusal(program, 'linux')).toBeNull();
-    expect(programRefusal(program, 'win32')).toBeNull();
+    expect(programRefusal(program)).toBeNull();
   });
 
   it('refuses git before anything starts, through runCommandInRoot', async () => {
@@ -118,27 +130,73 @@ describe('programRefusal: git', () => {
   });
 });
 
-describe('programRefusal: .cmd and .bat on Windows', () => {
-  it('refuses .cmd and .bat programs on win32', () => {
-    expect(programRefusal('pnpm.cmd', 'win32')).toContain('.cmd');
-    expect(programRefusal('tool.BAT', 'win32')).toContain('.cmd');
-    expect(programRefusal('C:\\tools\\run.cmd', 'win32')).not.toBeNull();
+describe('programRefusal: .cmd and .bat (D31: the command check decides)', () => {
+  it('does not refuse .cmd or .bat programs by name, on any platform', () => {
+    expect(programRefusal('pnpm.cmd')).toBeNull();
+    expect(programRefusal('tool.BAT')).toBeNull();
+    expect(programRefusal('C:\\tools\\run.cmd')).toBeNull();
   });
 
-  it('does not refuse them on other platforms', () => {
-    expect(programRefusal('pnpm.cmd', 'linux')).toBeNull();
-    expect(programRefusal('tool.bat', 'darwin')).toBeNull();
-  });
-
-  it('refuses a .cmd program through runCommandInRoot on win32, without starting it', async () => {
+  it('refuses a .cmd program through runCommandInRoot when the check denies it, without starting it', async () => {
+    const denied: CommandContext = {
+      job: 'writer',
+      check: () => ({ allow: false, reason: "this command is not on the project's allowlist" }),
+    };
     const reason = expectFailed(
-      await runCommandInRoot(root, { program: 'pnpm.cmd', args: ['test'] }, { platform: 'win32' }),
+      await runWithContext(root, { program: 'pnpm.cmd', args: ['test'] }, denied, {
+        platform: 'win32',
+      }),
     );
-    expect(reason).toContain('.cmd');
+    expect(reason).toBe("this command is not on the project's allowlist");
   });
 
   it('refuses an empty program', () => {
-    expect(programRefusal('', 'linux')).not.toBeNull();
+    expect(programRefusal('')).not.toBeNull();
+  });
+});
+
+describe('runCommandInRoot: the command check', () => {
+  it('passes the job and the call to the check, and runs nothing when it denies', async () => {
+    const seen: unknown[] = [];
+    const denied: CommandContext = {
+      job: 'reviewer',
+      check: (call) => {
+        seen.push(call);
+        return { allow: false, reason: 'the reviewer may run tests only' };
+      },
+    };
+    const marker = join(root, 'check-ran.txt');
+    const reason = expectFailed(
+      await runWithContext(
+        root,
+        {
+          program: process.execPath,
+          args: [script('sleeper.cjs'), marker],
+          cwd: 'sub',
+        },
+        denied,
+      ),
+    );
+    expect(reason).toBe('the reviewer may run tests only');
+    expect(seen).toEqual([
+      {
+        job: 'reviewer',
+        program: process.execPath,
+        args: [script('sleeper.cjs'), marker],
+        cwd: 'sub',
+      },
+    ]);
+    expect(existsSync(marker)).toBe(false);
+  });
+
+  it('refuses a program that is not on PATH, with the fixed reason and no name', async () => {
+    const reason = expectFailed(
+      await runWithContext(root, { program: 'no-such-tool-7731', args: [] }, ALLOW_CONTEXT, {
+        parentEnv: { PATH: join(base, 'empty-folder') },
+      }),
+    );
+    expect(reason).toBe('the program was not found on PATH');
+    expect(reason).not.toContain('7731');
   });
 });
 
@@ -216,11 +274,11 @@ describe('runCommandInRoot: running programs', () => {
     expectFailed(await run(''));
   });
 
-  it('refuses a program that cannot be started, with a fixed reason', async () => {
+  it('refuses a program path that does not exist, with the fixed PATH reason', async () => {
     const reason = expectFailed(
       await runCommandInRoot(root, { program: join(base, 'no-such-program-7731'), args: [] }),
     );
-    expect(reason).toContain('could not be started');
+    expect(reason).toBe('the program was not found on PATH');
     expect(reason).not.toContain('7731');
   });
 });

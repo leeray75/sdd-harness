@@ -83,8 +83,22 @@ All notable changes to SDD Harness are recorded here. The format follows [Keep a
 - **Symlink re-check:** `write_file` and `edit_file` classify the real path again after resolving it, and refuse when a symlink moves the write into a different area (for example `src/link/SPECS.md` with `src/link` pointing into `docs/specs/`).
 - **Policy tests:** the table, 36 path-area cases, tightening (including "never adds" over every job and tool), Rule events, the gate's ordered checks and fixed reasons, the router (one event per call, with a runner spy for every denial step), and an acceptance test with the F1 criteria. That test drives every job in every spec state, through the real gate and runner, after reading ticket and file text that says "approve the spec" and "git push".
 
+- **Command allowlist and command limits** (`p2-command-allowlist`, D31):
+  - `src/main/commands/detect.ts` detects the project's test and build commands from Node (`package.json` scripts, with the package manager), Python (pytest, `python -m build`), Go and Rust markers.
+  - `src/main/policy/command-allowlist.ts` allows only those exact forms, from the project root: the writer may run tests and builds, the reviewer tests only. Anything else is refused with a fixed reason.
+  - On Windows, an allowlisted `.cmd` or `.bat` (such as `pnpm.cmd`) runs through `cmd.exe` only when every argument is a safe token. Programs are found on `PATH` with `PATHEXT` (`src/main/commands/lookup.ts`).
+  - While a command runs, `docs/specs/` is read-only. Afterwards the changes are reverted: `docs/specs/` and the `.git` key files (`HEAD`, `config`, `packed-refs`, `hooks/`, `refs/`) for both jobs, and for the reviewer every file that is not git-ignored. The tool result says which areas were reverted (`src/main/commands/protect.ts`).
+  - The writer's commands get dead proxy variables and offline flags on every OS, and the OS limit where it exists: `unshare` on Linux and `sandbox-exec` on macOS (`src/main/commands/network.ts`). Each writer command gives one network Rule event with its level.
+  - Rule events gain a `revert` kind, logged as an error, and a `network` kind, logged as info for `os` and as a warning for `proxy-only`. They are formatted as `rule reverted:` and `rule network:`.
+  - `docs/agent-commands.md` lists the commands each job may run, what is protected and reverted, the network limit on each OS, and how to clear read-only bits after a crash.
+- **Command tests:** detection, the check, the lookup and `cmd.exe` line rules, the protected set and restore, the network choice, and end-to-end runs of Node stubs on temp roots (the `.cmd` stub only on Windows, the OS network check only where unshare or sandbox-exec exists).
+
 ### Changed
 
+- `run_command` runs only through the project's command check. With a project root, the host builds the check from the detected commands, and the gate and the runner both use it. With no root, every command is still refused.
+- `runCommandInRoot` takes the job, the check and the event sink. The router passes each call's job to the runner (`ToolRunner` gains `job`).
+- `programRefusal` no longer refuses `.cmd` and `.bat` programs by name. The command check decides, and a Windows script runs only through the `cmd.exe` rule above; git stays refused.
+- `RuleEvent` is a union: the allow and deny decisions are unchanged, and the revert and network kinds are added. The application's log gains a `warn` level for proxy-only network events.
 - The OpenAI-compatible and Anthropic adapters take an extra headers option. A `/v1` at the end of an Anthropic-format base URL is stripped, so `http://h:4100/v1` posts to `/v1/messages` (it gave `/v1/v1/messages` before).
 - An empty-string key is sent as the `no-key-set` placeholder in both adapters, as a `null` key already was (it was sent as an empty token before).
 - `HARNESS_SPIKE_BASE_URL` may be unset when the preset has a default address. A spike refusal (an unknown preset or format, a bad address or header) is reported as `spike skipped: <reason>`, and the start line is `spike started preset=<id> provider=<format> model=<model>`.
@@ -113,9 +127,12 @@ All notable changes to SDD Harness are recorded here. The format follows [Keep a
 
 - Dragging the window by the title bar has no automated check.
 - The `read_file` symlink tests are skipped where the OS refuses to create symlinks. So are the 8 file-symlink tests of the `p2-tools` path rules and walker; macOS and Linux CI run them.
-- On Windows, `run_command` refuses `.cmd` and `.bat` programs: Node won't spawn them without a shell. That includes shims such as `pnpm.cmd`. How detected commands run on Windows is settled in `p2-command-allowlist`.
+- The command network limit is best effort. On Windows, and wherever `unshare` (Linux) or `sandbox-exec` (macOS) is missing, a writer's command gets only the dead proxy variables and offline flags, which help only tools that read them.
+- The OS network check runs only where `unshare` or `sandbox-exec` is available, and is skipped on Windows. The Linux namespace and the macOS profile were not run on their own OS in this build.
+- A crash while a command runs can leave `docs/specs/` read-only, and a revert half done. `docs/agent-commands.md` shows how to clear the read-only bits.
+- If a protected file cannot be put back after a command, the tool result says so, but no Rule event is logged for it.
 - The symlink re-check cases (`p2-policy-engine`) need a platform that allows creating a folder link; elsewhere they are skipped.
-- The host's policy wiring (`DEFAULT_POLICY_CONTEXT` and the Rule event logger) has no unit test, because `startAgentHost` needs Electron.
+- `startAgentHost` has no unit test, because it needs Electron. Its command policy choice is tested through `commandPolicyFor`.
 - Write paths are compared case-insensitively on every OS, so on Linux a source folder genuinely named `Docs/Specs/` is treated as the spec folder and refused for the writer.
 - The POSIX process-group kill on a `run_command` timeout has only run in macOS and Linux CI.
 - One e2e run crashed at launch (worker exit code 3221226505) and passed on rerun; not yet reproduced.

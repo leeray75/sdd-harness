@@ -383,6 +383,8 @@ describe('F1: every decision is a Rule event', () => {
     await call(deps, 'reviewer', 'write_file', { path: 'src/a.ts', content: 'x' });
     await handleAgentMessage({ type: 'approve-spec', id: 'x' }, deps);
     expect(onRuleEvent).toHaveBeenCalledTimes(2);
-    expect(onRuleEvent.mock.calls.map((entry) => entry[0]?.decision)).toEqual(['allow', 'deny']);
+    expect(
+      onRuleEvent.mock.calls.map((entry) => (entry[0]?.kind === 'rule' ? entry[0].decision : null)),
+    ).toEqual(['allow', 'deny']);
   });
 });

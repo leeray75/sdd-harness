@@ -1,18 +1,56 @@
-// Rule events: one typed record for every policy decision, allowed or denied. The record holds
-// the job, the tool, a target and the reason, and never another argument value. Pure: no
-// Electron or file-system imports. The logger is only a type here.
+// Rule events: one typed record for every policy decision, allowed or denied, and for the two
+// command events of D31: a revert of a protected file, and the network level of a writer's
+// command. The record holds the job, the tool, a target and the reason, and never another
+// argument value or any file content. Pure: no Electron or file-system imports. The logger is
+// only a type here.
 
 import type { JobId } from '../../shared/agent-protocol';
 import { isToolName, TOOL_ARG_CHECKS } from '../../shared/tools';
 import type { Logger } from '../log';
 
-export interface RuleEvent {
+/** What a restore did to one path: put back, re-created, or deleted. */
+export type RevertAction = 'restored' | 're-created' | 'deleted';
+
+/** The network level a writer's command ran with (D31). */
+export type NetworkLevel = 'os' | 'proxy-only';
+
+/** The reason every revert event carries. */
+export const REVERT_REASON = 'a command changed a protected file';
+
+/** A tool call's allow or deny decision. */
+export interface DecisionEvent {
   kind: 'rule';
   decision: 'allow' | 'deny';
   job: JobId;
   tool: string;
   target: string;
   reason: string;
+}
+
+/** One protected path a command changed and the restore put back, re-created or deleted. */
+export interface RevertEvent {
+  kind: 'revert';
+  job: JobId;
+  tool: 'run_command';
+  target: string;
+  action: RevertAction;
+  reason: string;
+}
+
+/** The network level one writer command ran with. */
+export interface NetworkEvent {
+  kind: 'network';
+  job: 'writer';
+  tool: 'run_command';
+  target: string;
+  level: NetworkLevel;
+}
+
+export type RuleEvent = DecisionEvent | RevertEvent | NetworkEvent;
+
+/** The logger the rule sink writes to: the app's log, which also has a warning level. */
+export interface RuleLogger extends Logger {
+  warn(message: string): void;
 }
 
 /** The request fields a rule event is built from. Untrusted until validated by the router. */
@@ -86,7 +124,7 @@ function targetOf(tool: string, args: Record<string, unknown>): string {
  * Builds the rule event for one decision. The tool is the registry name, or `-` when it is not
  * one. The target is taken from the arguments that the guard accepts, then sanitized.
  */
-export function makeRuleEvent(request: RuleRequest, allow: boolean, reason: string): RuleEvent {
+export function makeRuleEvent(request: RuleRequest, allow: boolean, reason: string): DecisionEvent {
   return {
     kind: 'rule',
     decision: allow ? 'allow' : 'deny',
@@ -97,20 +135,69 @@ export function makeRuleEvent(request: RuleRequest, allow: boolean, reason: stri
   };
 }
 
-/** The one-line form of a rule event, as it is logged. */
-export function formatRuleEvent(event: RuleEvent): string {
-  const verdict = event.decision === 'allow' ? 'allowed' : 'blocked';
-  return `rule ${verdict}: job=${event.job} tool=${event.tool} target=${event.target} reason=${event.reason}`;
+/** The revert event for one protected path. The path is sanitized like any other target. */
+export function makeRevertEvent(job: JobId, path: string, action: RevertAction): RevertEvent {
+  return {
+    kind: 'revert',
+    job,
+    tool: 'run_command',
+    target: sanitizeTarget(path),
+    action,
+    reason: REVERT_REASON,
+  };
 }
 
-/** A sink that logs allows with info and denies with error, in the formatRuleEvent format. */
-export function logRuleEvent(logger: Logger): (event: RuleEvent) => void {
+/** The network event for one writer command. The program is sanitized like any other target. */
+export function makeNetworkEvent(program: string, level: NetworkLevel): NetworkEvent {
+  return {
+    kind: 'network',
+    job: 'writer',
+    tool: 'run_command',
+    target: sanitizeTarget(program),
+    level,
+  };
+}
+
+/** The one-line form of a rule event, as it is logged. */
+export function formatRuleEvent(event: RuleEvent): string {
+  switch (event.kind) {
+    case 'rule': {
+      const verdict = event.decision === 'allow' ? 'allowed' : 'blocked';
+      return `rule ${verdict}: job=${event.job} tool=${event.tool} target=${event.target} reason=${event.reason}`;
+    }
+    case 'revert':
+      return `rule reverted: job=${event.job} tool=${event.tool} target=${event.target} action=${event.action} reason=${event.reason}`;
+    case 'network':
+      return `rule network: job=${event.job} tool=${event.tool} target=${event.target} level=${event.level}`;
+  }
+}
+
+/**
+ * A sink for the rule events. A decision that allows, and a network event at the OS level, are
+ * logged with info. A denial and a revert are logged with error. A network event that is only
+ * proxy-only is logged with warn. Every line is the formatRuleEvent form.
+ */
+export function logRuleEvent(logger: RuleLogger): (event: RuleEvent) => void {
   return (event) => {
     const line = formatRuleEvent(event);
-    if (event.decision === 'allow') {
-      logger.info(line);
-    } else {
-      logger.error(line);
+    switch (event.kind) {
+      case 'rule':
+        if (event.decision === 'allow') {
+          logger.info(line);
+        } else {
+          logger.error(line);
+        }
+        return;
+      case 'revert':
+        logger.error(line);
+        return;
+      case 'network':
+        if (event.level === 'os') {
+          logger.info(line);
+        } else {
+          logger.warn(line);
+        }
+        return;
     }
   };
 }

@@ -9,7 +9,7 @@ import { isToolName, TOOL_ARG_CHECKS } from '../../shared/tools';
 import { effectiveFeature, type PolicyContext } from './context';
 import { BASE_TOOLS } from './policy-table';
 import { classifyPath, type PathArea } from './path-areas';
-import { makeRuleEvent, type RuleEvent } from './rule-event';
+import { makeRuleEvent, type DecisionEvent } from './rule-event';
 import { effectiveTools } from './tightening';
 
 export interface ToolCallRequest {
@@ -22,7 +22,7 @@ export interface ToolCallRequest {
 export interface PolicyDecision {
   allow: boolean;
   reason: string;
-  event: RuleEvent;
+  event: DecisionEvent;
 }
 
 const NO_SUCH_TOOL = 'not allowed: no such tool';
