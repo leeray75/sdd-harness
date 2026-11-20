@@ -3,7 +3,7 @@ import { _electron as electron, expect, test } from '@playwright/test';
 
 const root = join(__dirname, '..', '..');
 
-test('agent runs in its own process, its tool call is denied by main, and it exits cleanly', async () => {
+test('agent runs in its own process, main logs a rule event for its denied write, and it exits cleanly', async () => {
   // Drop the dev-server URL so the app loads the built page, and set the self-check flag.
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
@@ -41,23 +41,35 @@ test('agent runs in its own process, its tool call is denied by main, and it exi
     expect(agentPid).toBeGreaterThan(0);
     expect(agentPid).not.toBe(proc.pid);
 
-    // Main denies the self-check tool call and logs job, tool and reason.
+    // Main's policy gate denies the writer's write_file call (D30). It logs a Rule event with
+    // the job, the tool, the cleaned-up relative target and the reason. The target is logged on
+    // purpose; the file body is not.
     await expect
       .poll(() => output, { timeout: 20_000 })
       .toMatch(
-        /\[harness\] tool call denied: job=writer tool=write_file reason=not allowed: only the reader job/,
+        /\[harness\] rule blocked: job=writer tool=write_file target=selfcheck\.txt reason=not allowed: source files can be edited only after the spec is approved/,
       );
 
-    // The agent receives the denied result for the same id.
+    // The agent receives the denied result for the same id, with the same reason.
     await expect
       .poll(() => output, { timeout: 20_000 })
       .toMatch(
-        /\[agent\] received denied result id=selfcheck-1 reason=not allowed: only the reader job/,
+        /\[agent\] received denied result id=selfcheck-1 reason=not allowed: source files can be edited only after the spec is approved/,
       );
 
-    // The arguments of the self-check call never reach the log.
-    expect(output).not.toContain('selfcheck.txt');
+    // The body of the self-check call never reaches the output.
     expect(output).not.toContain('probe-body');
+
+    // No Rule event carries the absolute repo path. The path may appear with either slash
+    // direction on Windows, so both forms are checked.
+    const absoluteRoots = [root, root.replace(/\\/g, '/')];
+    const ruleLines = output.split(/\r?\n/).filter((line) => line.includes('rule '));
+    expect(ruleLines.length).toBeGreaterThan(0);
+    for (const line of ruleLines) {
+      for (const absoluteRoot of absoluteRoots) {
+        expect(line).not.toContain(absoluteRoot);
+      }
+    }
   } finally {
     await app.close();
   }

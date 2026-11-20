@@ -44,6 +44,8 @@ Work follows `docs/roadmap.md`: ten phases (0 scaffold → 9 pilot), each run in
 
   After the merge, only the progress file's status and commit are filled in.
 
+- A pull request is merged only when its CI run is green on every job (`check`, and `e2e` on Windows, macOS and Linux). The result-approval and close messages state the CI state and link the run or the compare page.
+
 ## Commands
 
 Use Node 24 (`.nvmrc`). pnpm is pinned in `package.json` and enabled through Corepack (D14).
