@@ -8,6 +8,7 @@ import { toProviderError } from './errors';
 import {
   ProviderError,
   type Message,
+  type ModelInfo,
   type Provider,
   type ProviderRequest,
   type StopReason,
@@ -52,7 +53,51 @@ export function createOpenAIProvider(options: OpenAIProviderOptions): Provider {
   });
   return {
     stream: (request, signal) => streamChat(client, request, signal),
+    listModels: (signal) => listOpenAIModels(client, signal),
   };
+}
+
+/** The fields that may hold a model's context window, in the order they are read (AC2). */
+const CONTEXT_FIELDS = ['max_model_len', 'context_length', 'context_window'] as const;
+
+/** The value when it is a positive integer, else null. */
+function positiveInteger(value: unknown): number | null {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : null;
+}
+
+/** The first positive integer among the context fields of one listed model, else null. */
+function openAIContextWindow(entry: Record<string, unknown>): number | null {
+  for (const field of CONTEXT_FIELDS) {
+    const value = positiveInteger(entry[field]);
+    if (value !== null) {
+      return value;
+    }
+  }
+  return null;
+}
+
+/** GET /v1/models through the SDK, every page. Entries without a string id are skipped (AC2). */
+async function listOpenAIModels(
+  client: OpenAI,
+  signal: AbortSignal | undefined,
+): Promise<ModelInfo[]> {
+  const models: ModelInfo[] = [];
+  try {
+    for await (const item of client.models.list(signal ? { signal } : undefined)) {
+      if (typeof item !== 'object' || item === null) {
+        continue;
+      }
+      const entry = item as unknown as Record<string, unknown>;
+      const id = entry['id'];
+      if (typeof id !== 'string') {
+        continue;
+      }
+      models.push({ id, contextWindow: openAIContextWindow(entry) });
+    }
+  } catch (error) {
+    throw toProviderError(error);
+  }
+  return models;
 }
 
 type ChatMessage = OpenAI.Chat.Completions.ChatCompletionMessageParam;
@@ -179,7 +224,9 @@ async function* streamChat(
       {
         model: request.model,
         messages: toOpenAIMessages(request.messages),
-        tools: request.tools.map(toOpenAITool),
+        // No tools field when there are none: vLLM rejects an empty list (HTTP 400), so the
+        // chat probe must not send one (p1-model-probes U1).
+        ...(request.tools.length > 0 ? { tools: request.tools.map(toOpenAITool) } : {}),
         stream: true,
         stream_options: { include_usage: true },
         ...(request.maxTokens !== undefined ? { max_tokens: request.maxTokens } : {}),

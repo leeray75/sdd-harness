@@ -428,3 +428,164 @@ describe('openai adapter errors', () => {
     expect(error).toMatchObject({ kind: 'aborted', retryable: false });
   });
 });
+
+/** A /models body in the OpenAI list shape. */
+function modelsResponse(data: unknown[]): Response {
+  return new Response(JSON.stringify({ object: 'list', data }), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  });
+}
+
+describe('openai adapter listing (AC2)', () => {
+  it('GETs /v1/models with the bearer key and returns each id', async () => {
+    const fake = recordingFetch(() => modelsResponse([{ id: 'model-a' }, { id: 'model-b' }]));
+    const provider = createOpenAIProvider({
+      baseURL: BASE_URL,
+      key: SENTINEL,
+      maxRetries: 0,
+      fetch: fake.fetch,
+    });
+    const models = await provider.listModels();
+
+    expect(fake.calls).toHaveLength(1);
+    expect(fake.calls[0]?.url).toBe('http://gateway.test/v1/models');
+    expect(fake.calls[0]?.headers.get('authorization')).toBe(`Bearer ${SENTINEL}`);
+    expect(models).toEqual([
+      { id: 'model-a', contextWindow: null },
+      { id: 'model-b', contextWindow: null },
+    ]);
+  });
+
+  it('uses the same path when the base URL already ends in /v1', async () => {
+    const fake = recordingFetch(() => modelsResponse([]));
+    const provider = createOpenAIProvider({
+      baseURL: 'http://gateway.test/v1/',
+      key: null,
+      maxRetries: 0,
+      fetch: fake.fetch,
+    });
+    await provider.listModels();
+    expect(fake.calls[0]?.url).toBe('http://gateway.test/v1/models');
+  });
+
+  it('reads max_model_len as the context window, then the other fields in order', async () => {
+    const fake = recordingFetch(() =>
+      modelsResponse([
+        { id: 'vllm', max_model_len: 32768, context_length: 4096 },
+        { id: 'other', context_length: 8192, context_window: 2048 },
+        { id: 'last', context_window: 1024 },
+      ]),
+    );
+    const provider = createOpenAIProvider({
+      baseURL: BASE_URL,
+      key: null,
+      maxRetries: 0,
+      fetch: fake.fetch,
+    });
+    expect(await provider.listModels()).toEqual([
+      { id: 'vllm', contextWindow: 32768 },
+      { id: 'other', contextWindow: 8192 },
+      { id: 'last', contextWindow: 1024 },
+    ]);
+  });
+
+  it('returns null when no context field is a positive integer', async () => {
+    const fake = recordingFetch(() =>
+      modelsResponse([
+        { id: 'zero', max_model_len: 0 },
+        { id: 'text', max_model_len: '8192' },
+        { id: 'fraction', context_length: 1.5 },
+        { id: 'none' },
+      ]),
+    );
+    const provider = createOpenAIProvider({
+      baseURL: BASE_URL,
+      key: null,
+      maxRetries: 0,
+      fetch: fake.fetch,
+    });
+    const models = await provider.listModels();
+    expect(models.map((m) => m.contextWindow)).toEqual([null, null, null, null]);
+  });
+
+  it('skips entries without a string id', async () => {
+    const fake = recordingFetch(() =>
+      modelsResponse([{ id: 'kept' }, { id: 7 }, { name: 'no-id' }, null]),
+    );
+    const provider = createOpenAIProvider({
+      baseURL: BASE_URL,
+      key: null,
+      maxRetries: 0,
+      fetch: fake.fetch,
+    });
+    expect(await provider.listModels()).toEqual([{ id: 'kept', contextWindow: null }]);
+  });
+
+  it('sends the extra headers on the listing request', async () => {
+    const fake = recordingFetch(() => modelsResponse([]));
+    const provider = createOpenAIProvider({
+      baseURL: BASE_URL,
+      key: null,
+      maxRetries: 0,
+      headers: { 'X-Probe-Route': 'route-sentinel-7' },
+      fetch: fake.fetch,
+    });
+    await provider.listModels();
+    expect(fake.calls[0]?.headers.get('x-probe-route')).toBe('route-sentinel-7');
+  });
+
+  it('maps an HTTP error to its kind, without the server message or the key', async () => {
+    const fake = recordingFetch(() => errorResponse(401));
+    const provider = createOpenAIProvider({
+      baseURL: BASE_URL,
+      key: SENTINEL,
+      maxRetries: 0,
+      fetch: fake.fetch,
+    });
+    const error = await caught(() => provider.listModels());
+    expect(error).toBeInstanceOf(ProviderError);
+    expect(error).toMatchObject({ kind: 'auth', status: 401 });
+    expect(String((error as Error).message)).not.toContain(SENTINEL);
+  });
+
+  it('maps a 429 to rate-limit', async () => {
+    const fake = recordingFetch(() => errorResponse(429));
+    const provider = createOpenAIProvider({
+      baseURL: BASE_URL,
+      key: null,
+      maxRetries: 0,
+      fetch: fake.fetch,
+    });
+    expect(await caught(() => provider.listModels())).toMatchObject({ kind: 'rate-limit' });
+  });
+});
+
+describe('openai adapter tools field (p1-model-probes U1)', () => {
+  it('omits the tools field from the request when the tool list is empty', async () => {
+    const fake = recordingFetch(() => sseResponse(FINAL_BODY));
+    const provider = createOpenAIProvider({
+      baseURL: BASE_URL,
+      key: SENTINEL,
+      maxRetries: 0,
+      fetch: fake.fetch,
+    });
+    await drain(
+      provider.stream({ model: MODEL, messages: [{ role: 'user', text: 'hi' }], tools: [] }),
+    );
+    expect(fake.calls[0]?.body).not.toHaveProperty('tools');
+    expect(fake.calls[0]?.body['stream']).toBe(true);
+  });
+
+  it('sends the tools field when the tool list is not empty', async () => {
+    const fake = recordingFetch(() => sseResponse(FINAL_BODY));
+    const provider = createOpenAIProvider({
+      baseURL: BASE_URL,
+      key: SENTINEL,
+      maxRetries: 0,
+      fetch: fake.fetch,
+    });
+    await drain(provider.stream(REQUEST));
+    expect(fake.calls[0]?.body['tools']).toHaveLength(1);
+  });
+});

@@ -51,9 +51,11 @@ pnpm lint              # ESLint (flat config, TypeScript and React rules)
 pnpm format            # Prettier: rewrite files
 pnpm format:check      # Prettier: check only
 pnpm test              # Vitest unit tests (tests/unit only)
-pnpm test:live         # opt-in live suite (tests/live): needs an address (HARNESS_SPIKE_BASE_URL, or the preset default) and reads HARNESS_SPIKE_API_KEY from its environment; never in CI
+pnpm test:live         # opt-in live suites (tests/live: the spike loop and the model probes): need an address (HARNESS_SPIKE_BASE_URL, or the preset default) and reads HARNESS_SPIKE_API_KEY from its environment; never in CI
 pnpm record:spike      # dev only: records tests/fixtures/spike/openai from agentgateway (AGENTGATEWAY_BASE_URL without /v1, AGENTGATEWAY_API_KEY)
 pnpm record:spike anthropic # dev only: records tests/fixtures/spike/anthropic in the Anthropic format (same variables; model claude-haiku-5-5)
+pnpm record:probes     # dev only: records tests/fixtures/probes/openai (models.json, chat.sse, tool-turn1.sse, tool-turn2.sse) from agentgateway (AGENTGATEWAY_BASE_URL without /v1, AGENTGATEWAY_API_KEY, optional AGENTGATEWAY_MODEL)
+pnpm record:probes anthropic # dev only: the same files in the Anthropic format (tests/fixtures/probes/anthropic; model claude-haiku-5-5)
 pnpm secrets:set agentgateway # dev only: stores a value in the secret store (hidden prompt, or piped stdin); unpackaged runs only
 pnpm secrets:list      # dev only: lists the stored names (never values)
 pnpm secrets:delete spike # dev only: removes a stored entry

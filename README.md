@@ -19,18 +19,19 @@ pnpm install   # installs dependencies and downloads the Electron binary for thi
 pnpm dev       # opens the app with hot reload
 ```
 
-| Command             | What it does                                                                                                                                                                  |
-| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pnpm dev`          | Run the app (electron-vite dev server, hot reload)                                                                                                                            |
-| `pnpm build`        | Build main, preload and renderer to `out/`                                                                                                                                    |
-| `pnpm typecheck`    | Strict `tsc` for the Node side and the web side                                                                                                                               |
-| `pnpm lint`         | ESLint                                                                                                                                                                        |
-| `pnpm format`       | Prettier: rewrite files (`pnpm format:check` checks only)                                                                                                                     |
-| `pnpm test`         | Vitest unit tests                                                                                                                                                             |
-| `pnpm e2e`          | Build, then the Playwright-for-Electron tests                                                                                                                                 |
-| `pnpm test:live`    | Opt-in live suite against the spike's address (`HARNESS_SPIKE_BASE_URL`, or the preset default); skipped without one, never in CI                                             |
-| `pnpm record:spike` | Dev only: records the spike fixture from agentgateway (`AGENTGATEWAY_BASE_URL` without `/v1`, `AGENTGATEWAY_API_KEY`); `pnpm record:spike anthropic` for the Anthropic format |
-| `pnpm package`      | Unsigned electron-builder build for the current OS                                                                                                                            |
+| Command              | What it does                                                                                                                                                                          |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm dev`           | Run the app (electron-vite dev server, hot reload)                                                                                                                                    |
+| `pnpm build`         | Build main, preload and renderer to `out/`                                                                                                                                            |
+| `pnpm typecheck`     | Strict `tsc` for the Node side and the web side                                                                                                                                       |
+| `pnpm lint`          | ESLint                                                                                                                                                                                |
+| `pnpm format`        | Prettier: rewrite files (`pnpm format:check` checks only)                                                                                                                             |
+| `pnpm test`          | Vitest unit tests                                                                                                                                                                     |
+| `pnpm e2e`           | Build, then the Playwright-for-Electron tests                                                                                                                                         |
+| `pnpm test:live`     | Opt-in live suites (the spike loop and the model probes) against the spike's address (`HARNESS_SPIKE_BASE_URL`, or the preset default); skipped without one, never in CI              |
+| `pnpm record:spike`  | Dev only: records the spike fixture from agentgateway (`AGENTGATEWAY_BASE_URL` without `/v1`, `AGENTGATEWAY_API_KEY`); `pnpm record:spike anthropic` for the Anthropic format         |
+| `pnpm record:probes` | Dev only: records the model probe fixtures from agentgateway (`AGENTGATEWAY_BASE_URL` without `/v1`, `AGENTGATEWAY_API_KEY`); `pnpm record:probes anthropic` for the Anthropic format |
+| `pnpm package`       | Unsigned electron-builder build for the current OS                                                                                                                                    |
 
 ### Run the spike (dev only)
 
