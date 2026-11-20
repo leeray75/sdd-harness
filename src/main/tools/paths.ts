@@ -4,6 +4,7 @@
 
 import { promises as fs, realpath } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { classifyPath, sameArea } from '../policy/path-areas';
 
 /**
  * Real path with the OS's native resolver. On Windows this also expands 8.3 short names
@@ -30,6 +31,8 @@ export const GIT_REASON = 'paths inside .git are not allowed';
 export const MISSING_REASON = 'the path does not exist';
 export const NOT_A_FOLDER_REASON = 'a parent of the path is not a folder';
 export const RESOLVE_FAILED_REASON = 'the path could not be resolved';
+export const AREA_CHANGED_REASON = 'the real path is in a different area than the path given';
+export const NODE_MODULES_REASON = 'paths inside node_modules are not searched';
 
 /** The outcome of resolving a path: the real root and target, or the reason it was refused. */
 export type ResolvedPath =
@@ -57,6 +60,25 @@ export function hasGitSegment(path: string): boolean {
     const normal = segment.toLowerCase().replace(/[. ]+$/, '');
     return normal === '.git';
   });
+}
+
+/**
+ * True when any segment of `path` is `node_modules`, ignoring case and trailing dots and spaces,
+ * with either separator. list_files and search_text refuse such a path.
+ */
+export function hasNodeModulesSegment(path: string): boolean {
+  return path.split(/[\\/]+/).some((segment) => {
+    const normal = segment.toLowerCase().replace(/[. ]+$/, '');
+    return normal === 'node_modules';
+  });
+}
+
+/**
+ * Null when the real path (`realRel`, relative to the root) is in the same policy area as the
+ * path the caller gave. Otherwise the fixed reason: a symlink moved the write into another area.
+ */
+export function areaMismatch(givenPath: string, realRel: string): string | null {
+  return sameArea(classifyPath(givenPath), classifyPath(realRel)) ? null : AREA_CHANGED_REASON;
 }
 
 function errorCode(error: unknown): string | undefined {

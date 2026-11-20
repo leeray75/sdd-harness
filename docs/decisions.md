@@ -117,6 +117,7 @@ Format: **Decision** · **Outcome** · **Why** · **Date**.
 - **Amended:** 2026-11-18, p1-spike-agent-loop: an allowed tool call now runs in main through an injected runner. Only `read_file` exists, for the reader job, and its output returns to the agent in a success `tool-call-result`; a tool that is allowed but fails returns the new `failed` error code. The gate still denies by default, and the router still logs job, tool and outcome only, never arguments or output. The Outcome above is otherwise unchanged.
 - **Amended:** 2026-11-19, p1-secrets: main sends the agent a new main-to-agent message, `{ type: 'model-key', key: string | null }`, once per agent process after its pong, when the spike flag is `1`. The key is the stored `spike` entry, or `null` when there is none or the store cannot be read. The message is typed and checked by the same guards (`key` at most 4,096 characters), and the guard's reasons never echo the key. Nothing else in the message contract changes, and the Outcome above is otherwise unchanged.
 - **Amended:** 2026-11-20, p2-tools: the injected runner (`makeToolRunner`) now knows all seven tools of the shared registry (D29). It checks each call's tool name and arguments with the registry's guard before it dispatches, and a failure returns `failed`. The gate (`checkToolCall`) is unchanged and still allows only `reader` with `read_file`, so the new tools can't be reached until the per-job policy table arrives (`p2-policy-engine`).
+- **Amended:** 2026-11-20, p2-policy-engine: the reader-only gate is replaced by the per-job policy (D30). `checkToolCall(request, context)` returns a decision with a Rule event. The router emits that event for every validated call through a new `onRuleEvent` dep, which replaces its denial log line. It still logs job, tool and outcome for calls that run, never arguments or output.
 
 ## D20 · Window controls bridge shape
 
@@ -223,4 +224,36 @@ Format: **Decision** · **Outcome** · **Why** · **Date**.
     - schemas next to each runner in main;
     - git rules in the policy engine only.
 - **Open:** How `run_command` runs `.cmd`/`.bat` commands such as `pnpm test` on Windows is decided in `p2-command-allowlist`.
+- **Date:** 2026-11-20
+
+## D30 · Agent tool policy: per-job table, path areas, tightening and Rule events
+
+- **Outcome:** Every agent tool call is decided in main by a pure gate, `checkToolCall(request, context)` in `src/main/policy/`.
+  - **Table:** each job's base tools follow the design table ("What each agent can do"):
+    - every job may read, list and search;
+    - the planner and the writer may write and edit, under the path rules;
+    - the writer and the reviewer reach `run_command` through a command check;
+    - the planner and the reader may read tickets;
+    - the reviewer and the reader have no write tool.
+  - **Context:** the caller passes the feature slug (or none), the spec state (`none`, `draft` or `approved`), the project's tightening and the command check. Phase 3 maps its workflow states onto the spec state. Until then the host passes no feature, and a command check that denies every command until `p2-command-allowlist`.
+  - **Path areas:** a write path is normalized (separators, `.` and `..`, letter case on every OS, trailing dots and spaces) and classed as `outside`, `git`, `spec-doc`, `spec-other` or `source`. A `spec-doc` is one of the four planning docs of a feature.
+    - The planner may write only the `spec-doc` files of the current feature, before approval.
+    - The writer may write only `source`, after approval.
+    - The app's own files in `docs/specs/`, and approved specs, are therefore unreachable to every agent.
+    - The write and edit runners classify the real path again and refuse when a symlink changes its area.
+  - **Tightening:** only a per-job removal list. Anything else is refused, and the gate uses the base set minus the removals, so a project can never add a tool.
+  - **Rule events:** every decision, allowed or denied, is a Rule event with the job, the tool, a sanitized target (the path, the program or the ticket id, never content or other arguments) and the reason. It is logged through the redacting logger. A denied call returns `denied` with a fixed reason that never echoes the target.
+  - **`node_modules`:** `list_files` and `search_text` refuse a path inside `node_modules`.
+- **Why:**
+  - A pure gate with the workflow state as an input can be tested exhaustively now and wired to Phase 3 later, without a second gate.
+  - Limiting the planner to four named files keeps the state file, the spec hash and the build ledger out of every agent's reach, so no agent can fake an approval (D3, D4, D7).
+  - Comparing paths case-insensitively on every OS is stricter on Linux, but it blocks case tricks on Windows and macOS with one rule.
+  - The runner's real-path re-check closes the symlink gap that a pure gate can't see.
+  - Alternatives not chosen (from the `p2-policy-engine` plan):
+    - allowing `run_command` before the allowlist;
+    - letting the planner write any file in the feature folder;
+    - protecting only the current feature's spec folder from the writer;
+    - a gate-only lexical check;
+    - taking the plugin's state ids as input now;
+    - silently ignoring bad tightening.
 - **Date:** 2026-11-20

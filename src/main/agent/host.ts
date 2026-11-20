@@ -16,7 +16,9 @@ import {
   isToolName,
 } from '../../shared/tools';
 import { log } from '../log';
+import { DEFAULT_POLICY_CONTEXT } from '../policy/context';
 import { checkToolCall } from '../policy/gate';
+import { logRuleEvent } from '../policy/rule-event';
 import { createElectronSecretStore } from '../secrets/electron';
 import { editFileInRoot } from '../tools/edit-file';
 import { listFilesInRoot } from '../tools/list-files';
@@ -26,7 +28,7 @@ import { searchTextInRoot } from '../tools/search-text';
 import { defaultTicketSource, makeReadTicket, type TicketSource } from '../tools/read-ticket';
 import { writeFileInRoot } from '../tools/write-file';
 import { decideModelKey } from './model-key';
-import { handleAgentMessage, type ToolRunResult, type ToolRunner } from './router';
+import { handleAgentMessage, type RouterDeps, type ToolRunResult, type ToolRunner } from './router';
 
 const SELFCHECK_FLAG = 'HARNESS_AGENT_SELFCHECK';
 const SPIKE_FLAG = 'HARNESS_AGENT_SPIKE';
@@ -194,6 +196,12 @@ export function startAgentHost(): void {
   forwardLines(child.stderr, true);
 
   const runTool = makeToolRunner(process.env[SPIKE_ROOT_VAR]);
+  const routerDeps: RouterDeps = {
+    checkToolCall: (request) => checkToolCall(request, DEFAULT_POLICY_CONTEXT),
+    runTool,
+    onRuleEvent: logRuleEvent(log),
+    logger: log,
+  };
 
   // The key is sent once per agent process, after its pong (D25). The store is built here,
   // which is after app ready; it reads the disk only when a key is asked for.
@@ -204,7 +212,7 @@ export function startAgentHost(): void {
   child.on('message', (message: unknown) => {
     const parsed = validateAgentToMainMessage(message);
     const isPong = parsed.ok && parsed.message.type === 'pong';
-    handleAgentMessage(message, { checkToolCall, runTool, logger: log })
+    handleAgentMessage(message, routerDeps)
       .then((outcome) => {
         if (outcome.reply) {
           child.postMessage(outcome.reply);
