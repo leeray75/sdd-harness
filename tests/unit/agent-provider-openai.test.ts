@@ -155,6 +155,51 @@ describe('openai adapter requests', () => {
   });
 });
 
+describe('openai adapter keys and headers (AC3)', () => {
+  it('sends the placeholder when the key is an empty string', async () => {
+    const fake = recordingFetch(() => sseResponse(FINAL_BODY));
+    const provider = createOpenAIProvider({
+      baseURL: BASE_URL,
+      key: '',
+      maxRetries: 0,
+      fetch: fake.fetch,
+    });
+    await drain(provider.stream(REQUEST));
+    expect(fake.calls[0]?.headers.get('authorization')).toBe('Bearer no-key-set');
+  });
+
+  it('sends the extra headers on every request, with the bearer key intact', async () => {
+    const fake = recordingFetch((index) => sseResponse(index === 0 ? TOOL_CALL_BODY : FINAL_BODY));
+    const provider = createOpenAIProvider({
+      baseURL: BASE_URL,
+      key: SENTINEL,
+      headers: { 'X-Team': 'platform', 'X-Route': 'a' },
+      maxRetries: 0,
+      fetch: fake.fetch,
+    });
+    await drain(provider.stream(REQUEST));
+    await drain(provider.stream(REQUEST));
+    expect(fake.calls).toHaveLength(2);
+    for (const call of fake.calls) {
+      expect(call.headers.get('x-team')).toBe('platform');
+      expect(call.headers.get('x-route')).toBe('a');
+      expect(call.headers.get('authorization')).toBe(`Bearer ${SENTINEL}`);
+    }
+  });
+
+  it('keeps the /v1 handling: a base URL with /v1 is not given a second one', async () => {
+    const fake = recordingFetch(() => sseResponse(FINAL_BODY));
+    const provider = createOpenAIProvider({
+      baseURL: `${BASE_URL}/v1/`,
+      key: SENTINEL,
+      maxRetries: 0,
+      fetch: fake.fetch,
+    });
+    await drain(provider.stream(REQUEST));
+    expect(fake.calls[0]?.url).toBe('http://gateway.test/v1/chat/completions');
+  });
+});
+
 describe('openai adapter on the recorded fixtures', () => {
   it('turns the tool-call turn into one read_file call, usage and tool-use', async () => {
     const fake = recordingFetch(() => sseResponse(TOOL_CALL_BODY));

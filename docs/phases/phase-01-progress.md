@@ -47,9 +47,9 @@ Subtask 1 runs against the user's agentgateway (OpenAI-compatible, `openai` SDK)
   - The base URL differs by format: the openai adapter adds `/v1`, the anthropic adapter adds `/v1/messages` itself. `HARNESS_SPIKE_BASE_URL` is the gateway root without `/v1` in the docs.
   - The spike e2e checks the openai fixture's wording ("The file notes.txt contains") and waits on the app's close event after `app.close()` (15 s). The "agent exited unexpectedly" check is gone, so the note above about it is closed.
   - The openai adapter sends `max_tokens` only when a request sets `maxTokens`; the spike sets none. Revisit when the cost display needs it.
-  - `p1-openai-compatible` should add the agentgateway preset with both formats (D26), and settle what a base URL ending in `/v1` does for the Anthropic format (today it gives `/v1/v1/messages`).
+  - ~~`p1-openai-compatible` should add the agentgateway preset with both formats (D26), and settle what a base URL ending in `/v1` does for the Anthropic format (today it gives `/v1/v1/messages`).~~ Done in `p1-openai-compatible` (D27): the agentgateway preset offers both formats, and one trailing `/v1` is stripped for the Anthropic format.
   - The old `spike` store entry is no longer read; run `pnpm secrets:set agentgateway` before using the spike in the app.
-  - The adapters use `key ?? 'no-key-set'`, so an empty-string key would send an empty token (likely unreachable: the store returns null or a non-empty value).
+  - ~~The adapters use `key ?? 'no-key-set'`, so an empty-string key would send an empty token (likely unreachable: the store returns null or a non-empty value).~~ Done in `p1-openai-compatible`: both adapters use `key || 'no-key-set'`.
   - PR #10 was merged while its CI run was still in progress; the `main` run 44535131364 then passed on all three OSes (`main` green at `5d030ef`). Wait for green checks before merging.
 
 ## Phase summary

@@ -42,8 +42,16 @@ All notable changes to SDD Harness are recorded here. The format follows [Keep a
 - **Spike provider choice:** `HARNESS_SPIKE_PROVIDER` (`openai`, the default, or `anthropic`) picks the adapter; the default model is per format and `HARNESS_SPIKE_MODEL` overrides it.
 - **Anthropic and OpenAI fixtures:** recorded through agentgateway for both formats (`tests/fixtures/spike/<format>/`); `pnpm record:spike anthropic` records the Anthropic format. The fixture tests replay both formats at adapter and loop level.
 - **Live suite for both formats** (`tests/live/spike.live.test.ts`, `pnpm test:live`) against `HARNESS_SPIKE_BASE_URL`, without `/v1`.
+- **Server presets** (`p1-openai-compatible`, D27): `src/shared/server-presets.ts` holds one table for vLLM, Ollama, LM Studio, llama.cpp server, TGI / SGLang, LiteLLM, agentgateway and Other, with each default address and the wire formats it offers. agentgateway and Other offer both the openai and the anthropic format.
+- **Provider factory** (`src/agent/provider/factory.ts`): `createProvider` builds the adapter from a preset, a format, an address and headers, and refuses an unknown preset, an unoffered format, a missing address, a non-http(s) address or one with a user name or password, and invalid headers, without echoing the key or a header value.
+- **Extra headers** (`src/agent/provider/headers.ts`, D27): `Name: value` lines, sent on every request through the SDK's `defaultHeaders`. Names must be HTTP tokens, values must have no CR, LF or NUL, and `Authorization`, `x-api-key`, `anthropic-version`, `Content-Type`, `Content-Length` and `Host` are refused.
+- **Spike settings** `HARNESS_SPIKE_PRESET` (default `agentgateway`) and `HARNESS_SPIKE_HEADERS`, passed to the agent only with `HARNESS_AGENT_SPIKE=1`.
 
 ### Changed
+
+- The OpenAI-compatible and Anthropic adapters take an extra headers option. A `/v1` at the end of an Anthropic-format base URL is stripped, so `http://h:4100/v1` posts to `/v1/messages` (it gave `/v1/v1/messages` before).
+- An empty-string key is sent as the `no-key-set` placeholder in both adapters, as a `null` key already was (it was sent as an empty token before).
+- `HARNESS_SPIKE_BASE_URL` may be unset when the preset has a default address. A spike refusal (an unknown preset or format, a bad address or header) is reported as `spike skipped: <reason>`, and the start line is `spike started preset=<id> provider=<format> model=<model>`.
 
 - The spike loop runs on the provider interface instead of the `openai` SDK. The finished line adds `input=<n> output=<n>` (or `usage=none`), and `LoopResult` gains per-turn and total usage.
 - The spike's stored key is the `agentgateway` entry (`pnpm secrets:set agentgateway`), replacing `spike`.

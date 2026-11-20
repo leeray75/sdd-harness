@@ -1,6 +1,6 @@
 // Anthropic Messages adapter (AC3, AC5). Streams POST /v1/messages through the Anthropic SDK and
 // turns the raw stream events into the neutral stream events. The SDK types stay inside this file.
-// The SDK adds /v1/messages itself, so baseURL is passed unchanged (the gateway root, no /v1).
+// The SDK adds /v1/messages itself, so the base URL is normalized to the root (no /v1, D27).
 
 import Anthropic from '@anthropic-ai/sdk';
 import { toProviderError } from './errors';
@@ -20,7 +20,10 @@ const DEFAULT_MAX_RETRIES = 2;
 const DEFAULT_MAX_TOKENS = 1024;
 
 export interface AnthropicProviderOptions {
-  /** The gateway root, passed to the SDK unchanged. The SDK adds /v1/messages. */
+  /**
+   * The gateway root. A trailing /v1 is optional and is stripped (normalizeAnthropicBaseUrl),
+   * because the SDK adds /v1/messages itself (D27).
+   */
   baseURL: string;
   /**
    * The key, or null when none is set (the placeholder is sent as the Bearer token). The key is
@@ -30,23 +33,37 @@ export interface AnthropicProviderOptions {
   key: string | null;
   /** SDK retries for 429, 5xx and connection failures. Default 2. */
   maxRetries?: number;
+  /** Extra headers sent on every request, as defaultHeaders. The factory validates them (D27). */
+  headers?: Record<string, string>;
   /** Used when a request does not set maxTokens. Default 1024. */
   maxTokens?: number;
   /** Replaces the global fetch. Tests inject a fake here. */
   fetch?: typeof globalThis.fetch;
 }
 
+/**
+ * Strips trailing slashes, then one trailing /v1, then trailing slashes again. The result is the
+ * root the SDK adds /v1/messages to, so the root and root + /v1 give the same address (D27).
+ */
+export function normalizeAnthropicBaseUrl(baseURL: string): string {
+  const root = baseURL.replace(/\/+$/, '');
+  const withoutV1 = root.endsWith('/v1') ? root.slice(0, -'/v1'.length) : root;
+  return withoutV1.replace(/\/+$/, '');
+}
+
 /** Builds the Anthropic provider. The key is held only inside the SDK client. */
 export function createAnthropicProvider(options: AnthropicProviderOptions): Provider {
   // Both credential options are always passed (apiKey as null), so the SDK never reads
   // ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN. webhookKey is null for the same reason.
-  // The SDK's anthropic-version default is kept (no defaultHeaders pin).
+  // The SDK's anthropic-version default is kept (no defaultHeaders pin for it).
   const client = new Anthropic({
-    baseURL: options.baseURL,
-    authToken: options.key ?? NO_KEY_PLACEHOLDER,
+    baseURL: normalizeAnthropicBaseUrl(options.baseURL),
+    // An empty key counts as no key, so the placeholder is sent as the Bearer token (AC4).
+    authToken: options.key || NO_KEY_PLACEHOLDER,
     apiKey: null,
     webhookKey: null,
     maxRetries: options.maxRetries ?? DEFAULT_MAX_RETRIES,
+    ...(options.headers ? { defaultHeaders: options.headers } : {}),
     ...(options.fetch ? { fetch: options.fetch } : {}),
   });
   return {

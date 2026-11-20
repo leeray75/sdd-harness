@@ -212,4 +212,19 @@ describe('agentEnv: the spike variables', () => {
     expect(env).not.toHaveProperty('HARNESS_SPIKE_ROOT');
     expect(env).not.toHaveProperty('ANTHROPIC_API_KEY');
   });
+
+  it('passes HARNESS_SPIKE_PRESET and HARNESS_SPIKE_HEADERS only with the spike flag on (AC6)', () => {
+    const settings = {
+      HARNESS_SPIKE_PRESET: 'agentgateway',
+      HARNESS_SPIKE_HEADERS: 'X-Harness-Test: e2e',
+    };
+    const on = agentEnv({ ...OS_BASICS, HARNESS_AGENT_SPIKE: '1', ...settings }, 'linux');
+    expect(on).toEqual({ ...OS_BASICS, HARNESS_AGENT_SPIKE: '1', ...settings });
+    for (const flag of ['0', undefined]) {
+      const parent = { ...OS_BASICS, ...settings, HARNESS_AGENT_SPIKE: flag };
+      const env = agentEnv(parent, 'linux');
+      expect(env).not.toHaveProperty('HARNESS_SPIKE_PRESET');
+      expect(env).not.toHaveProperty('HARNESS_SPIKE_HEADERS');
+    }
+  });
 });

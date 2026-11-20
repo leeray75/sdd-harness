@@ -28,21 +28,23 @@ pnpm dev       # opens the app with hot reload
 | `pnpm format`       | Prettier: rewrite files (`pnpm format:check` checks only)                                                                                                                     |
 | `pnpm test`         | Vitest unit tests                                                                                                                                                             |
 | `pnpm e2e`          | Build, then the Playwright-for-Electron tests                                                                                                                                 |
-| `pnpm test:live`    | Opt-in live suite against `HARNESS_SPIKE_BASE_URL`; skipped without it, never in CI                                                                                           |
+| `pnpm test:live`    | Opt-in live suite against the spike's address (`HARNESS_SPIKE_BASE_URL`, or the preset default); skipped without one, never in CI                                             |
 | `pnpm record:spike` | Dev only: records the spike fixture from agentgateway (`AGENTGATEWAY_BASE_URL` without `/v1`, `AGENTGATEWAY_API_KEY`); `pnpm record:spike anthropic` for the Anthropic format |
 | `pnpm package`      | Unsigned electron-builder build for the current OS                                                                                                                            |
 
 ### Run the spike (dev only)
 
-The spike sends one prompt through agentgateway, in the OpenAI-compatible format (the default) or the Anthropic Messages format (`HARNESS_SPIKE_PROVIDER=anthropic`). The model may ask for `read_file`, main checks the call and runs it inside one folder, and the model finishes its answer. Set these before `pnpm dev`:
+The spike sends one prompt through the server named by `HARNESS_SPIKE_PRESET` (agentgateway by default), in the OpenAI-compatible format (the default) or the Anthropic Messages format (`HARNESS_SPIKE_PROVIDER=anthropic`, where the preset offers it). The model may ask for `read_file`, main checks the call and runs it inside one folder, and the model finishes its answer. Set these before `pnpm dev`:
 
-| Variable                 | What it does                                                                                                                                                        |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `HARNESS_AGENT_SPIKE=1`  | The agent runs the spike loop once, when main sends its key message. The spike variables reach the agent only when this is `1`                                      |
-| `HARNESS_SPIKE_BASE_URL` | The gateway root, without `/v1`, for example `http://spark-8013.taileaa4a8.ts.net:4100`. The openai format adds `/v1`; the anthropic format posts to `/v1/messages` |
-| `HARNESS_SPIKE_MODEL`    | The model name. Default `qwen3.8-flash-next-nothink` for openai, `claude-haiku-5-5` for anthropic                                                                   |
-| `HARNESS_SPIKE_PROVIDER` | `openai` (the default) or `anthropic`. Any other value skips the spike with a message                                                                               |
-| `HARNESS_SPIKE_ROOT`     | The one folder `read_file` may read inside. Absolute paths and paths that leave it are refused                                                                      |
+| Variable                 | What it does                                                                                                                                                                                                                            |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `HARNESS_AGENT_SPIKE=1`  | The agent runs the spike loop once, when main sends its key message. The spike variables reach the agent only when this is `1`                                                                                                          |
+| `HARNESS_SPIKE_PRESET`   | The server type: `agentgateway` (the default), `vllm`, `ollama`, `lm-studio`, `llama-cpp`, `tgi-sglang`, `litellm` or `other` (presets in `src/shared/server-presets.ts`, D27). An unknown preset skips the spike with a message        |
+| `HARNESS_SPIKE_BASE_URL` | The address, for example `http://spark-8013.taileaa4a8.ts.net:4100`. It may be unset when the preset has a default address. One address serves both formats: the openai format adds `/v1`, the anthropic format posts to `/v1/messages` |
+| `HARNESS_SPIKE_PROVIDER` | The wire format: `openai` or `anthropic`. The default is the preset's first format; a format the preset does not offer skips the spike with a message                                                                                   |
+| `HARNESS_SPIKE_HEADERS`  | Extra headers as `Name: value`, one per line. `Authorization`, `x-api-key`, `anthropic-version`, `Content-Type`, `Content-Length` and `Host` are refused (D27)                                                                          |
+| `HARNESS_SPIKE_MODEL`    | The model name. Default `qwen3.8-flash-next-nothink` for openai, `claude-haiku-5-5` for anthropic                                                                                                                                       |
+| `HARNESS_SPIKE_ROOT`     | The one folder `read_file` may read inside. Absolute paths and paths that leave it are refused                                                                                                                                          |
 
 The provider key is not an environment variable. Store it in the app's secret store first (dev only; the value is never on the command line, and the script builds the app first when `out/` is missing):
 
