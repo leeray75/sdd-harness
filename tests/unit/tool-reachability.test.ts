@@ -6,6 +6,7 @@ import { JOB_IDS, type JobId } from '../../src/shared/agent-protocol';
 import { TOOL_NAMES, type ToolName } from '../../src/shared/tools';
 import { handleAgentMessage, type RouterDeps, type ToolRunner } from '../../src/main/agent/router';
 import { makeToolRunner } from '../../src/main/agent/host';
+import { DEFAULT_POLICY_CONTEXT } from '../../src/main/policy/context';
 import { checkToolCall } from '../../src/main/policy/gate';
 
 // host.ts imports Electron for the fork and the quit hook. The runner does not use it.
@@ -30,6 +31,17 @@ const NEW_TOOL_CALLS: Array<{ tool: ToolName; args: Record<string, unknown> }> =
   { tool: 'read_ticket', args: { id: 'T-1' } },
 ];
 
+/**
+ * What the table allows under the default context (no feature, spec none, no removals, every
+ * command denied). A job that is not listed for a tool is denied it at step 2 or by the path
+ * or command rules. Only these pairs reach the runner.
+ */
+const ALLOWED_UNDER_DEFAULT: Partial<Record<ToolName, readonly JobId[]>> = {
+  list_files: JOB_IDS,
+  search_text: JOB_IDS,
+  read_ticket: ['planner', 'reader'],
+};
+
 let base: string;
 let root: string;
 
@@ -48,7 +60,12 @@ function makeDeps(runner: ToolRunner) {
   const info = vi.fn<(message: string) => void>();
   const error = vi.fn<(message: string) => void>();
   const runTool = vi.fn<ToolRunner>(runner);
-  const deps: RouterDeps = { checkToolCall, runTool, logger: { info, error } };
+  const deps: RouterDeps = {
+    checkToolCall: (request) => checkToolCall(request, DEFAULT_POLICY_CONTEXT),
+    runTool,
+    onRuleEvent: vi.fn<RouterDeps['onRuleEvent']>(),
+    logger: { info, error },
+  };
   return { deps, runTool };
 }
 
@@ -56,18 +73,41 @@ function request(job: JobId, tool: string, args: Record<string, unknown>, id = '
   return { type: 'tool-call-request', id, job, tool, args };
 }
 
-describe('reachability: the gate still denies every new tool for every job', () => {
+describe('reachability: the table under the default context', () => {
   it.each(
     JOB_IDS.flatMap((job) => NEW_TOOL_CALLS.map((call) => [job, call.tool, call.args] as const)),
-  )('denies %s calling %s, and the runner is never called', async (job, tool, args) => {
+  )('%s calling %s is allowed only where the table says', async (job, tool, args) => {
     const { deps, runTool } = makeDeps(makeToolRunner(root));
     const outcome = await handleAgentMessage(request(job, tool, args), deps);
-    expect(outcome.reply).toMatchObject({
-      type: 'tool-call-result',
-      ok: false,
-      error: { code: 'denied' },
-    });
-    expect(runTool).not.toHaveBeenCalled();
+    const allowed = ALLOWED_UNDER_DEFAULT[tool]?.includes(job) ?? false;
+    if (allowed) {
+      expect(runTool).toHaveBeenCalledTimes(1);
+      expect(outcome.reply).toMatchObject({ type: 'tool-call-result' });
+    } else {
+      expect(outcome.reply).toMatchObject({
+        type: 'tool-call-result',
+        ok: false,
+        error: { code: 'denied' },
+      });
+      expect(runTool).not.toHaveBeenCalled();
+    }
+  });
+
+  it('denies write_file and edit_file to the reviewer and the reader at step 2', async () => {
+    for (const job of ['reviewer', 'reader'] as const) {
+      for (const tool of ['write_file', 'edit_file'] as const) {
+        const call = NEW_TOOL_CALLS.find((entry) => entry.tool === tool);
+        const { deps, runTool } = makeDeps(makeToolRunner(root));
+        const outcome = await handleAgentMessage(request(job, tool, call?.args ?? {}), deps);
+        expect(outcome.reply).toEqual({
+          type: 'tool-call-result',
+          id: 'req-1',
+          ok: false,
+          error: { code: 'denied', reason: `not allowed: the ${job} job has no ${tool} tool` },
+        });
+        expect(runTool).not.toHaveBeenCalled();
+      }
+    }
   });
 
   it('leaves no trace on disk from the denied write and command', async () => {
@@ -82,12 +122,22 @@ describe('reachability: the gate still denies every new tool for every job', () 
     expect(readFileSync(join(root, 'a.txt'), 'utf8')).toBe('alpha beta');
   });
 
-  it('denies read_file for every job except reader', async () => {
-    for (const job of JOB_IDS.filter((name) => name !== 'reader')) {
+  it('denies run_command to every job under the default check', async () => {
+    const call = NEW_TOOL_CALLS.find((entry) => entry.tool === 'run_command');
+    for (const job of JOB_IDS) {
       const { deps, runTool } = makeDeps(makeToolRunner(root));
-      const outcome = await handleAgentMessage(request(job, 'read_file', { path: 'a.txt' }), deps);
+      const outcome = await handleAgentMessage(request(job, 'run_command', call?.args ?? {}), deps);
       expect(outcome.reply).toMatchObject({ ok: false, error: { code: 'denied' } });
       expect(runTool).not.toHaveBeenCalled();
+    }
+  });
+
+  it('lets every job read a file with read_file, since it is in every base set', async () => {
+    for (const job of JOB_IDS) {
+      const { deps, runTool } = makeDeps(makeToolRunner(root));
+      const outcome = await handleAgentMessage(request(job, 'read_file', { path: 'a.txt' }), deps);
+      expect(outcome.reply).toMatchObject({ ok: true, output: 'alpha beta' });
+      expect(runTool).toHaveBeenCalledTimes(1);
     }
   });
 
@@ -230,10 +280,10 @@ describe('makeToolRunner: dispatch after the registry guard', () => {
   });
 });
 
-// Every registry tool except read_file must be among the denied calls above. A tool added to
-// the registry later makes this fail until its denial is covered too.
+// Every registry tool except read_file must be among the calls above. A tool added to the
+// registry later makes this fail until its reachability is covered too.
 describe('reachability: coverage', () => {
-  it('covers every registry tool other than read_file among the denied calls', () => {
+  it('covers every registry tool other than read_file among the calls above', () => {
     const covered = new Set(NEW_TOOL_CALLS.map((call) => call.tool));
     const expected = new Set<ToolName>(TOOL_NAMES.filter((name) => name !== 'read_file'));
     expect(covered).toEqual(expected);

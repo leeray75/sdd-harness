@@ -4,6 +4,8 @@ import { dirname, join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { MAX_TOOL_OUTPUT_LENGTH } from '../../src/shared/agent-protocol';
 import { listFilesInRoot, LIST_MAX_ENTRIES } from '../../src/main/tools/list-files';
+import { hasNodeModulesSegment, NODE_MODULES_REASON } from '../../src/main/tools/paths';
+import { readFileInRoot } from '../../src/main/tools/read-file';
 import { globToRegExp } from '../../src/main/tools/walk';
 import {
   SEARCH_MAX_FILE_BYTES,
@@ -203,6 +205,69 @@ describe('list_files: glob forms', () => {
   it('refuses a .git path', async () => {
     const result = await listFilesInRoot(root, { path: '.git' });
     expect(result.ok).toBe(false);
+  });
+});
+
+describe('list_files and search_text: node_modules paths (AC10)', () => {
+  let nmBase: string;
+  let nmRoot: string;
+
+  beforeAll(() => {
+    nmBase = mkdtempSync(join(tmpdir(), 'tool-files-nm-'));
+    nmRoot = join(nmBase, 'root');
+    mkdirSync(nmRoot, { recursive: true });
+    put(nmRoot, 'node_modules/pkg/index.js', 'needle in modules');
+    put(nmRoot, 'a/node_modules/b/x.js', 'needle nested');
+    put(nmRoot, 'src/app.js', 'needle in source');
+  });
+
+  afterAll(() => {
+    rmSync(nmBase, { recursive: true, force: true });
+  });
+
+  it.each(['node_modules', 'NODE_MODULES/x', 'a/node_modules/b', 'a\\node_modules'])(
+    'list_files refuses the path %j with the fixed reason',
+    async (path) => {
+      expect(await listFilesInRoot(nmRoot, { path })).toEqual({
+        ok: false,
+        reason: NODE_MODULES_REASON,
+      });
+    },
+  );
+
+  it.each(['node_modules', 'NODE_MODULES/x', 'a/node_modules/b', 'a\\node_modules'])(
+    'search_text refuses the path %j with the fixed reason',
+    async (path) => {
+      expect(await searchTextInRoot(nmRoot, { pattern: 'needle', path })).toEqual({
+        ok: false,
+        reason: NODE_MODULES_REASON,
+      });
+    },
+  );
+
+  it('keeps node_modules out of the default listing and the default search', async () => {
+    expect(await listFilesInRoot(nmRoot, {})).toEqual({ ok: true, output: 'src/app.js' });
+    expect(await searchTextInRoot(nmRoot, { pattern: 'needle' })).toEqual({
+      ok: true,
+      output: 'src/app.js:1: needle in source',
+    });
+  });
+
+  it('still reads a file under node_modules with read_file', async () => {
+    expect(await readFileInRoot(nmRoot, 'node_modules/pkg/index.js')).toEqual({
+      ok: true,
+      output: 'needle in modules',
+    });
+  });
+
+  it('recognises node_modules segments with any case, trailing dots and spaces, and either separator', () => {
+    expect(hasNodeModulesSegment('node_modules')).toBe(true);
+    expect(hasNodeModulesSegment('Node_Modules.')).toBe(true);
+    expect(hasNodeModulesSegment('a/node_modules /b')).toBe(true);
+    expect(hasNodeModulesSegment('a\\node_modules\\b')).toBe(true);
+    expect(hasNodeModulesSegment('node_modules_x')).toBe(false);
+    expect(hasNodeModulesSegment('nodemodules')).toBe(false);
+    expect(hasNodeModulesSegment('src/app.js')).toBe(false);
   });
 });
 

@@ -6,7 +6,7 @@ import { promises as fs } from 'node:fs';
 import { MAX_TOOL_OUTPUT_LENGTH } from '../../shared/agent-protocol';
 import type { ListFilesArgs } from '../../shared/tools';
 import type { ToolRunResult } from '../agent/router';
-import { resolveInRoot } from './paths';
+import { hasNodeModulesSegment, NODE_MODULES_REASON, resolveInRoot } from './paths';
 import { globToRegExp, walkFiles, type FoundFile } from './walk';
 
 /** Most entries list_files returns. More matches than this cut the list. */
@@ -39,6 +39,10 @@ export async function collectMatchingFiles(
   }
   if (path === '') {
     return { ok: false, reason: EMPTY_PATH };
+  }
+  // Used by list_files and search_text. The walk skips node_modules anyway; a path into it is refused.
+  if (path !== undefined && hasNodeModulesSegment(path)) {
+    return { ok: false, reason: NODE_MODULES_REASON };
   }
   const resolved = await resolveInRoot(root, path ?? '.', { mustExist: true });
   if (!resolved.ok) {

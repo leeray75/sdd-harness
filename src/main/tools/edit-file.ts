@@ -7,7 +7,7 @@ import { promises as fs } from 'node:fs';
 import type { EditFileArgs } from '../../shared/tools';
 import type { ToolRunResult } from '../agent/router';
 import { writeFileAtomic } from './atomic-write';
-import { resolveInRoot } from './paths';
+import { areaMismatch, resolveInRoot } from './paths';
 import { WRITE_MAX_BYTES } from './write-file';
 
 const EMPTY_OLD = 'old_text must not be empty; nothing was changed';
@@ -33,6 +33,11 @@ export async function editFileInRoot(root: unknown, args: EditFileArgs): Promise
   const resolved = await resolveInRoot(root, args.path, { mustExist: true });
   if (!resolved.ok) {
     return { ok: false, reason: resolved.reason };
+  }
+  // A symlink must not move the edit into another policy area (for example into the spec folder).
+  const moved = areaMismatch(args.path, resolved.rel);
+  if (moved !== null) {
+    return { ok: false, reason: moved };
   }
   const target = resolved.target;
 

@@ -8,7 +8,7 @@ import { dirname } from 'node:path';
 import { MAX_CONTENT_LENGTH, type WriteFileArgs } from '../../shared/tools';
 import type { ToolRunResult } from '../agent/router';
 import { writeFileAtomic } from './atomic-write';
-import { resolveInRoot } from './paths';
+import { areaMismatch, resolveInRoot } from './paths';
 
 /** Largest content, in bytes, that write_file or edit_file writes. */
 export const WRITE_MAX_BYTES = 1024 * 1024;
@@ -47,6 +47,11 @@ export async function writeFileInRoot(root: unknown, args: WriteFileArgs): Promi
   const resolved = await resolveInRoot(root, args.path, { mustExist: false });
   if (!resolved.ok) {
     return { ok: false, reason: resolved.reason };
+  }
+  // A symlink must not move the write into another policy area (for example into the spec folder).
+  const moved = areaMismatch(args.path, resolved.rel);
+  if (moved !== null) {
+    return { ok: false, reason: moved };
   }
   const target = resolved.target;
 

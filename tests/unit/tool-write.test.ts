@@ -1,4 +1,5 @@
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -13,6 +14,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { writeFileAtomic } from '../../src/main/tools/atomic-write';
+import { AREA_CHANGED_REASON } from '../../src/main/tools/paths';
 import { editFileInRoot } from '../../src/main/tools/edit-file';
 import { writeFileInRoot, WRITE_MAX_BYTES } from '../../src/main/tools/write-file';
 
@@ -360,5 +362,73 @@ describe('edit_file', () => {
     );
     expectFailed(await editFileInRoot(root, { path: '.git/config', old_text: 'a', new_text: 'b' }));
     expect(read('guard.txt')).toBe('guarded');
+  });
+});
+
+describe('write and edit: the symlink area re-check (AC9)', () => {
+  let areaBase: string;
+  let areaRoot: string;
+
+  beforeAll(() => {
+    areaBase = mkdtempSync(join(tmpdir(), 'tool-write-area-'));
+    areaRoot = join(areaBase, 'root');
+    mkdirSync(join(areaRoot, 'docs', 'specs', 'f'), { recursive: true });
+    mkdirSync(join(areaRoot, 'src'), { recursive: true });
+    writeFileSync(join(areaRoot, 'docs', 'specs', 'f', 'SPECS.md'), 'spec body');
+    if (canDirSymlink) {
+      // src/link is a folder link to the spec folder, so a source path lands in the spec area.
+      symlinkSync(join(areaRoot, 'docs', 'specs', 'f'), join(areaRoot, 'src', 'link'), 'junction');
+    }
+  });
+
+  afterAll(() => {
+    rmSync(areaBase, { recursive: true, force: true });
+  });
+
+  it.skipIf(!canDirSymlink)(
+    'refuses write_file of a source path that a folder link moves into the spec folder',
+    async () => {
+      expect(
+        expectFailed(
+          await writeFileInRoot(areaRoot, { path: 'src/link/SPECS.md', content: 'pwned' }),
+        ),
+      ).toBe(AREA_CHANGED_REASON);
+      expect(readFileSync(join(areaRoot, 'docs', 'specs', 'f', 'SPECS.md'), 'utf8')).toBe(
+        'spec body',
+      );
+    },
+  );
+
+  it.skipIf(!canDirSymlink)(
+    'does not create a new file in the spec folder through the link',
+    async () => {
+      expectFailed(await writeFileInRoot(areaRoot, { path: 'src/link/new.md', content: 'made' }));
+      expect(existsSync(join(areaRoot, 'docs', 'specs', 'f', 'new.md'))).toBe(false);
+    },
+  );
+
+  it.skipIf(!canDirSymlink)(
+    'refuses edit_file of a source path that a folder link moves into the spec folder',
+    async () => {
+      expect(
+        expectFailed(
+          await editFileInRoot(areaRoot, {
+            path: 'src/link/SPECS.md',
+            old_text: 'spec',
+            new_text: 'pwned',
+          }),
+        ),
+      ).toBe(AREA_CHANGED_REASON);
+      expect(readFileSync(join(areaRoot, 'docs', 'specs', 'f', 'SPECS.md'), 'utf8')).toBe(
+        'spec body',
+      );
+    },
+  );
+
+  it('still writes a plain source file', async () => {
+    expect(
+      await writeFileInRoot(areaRoot, { path: 'src/plain.ts', content: 'export {};' }),
+    ).toEqual({ ok: true, output: 'wrote 10 bytes to src/plain.ts' });
+    expect(readFileSync(join(areaRoot, 'src', 'plain.ts'), 'utf8')).toBe('export {};');
   });
 });

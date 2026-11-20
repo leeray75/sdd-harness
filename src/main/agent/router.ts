@@ -13,7 +13,8 @@ import {
   type MainToAgentMessage,
 } from '../../shared/agent-protocol';
 import type { Logger } from '../log';
-import type { GateDecision, ToolCallRequest } from '../policy/gate';
+import type { PolicyDecision, ToolCallRequest } from '../policy/gate';
+import type { RuleEvent } from '../policy/rule-event';
 
 /** What a tool runner returns: its text, or the reason it could not complete. */
 export type ToolRunResult = { ok: true; output: string } | { ok: false; reason: string };
@@ -25,8 +26,11 @@ export type ToolRunner = (call: {
 }) => Promise<ToolRunResult>;
 
 export interface RouterDeps {
-  checkToolCall: (request: ToolCallRequest) => GateDecision;
+  /** The gate, with the policy context already bound by the caller. */
+  checkToolCall: (request: ToolCallRequest) => PolicyDecision;
   runTool: ToolRunner;
+  /** Receives one rule event per validated tool call, allowed or denied, before it runs or replies. */
+  onRuleEvent: (event: RuleEvent) => void;
   logger: Logger;
 }
 
@@ -80,11 +84,9 @@ export async function handleAgentMessage(raw: unknown, deps: RouterDeps): Promis
         tool: message.tool,
         args: message.args,
       });
+      deps.onRuleEvent(decision.event);
       if (!decision.allow) {
         const reason = decision.reason || FALLBACK_DENY_REASON;
-        deps.logger.info(
-          `tool call denied: job=${message.job} tool=${message.tool} reason=${reason}`,
-        );
         return {
           reply: {
             type: 'tool-call-result',
