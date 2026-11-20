@@ -5,12 +5,28 @@ import { app, utilityProcess, type UtilityProcess } from 'electron';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { validateAgentToMainMessage, type MainToAgentMessage } from '../../shared/agent-protocol';
+import {
+  checkEditFileArgs,
+  checkListFilesArgs,
+  checkReadFileArgs,
+  checkReadTicketArgs,
+  checkRunCommandArgs,
+  checkSearchTextArgs,
+  checkWriteFileArgs,
+  isToolName,
+} from '../../shared/tools';
 import { log } from '../log';
 import { checkToolCall } from '../policy/gate';
 import { createElectronSecretStore } from '../secrets/electron';
+import { editFileInRoot } from '../tools/edit-file';
+import { listFilesInRoot } from '../tools/list-files';
 import { readFileInRoot } from '../tools/read-file';
+import { runCommandInRoot } from '../tools/run-command';
+import { searchTextInRoot } from '../tools/search-text';
+import { defaultTicketSource, makeReadTicket, type TicketSource } from '../tools/read-ticket';
+import { writeFileInRoot } from '../tools/write-file';
 import { decideModelKey } from './model-key';
-import { handleAgentMessage, type ToolRunner } from './router';
+import { handleAgentMessage, type ToolRunResult, type ToolRunner } from './router';
 
 const SELFCHECK_FLAG = 'HARNESS_AGENT_SELFCHECK';
 const SPIKE_FLAG = 'HARNESS_AGENT_SPIKE';
@@ -42,16 +58,72 @@ const SPIKE_VARS = [
   'HARNESS_SPIKE_HEADERS',
 ];
 
+/** Options main sets for the tool runners. The agent cannot set any of them. */
+export interface ToolRunnerOptions {
+  /** Timeout for run_command in milliseconds. Unset means the runner's 10 minute default. */
+  commandTimeoutMs?: number;
+  /** Where read_ticket reads from. Unset means the default source, which says none is configured. */
+  ticketSource?: TicketSource;
+}
+
+const NO_SUCH_TOOL = 'no such tool';
+
+function refused(reason: string): Promise<ToolRunResult> {
+  return Promise.resolve({ ok: false, reason });
+}
+
 /**
- * Runs the tools the gate can allow. Only `read_file` exists so far, and it reads inside
- * the one root given to main. Any other name is refused.
+ * Runs an allowed tool call. The name must be in the registry, and the arguments must pass
+ * that tool's guard, before its runner is called. Every runner works inside the one `root`
+ * given to main. A name that is not in the registry, or arguments that fail the guard, give
+ * a `failed` result without running anything. Whether the job may call the tool at all is
+ * decided by the gate before this runs.
  */
-export function makeToolRunner(root: string | undefined): ToolRunner {
+export function makeToolRunner(
+  root: string | undefined,
+  options: ToolRunnerOptions = {},
+): ToolRunner {
+  const readTicket = makeReadTicket(options.ticketSource ?? defaultTicketSource);
+  const commandOptions = { timeoutMs: options.commandTimeoutMs };
+
   return ({ tool, args }) => {
-    if (tool === 'read_file') {
-      return readFileInRoot(root, args['path']);
+    if (!isToolName(tool)) {
+      return refused(NO_SUCH_TOOL);
     }
-    return Promise.resolve({ ok: false, reason: 'no such tool' });
+    switch (tool) {
+      case 'read_file': {
+        const checked = checkReadFileArgs(args);
+        return checked.ok ? readFileInRoot(root, checked.args.path) : refused(checked.reason);
+      }
+      case 'list_files': {
+        const checked = checkListFilesArgs(args);
+        return checked.ok ? listFilesInRoot(root, checked.args) : refused(checked.reason);
+      }
+      case 'search_text': {
+        const checked = checkSearchTextArgs(args);
+        return checked.ok ? searchTextInRoot(root, checked.args) : refused(checked.reason);
+      }
+      case 'write_file': {
+        const checked = checkWriteFileArgs(args);
+        return checked.ok ? writeFileInRoot(root, checked.args) : refused(checked.reason);
+      }
+      case 'edit_file': {
+        const checked = checkEditFileArgs(args);
+        return checked.ok ? editFileInRoot(root, checked.args) : refused(checked.reason);
+      }
+      case 'run_command': {
+        const checked = checkRunCommandArgs(args);
+        return checked.ok
+          ? runCommandInRoot(root, checked.args, commandOptions)
+          : refused(checked.reason);
+      }
+      case 'read_ticket': {
+        const checked = checkReadTicketArgs(args);
+        return checked.ok ? readTicket(checked.args) : refused(checked.reason);
+      }
+      default:
+        return refused(NO_SUCH_TOOL);
+    }
   };
 }
 

@@ -116,6 +116,7 @@ Format: **Decision** · **Outcome** · **Why** · **Date**.
 - **Date:** 2026-11-17
 - **Amended:** 2026-11-18, p1-spike-agent-loop: an allowed tool call now runs in main through an injected runner. Only `read_file` exists, for the reader job, and its output returns to the agent in a success `tool-call-result`; a tool that is allowed but fails returns the new `failed` error code. The gate still denies by default, and the router still logs job, tool and outcome only, never arguments or output. The Outcome above is otherwise unchanged.
 - **Amended:** 2026-11-19, p1-secrets: main sends the agent a new main-to-agent message, `{ type: 'model-key', key: string | null }`, once per agent process after its pong, when the spike flag is `1`. The key is the stored `spike` entry, or `null` when there is none or the store cannot be read. The message is typed and checked by the same guards (`key` at most 4,096 characters), and the guard's reasons never echo the key. Nothing else in the message contract changes, and the Outcome above is otherwise unchanged.
+- **Amended:** 2026-11-20, p2-tools: the injected runner (`makeToolRunner`) now knows all seven tools of the shared registry (D29). It checks each call's tool name and arguments with the registry's guard before it dispatches, and a failure returns `failed`. The gate (`checkToolCall`) is unchanged and still allows only `reader` with `read_file`, so the new tools can't be reached until the per-job policy table arrives (`p2-policy-engine`).
 
 ## D20 · Window controls bridge shape
 
@@ -187,3 +188,39 @@ Format: **Decision** · **Outcome** · **Why** · **Date**.
 - **Live and recorded checks:** the fixtures are recorded from agentgateway by `pnpm record:probes` (dev only; it never saves request headers and refuses to write the key). CI replays them through `createProvider` with an injected `fetch`. The opt-in live suite (`tests/live/probes.live.test.ts`) lists the models and runs both probes on the spike's model for each format the preset offers, and asserts neither probe is `failed`.
 - **Why:** The screen that assigns models needs per-model capability data, and the rules must be the same wherever they run. Fixed prompts and tokens, a structured tool check and a median over runs keep the results repeatable enough to compare models. Keeping the result as plain data lets Phase 8 send it over the protocol unchanged. Alternatives not chosen (from the plan): one run per probe, where unreliable would mean leniency on a single reply; a tool probe with one valid call and no second step (it would not show that the model uses the result); a whole-request time for latency and speed (it would count the length of the answer, not the wait for the first event); listing through the openai path for both formats, or no listing for the anthropic format (manual ids); leaving the context window out until Phase 8; hand-written SSE fixtures instead of recorded ones; folding these rules into D27.
 - **Date:** 2026-11-19
+
+## D29 · Agent tools: shared registry and tool-level limits
+
+- **Outcome:** Seven agent tools run in the main process: `read_file`, `list_files`, `search_text`, `write_file`, `edit_file`, `run_command` and `read_ticket`. `read_ticket` is an interface only until a tracker client exists.
+  - **Registry:** their names, descriptions, JSON schemas and args guards live in one shared registry, `src/shared/tools.ts`, which imports no Node, Electron or DOM API. Each schema and its guard are built from one field table.
+  - **Runners:** in `src/main/tools/`, one per tool.
+  - **Path rules:** every file tool resolves its path through `src/main/tools/paths.ts`:
+    - the path must be relative;
+    - it must stay inside the root after real paths are resolved. For a new file, the deepest existing parent folder is checked;
+    - any `.git` segment is refused, ignoring case, with trailing dots or spaces, or as an 8.3 short name;
+    - reasons are fixed strings that never echo the path or the contents.
+  - **Search:** `list_files` and `search_text` walk the root in pure Node. They skip `.git` and `node_modules`, never follow symlinks, and stop at fixed caps with a note.
+  - **Writes:** a temporary file in the same folder, then a rename.
+  - **`run_command`:**
+    - runs a program with an argument array and `shell: false`;
+    - refuses `git`, whatever its case or extension, and on Windows refuses `.cmd`/`.bat` programs;
+    - gives the child only `PATH` and the variables each OS needs to start a process;
+    - kills the process tree after a timeout (10 minutes by default; only main can set it);
+    - keeps the last 64 KiB of output.
+  - **`read_ticket`:** returns ticket text inside a fixed untrusted-data frame whose markers can't be closed early.
+  - **Limits:** every tool's output stays within `MAX_TOOL_OUTPUT_LENGTH` (64 KiB).
+  - **Scope:** these limits hold under any policy. Which job may call which tool, the spec-folder and source rules, the command allowlist and network limits are separate (D4, D6; `p2-policy-engine`, `p2-command-allowlist`).
+- **Why:**
+  - One shared registry lets main check arguments and lets the agent advertise the same schemas, with no copy to drift.
+  - Refusing git and leaving the root in the tools themselves gives a second layer under the policy engine, so "no git for any agent" (D4) holds even if a policy row is wrong.
+  - With no shell, pipes, quoting and the `cmd`/`sh` differences can't get around the later allowlist.
+  - A pure-Node walk behaves the same on all three pilot platforms (D12) and adds no native dependency.
+  - Alternatives not chosen (from the `p2-tools` plan):
+    - five coarse tools, or seven plus delete and move;
+    - a temporary gate that allows the new tools now;
+    - a shell command string, or leaving `run_command` out until the allowlist;
+    - a bundled ripgrep;
+    - schemas next to each runner in main;
+    - git rules in the policy engine only.
+- **Open:** How `run_command` runs `.cmd`/`.bat` commands such as `pnpm test` on Windows is decided in `p2-command-allowlist`.
+- **Date:** 2026-11-20
