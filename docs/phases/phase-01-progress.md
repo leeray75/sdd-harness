@@ -1,6 +1,6 @@
 # Phase 1 progress: Agent loop spike and provider adapters
 
-Status: in progress · Started: 2026-11-18
+Status: done · Started: 2026-11-18 · Finished: 2026-11-20
 
 Remote: `origin` = https://github.com/leeray75/sdd-harness.git; feature branches come into `main` through pull requests. agentgateway for live runs: `http://spark-8013.taileaa4a8.ts.net:4100/v1` (the `/v1` is needed for chat; `/models` also answers at the root).
 
@@ -8,13 +8,13 @@ Order changed from the suggested list: secrets come second, so every adapter rea
 
 Subtask 1 runs against the user's agentgateway (OpenAI-compatible, `openai` SDK) instead of Anthropic; the Anthropic adapter and the check that the same loop runs on both providers move to `p1-provider-interface`.
 
-| #   | Feature               | Goal                                                                                                                                                                                              | Status    | Spec                                                                                        | Commit                                                                       |
-| --- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | ------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| 1   | p1-spike-agent-loop   | Smallest streaming loop in the agent process against an OpenAI-compatible server (agentgateway), with one read-only tool round trip checked by main's gate; allowlisted agent env; fixture-tested | done      | [SUMMARY](../specs/p1-spike-agent-loop/SUMMARY.md)                                          | `36f5542` (PR #7; work in `0f40119`, close in `844bb44`)                     |
-| 2   | p1-secrets            | API keys in the OS keychain via safeStorage, kept in main; redaction in logs and errors; tests that keys never appear in logs, errors or test output                                              | done      | [SUMMARY](../specs/p1-secrets/SUMMARY.md); fix [SUMMARY](../specs/p1-secrets-ci/SUMMARY.md) | `afaf22d` (PR #8; work `c871c28`, close `1ec6235`); CI fix `d9ca80d` (PR #9) |
-| 3   | p1-provider-interface | Provider interface (messages, tool calls, streaming, token usage, errors, retries) and the Anthropic adapter; the spike loop moves onto it and runs on both providers                             | done      | [SUMMARY](../specs/p1-provider-interface/SUMMARY.md)                                        | `5d030ef` (PR #10; work `0995dbe`, close `a70723f`)                          |
-| 4   | p1-openai-compatible  | OpenAI-compatible adapter: base URL, optional key, extra headers, presets for vLLM, Ollama, LM Studio, llama.cpp, TGI/SGLang, LiteLLM, agentgateway and Other; same loop runs                     | done      | [SUMMARY](../specs/p1-openai-compatible/SUMMARY.md)                                         | `84e2409` (PR #11; work `2d1816b`, close `2957757`)                          |
-| 5   | p1-model-probes       | `/models` listing, chat probe and tool-use probe per model, with results (passed, unreliable, failed; latency; speed) a UI can show later                                                         | in review |                                                                                             |                                                                              |
+| #   | Feature               | Goal                                                                                                                                                                                              | Status | Spec                                                                                        | Commit                                                                       |
+| --- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| 1   | p1-spike-agent-loop   | Smallest streaming loop in the agent process against an OpenAI-compatible server (agentgateway), with one read-only tool round trip checked by main's gate; allowlisted agent env; fixture-tested | done   | [SUMMARY](../specs/p1-spike-agent-loop/SUMMARY.md)                                          | `36f5542` (PR #7; work in `0f40119`, close in `844bb44`)                     |
+| 2   | p1-secrets            | API keys in the OS keychain via safeStorage, kept in main; redaction in logs and errors; tests that keys never appear in logs, errors or test output                                              | done   | [SUMMARY](../specs/p1-secrets/SUMMARY.md); fix [SUMMARY](../specs/p1-secrets-ci/SUMMARY.md) | `afaf22d` (PR #8; work `c871c28`, close `1ec6235`); CI fix `d9ca80d` (PR #9) |
+| 3   | p1-provider-interface | Provider interface (messages, tool calls, streaming, token usage, errors, retries) and the Anthropic adapter; the spike loop moves onto it and runs on both providers                             | done   | [SUMMARY](../specs/p1-provider-interface/SUMMARY.md)                                        | `5d030ef` (PR #10; work `0995dbe`, close `a70723f`)                          |
+| 4   | p1-openai-compatible  | OpenAI-compatible adapter: base URL, optional key, extra headers, presets for vLLM, Ollama, LM Studio, llama.cpp, TGI/SGLang, LiteLLM, agentgateway and Other; same loop runs                     | done   | [SUMMARY](../specs/p1-openai-compatible/SUMMARY.md)                                         | `84e2409` (PR #11; work `2d1816b`, close `2957757`)                          |
+| 5   | p1-model-probes       | `/models` listing, chat probe and tool-use probe per model, with results (passed, unreliable, failed; latency; speed) a UI can show later                                                         | done   | [SUMMARY](../specs/p1-model-probes/SUMMARY.md)                                              | `8207641` (PR #12; work `8ec7491`, close `14ebb10`)                          |
 
 ## Decisions added
 
@@ -60,16 +60,48 @@ Subtask 1 runs against the user's agentgateway (OpenAI-compatible, `openai` SDK)
   - `HARNESS_SPIKE_HEADERS` takes one `Name: value` per line (in PowerShell, separate lines with `` `n ``).
   - Header values are configuration, not secrets (D27). If a server needs a token header other than `Authorization` or `x-api-key`, revisit the reserved list and the redactor.
 - `p1-model-probes` follow-ups:
-  - The anthropic fixtures in `tests/fixtures/probes/anthropic/` are the user's recording. The openai fixtures are still starter files: the user re-records them with `pnpm record:probes` after the no-`tools` fix (U1), before result approval. The tests read their expectations from the files and derive the failing cases from the parsed streams (U2), so they should pass on the re-recording.
+  - Both formats' fixtures in `tests/fixtures/probes/` are the user's recordings from agentgateway (openai re-recorded after the no-`tools` fix, U1). The tests read their expectations from the files and derive the failing cases from the parsed streams (U2); `pnpm test` passed on them (477 passed, 2 skipped).
   - The recorder's parsing of the replies is only exercised by the user's run; the probes' own checks on the same bodies are unit-tested.
   - The first live run failed the openai chat probe with HTTP 400 (`bad-request`, 0 of 3 runs) because the chat request sent `tools: []`, which vLLM rejects. Both adapters now omit the `tools` field when the list is empty (U1), and the recorder sends the same body. The tool-use probe was unaffected.
   - The anthropic listing falls back to the openai-format context fields when an entry has no `max_input_tokens` (AC3's conditional). The recording shows agentgateway answers in the openai list shape, so the fallback is needed (D28).
   - Speed is indicative (D28): the live run gave claude-haiku-5-5 a tool-use speed of about 1762 tok/s, because the tool call arrived in one burst with a tiny stream span. The formula is unchanged (AC7).
   - The recorder imports the TypeScript probe modules through `scripts/register-ts-resolve.mjs`, a dev-only Node resolve hook, because the repo's imports omit file extensions. Keep it in step if the module layout changes.
   - The probes do not yet run from main or appear in the UI (Phase 8). Results are not stored.
-  - The `pnpm test:live` run for both formats is the user's, before result approval.
+  - The user's `pnpm test:live` run passed for both formats after the fix: qwen3.8-flash-next-nothink (openai) chat 3/3 at 151 ms and tool use 3/3 at 491 ms, context window null; claude-haiku-5-5 (anthropic) chat 3/3 at 424 ms and tool use 3/3 at 628 ms, context window 1000000. Both listings returned 21 models.
   - PR #11 was merged while its CI run was still in progress; the `main` run 44647948765 then passed on all three OSes, including the spike e2e header check on Linux and macOS (`main` green at `84e2409`). Wait for green checks before merging.
+  - PR #12 was merged after its checks passed on all three OSes; the `main` run 44683313899 then passed `check` and `e2e and package` on Windows, macOS and Linux (`main` green at `8207641`).
 
 ## Phase summary
 
-(written when the phase is done)
+Phase 1 delivered the agent loop and the provider layer in five subtasks (PRs #7–#12, with #9 a CI fix for `p1-secrets`):
+
+- `p1-spike-agent-loop`: the agent's own streaming loop in the agent process, with a read-only tool round trip checked by main's gate and an allowlisted agent environment.
+- `p1-secrets`: keys in the OS keychain through `safeStorage`, kept in main, delivered per run in a `model-key` message, and redacted from every line main writes.
+- `p1-provider-interface`: the neutral provider interface and the Anthropic adapter. The loop moved onto the interface.
+- `p1-openai-compatible`: the OpenAI-compatible adapter, the server presets, one address for both formats, and extra headers.
+- `p1-model-probes`: model listing and the chat and tool-use probes, whose results are plain data for Phase 8.
+
+Decisions D23–D28 were added, and D17 and D19 were amended. Every model is reached through agentgateway in development (D26).
+
+Definition of done:
+
+- [x] The same loop runs against Anthropic and an OpenAI-compatible server, with fixture tests in CI:
+  - `tests/unit/agent-loop.test.ts` replays `tests/fixtures/spike/{openai,anthropic}` through `runAgentLoop` and `createProvider` in `pnpm test`, and the spike e2e runs in CI on all three OSes;
+  - the user's `pnpm test:live` ran the loop against agentgateway in both formats and passed.
+- [x] Probes report chat and tool use per model:
+  - `probeModel` and `listServerModels` in `src/agent/probes/`, with fixture tests for both formats in CI;
+  - the user's live run passed chat and tool use 3/3 on qwen3.8-flash-next-nothink (openai) and claude-haiku-5-5 (anthropic).
+- [x] No key appears in logs, errors or test output:
+  - the redactor in main covers every line main writes (D25);
+  - sentinel-key tests cover the secret store, the loop, both adapters, the factory and the probes (results, thrown errors and `console`);
+  - the recorders never save request headers and refuse to write a file that contains the key;
+  - the live suites print result data only.
+- CI: `main` run 44683313899 is green for `check` and for `e2e and package` on Windows, macOS and Ubuntu.
+
+Carried into later phases: the follow-ups above, chiefly:
+
+- moving the secret store to the async `safeStorage` calls;
+- the open `p1-secrets` notes;
+- escaping agent strings and real tool execution (Phase 2);
+- a manual check of the real macOS keychain before a release;
+- running the probes from main and showing them in the UI (Phase 8).
