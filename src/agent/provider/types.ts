@@ -47,9 +47,17 @@ export interface ProviderRequest {
   maxTokens?: number;
 }
 
+/** One model a server lists. `contextWindow` is null when the server does not report it (AC1). */
+export interface ModelInfo {
+  id: string;
+  contextWindow: number | null;
+}
+
 export interface Provider {
   /** Streams one model reply as events. Failures are thrown as ProviderError. */
   stream(request: ProviderRequest, signal?: AbortSignal): AsyncIterable<StreamEvent>;
+  /** Lists the server's models, every page. Failures are thrown as ProviderError (p1-model-probes). */
+  listModels(signal?: AbortSignal): Promise<ModelInfo[]>;
 }
 
 export type ProviderErrorKind =

@@ -6,6 +6,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { toProviderError } from './errors';
 import {
   type Message,
+  type ModelInfo,
   type Provider,
   type ProviderRequest,
   type StopReason,
@@ -68,7 +69,60 @@ export function createAnthropicProvider(options: AnthropicProviderOptions): Prov
   });
   return {
     stream: (request, signal) => streamMessages(client, request, signal, options.maxTokens),
+    listModels: (signal) => listAnthropicModels(client, signal),
   };
+}
+
+/** The Anthropic field that holds a model's input limit (AC3). */
+const ANTHROPIC_CONTEXT_FIELD = 'max_input_tokens';
+/**
+ * The OpenAI-shape fields, read when an entry carries no max_input_tokens. The spec's AC3 fallback
+ * covers a gateway that answers /v1/models in the OpenAI list shape (D28 records what it returned).
+ */
+const FALLBACK_CONTEXT_FIELDS = ['max_model_len', 'context_length', 'context_window'] as const;
+
+/** The value when it is a positive integer, else null. */
+function positiveInteger(value: unknown): number | null {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : null;
+}
+
+/** The context window of one listed model: max_input_tokens, else the first fallback field. */
+function anthropicContextWindow(entry: Record<string, unknown>): number | null {
+  const direct = positiveInteger(entry[ANTHROPIC_CONTEXT_FIELD]);
+  if (direct !== null) {
+    return direct;
+  }
+  for (const field of FALLBACK_CONTEXT_FIELDS) {
+    const value = positiveInteger(entry[field]);
+    if (value !== null) {
+      return value;
+    }
+  }
+  return null;
+}
+
+/** GET /v1/models through the SDK, every page. Entries without a string id are skipped (AC3). */
+async function listAnthropicModels(
+  client: Anthropic,
+  signal: AbortSignal | undefined,
+): Promise<ModelInfo[]> {
+  const models: ModelInfo[] = [];
+  try {
+    for await (const item of client.models.list(undefined, signal ? { signal } : undefined)) {
+      if (typeof item !== 'object' || item === null) {
+        continue;
+      }
+      const entry = item as unknown as Record<string, unknown>;
+      const id = entry['id'];
+      if (typeof id !== 'string') {
+        continue;
+      }
+      models.push({ id, contextWindow: anthropicContextWindow(entry) });
+    }
+  } catch (error) {
+    throw toProviderError(error);
+  }
+  return models;
 }
 
 type MessageParam = Anthropic.MessageParam;
@@ -176,7 +230,8 @@ async function* streamMessages(
         model: request.model,
         max_tokens: request.maxTokens ?? defaultMaxTokens ?? DEFAULT_MAX_TOKENS,
         messages: toAnthropicMessages(request.messages),
-        tools: request.tools.map(toAnthropicTool),
+        // No tools field when there are none, as in the openai adapter (p1-model-probes U1).
+        ...(request.tools.length > 0 ? { tools: request.tools.map(toAnthropicTool) } : {}),
         stream: true,
       },
       signal ? { signal } : undefined,

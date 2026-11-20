@@ -465,3 +465,108 @@ describe('anthropic adapter errors', () => {
     expect(await pending).toMatchObject({ kind: 'aborted', retryable: false });
   });
 });
+
+/** A /v1/models body in the Anthropic list shape, with the paging fields. */
+function anthropicModelsResponse(data: unknown[], hasMore = false, lastId?: string): Response {
+  return new Response(
+    JSON.stringify({ data, has_more: hasMore, first_id: null, last_id: lastId ?? null }),
+    { status: 200, headers: { 'content-type': 'application/json' } },
+  );
+}
+
+describe('anthropic adapter listing (AC3)', () => {
+  it('GETs /v1/models with Bearer auth and anthropic-version, and returns each id', async () => {
+    const fake = recordingFetch(() =>
+      anthropicModelsResponse([{ id: 'claude-haiku-5-5', type: 'model', display_name: 'x' }]),
+    );
+    const models = await bearerProvider(fake).listModels();
+
+    expect(fake.calls).toHaveLength(1);
+    expect(fake.calls[0]?.url).toBe('http://gateway.test/v1/models');
+    expect(fake.calls[0]?.headers.get('authorization')).toBe(`Bearer ${SENTINEL}`);
+    expect(fake.calls[0]?.headers.get('anthropic-version')).toBe(recorderVersion());
+    expect(models).toEqual([{ id: MODEL, contextWindow: null }]);
+  });
+
+  it('uses the same path when the base URL already ends in /v1', async () => {
+    const fake = recordingFetch(() => anthropicModelsResponse([]));
+    await createAnthropicProvider({
+      baseURL: 'http://gateway.test/v1',
+      key: null,
+      maxRetries: 0,
+      fetch: fake.fetch,
+    }).listModels();
+    expect(fake.calls[0]?.url).toBe('http://gateway.test/v1/models');
+  });
+
+  it('reads max_input_tokens as the context window', async () => {
+    const fake = recordingFetch(() =>
+      anthropicModelsResponse([
+        { id: 'with-limit', max_input_tokens: 200000 },
+        { id: 'zero', max_input_tokens: 0 },
+      ]),
+    );
+    expect(await bearerProvider(fake).listModels()).toEqual([
+      { id: 'with-limit', contextWindow: 200000 },
+      { id: 'zero', contextWindow: null },
+    ]);
+  });
+
+  it('falls back to the OpenAI-shape fields when an entry has no max_input_tokens', async () => {
+    const fake = recordingFetch(() =>
+      anthropicModelsResponse([{ id: 'vllm', max_model_len: 4096 }]),
+    );
+    expect(await bearerProvider(fake).listModels()).toEqual([{ id: 'vllm', contextWindow: 4096 }]);
+  });
+
+  it('reads an OpenAI-shape body ({ data: [{ id }] }) and skips entries without an id', async () => {
+    const fake = recordingFetch(
+      () =>
+        new Response(JSON.stringify({ object: 'list', data: [{ id: 'kept' }, { id: 3 }] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+    );
+    expect(await bearerProvider(fake).listModels()).toEqual([{ id: 'kept', contextWindow: null }]);
+  });
+
+  it('follows every page with after_id', async () => {
+    const fake = recordingFetch((index) =>
+      index === 0
+        ? anthropicModelsResponse([{ id: 'first' }], true, 'first')
+        : anthropicModelsResponse([{ id: 'second' }]),
+    );
+    const models = await bearerProvider(fake).listModels();
+    expect(fake.calls).toHaveLength(2);
+    expect(fake.calls[1]?.url).toContain('after_id=first');
+    expect(models.map((m) => m.id)).toEqual(['first', 'second']);
+  });
+
+  it('maps an HTTP error to its kind, without the server message or the key', async () => {
+    const fake = recordingFetch(() => errorResponse(500));
+    const error = await caught(() => bearerProvider(fake, { maxRetries: 0 }).listModels());
+    expect(error).toMatchObject({ kind: 'server', status: 500 });
+    expect(String((error as Error).message)).not.toContain(SENTINEL);
+  });
+});
+
+describe('anthropic adapter tools field (p1-model-probes U1)', () => {
+  it('omits the tools field from the request when the tool list is empty', async () => {
+    const fake = recordingFetch(() => sseResponse(FINAL_BODY));
+    await drain(
+      bearerProvider(fake).stream({
+        model: MODEL,
+        messages: [{ role: 'user', text: 'hi' }],
+        tools: [],
+      }),
+    );
+    expect(fake.calls[0]?.body).not.toHaveProperty('tools');
+    expect(fake.calls[0]?.body['max_tokens']).toBe(1024);
+  });
+
+  it('sends the tools field when the tool list is not empty', async () => {
+    const fake = recordingFetch(() => sseResponse(FINAL_BODY));
+    await drain(bearerProvider(fake).stream(REQUEST));
+    expect(fake.calls[0]?.body['tools']).toHaveLength(1);
+  });
+});

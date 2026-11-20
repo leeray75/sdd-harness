@@ -31,6 +31,9 @@ function scriptedProvider(replies: StreamEvent[][]): {
 } {
   const requests: ProviderRequest[] = [];
   const provider: Provider = {
+    listModels() {
+      return Promise.resolve([]);
+    },
     stream(request) {
       // The loop reuses its message array, so keep a copy of what each request held.
       requests.push(structuredClone(request));

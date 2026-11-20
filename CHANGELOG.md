@@ -46,6 +46,10 @@ All notable changes to SDD Harness are recorded here. The format follows [Keep a
 - **Provider factory** (`src/agent/provider/factory.ts`): `createProvider` builds the adapter from a preset, a format, an address and headers, and refuses an unknown preset, an unoffered format, a missing address, a non-http(s) address or one with a user name or password, and invalid headers, without echoing the key or a header value.
 - **Extra headers** (`src/agent/provider/headers.ts`, D27): `Name: value` lines, sent on every request through the SDK's `defaultHeaders`. Names must be HTTP tokens, values must have no CR, LF or NUL, and `Authorization`, `x-api-key`, `anthropic-version`, `Content-Type`, `Content-Length` and `Host` are refused.
 - **Spike settings** `HARNESS_SPIKE_PRESET` (default `agentgateway`) and `HARNESS_SPIKE_HEADERS`, passed to the agent only with `HARNESS_AGENT_SPIKE=1`.
+- **Model listing** (`p1-model-probes`, D28): `Provider.listModels()` returns each model's id and context window (`max_model_len`, `context_length` or `context_window` for the openai format; `max_input_tokens` for the anthropic format), every page, through the SDKs' `models.list()`.
+- **Model probes** (`src/agent/probes/`, D28): a chat probe and a two-step tool-use probe (`lookup_code`), each run three times by default. Each probe is passed, unreliable or failed, with median latency and speed and one failure code per failed run. The results are plain data for the Phase 8 "Test and assign" screen; no protocol message or UI yet.
+- **Probe recorder and fixtures** (`pnpm record:probes [anthropic]`, `scripts/record-probe-fixtures.ts`, dev only): records `models.json`, `chat.sse`, `tool-turn1.sse` and `tool-turn2.sse` from agentgateway into `tests/fixtures/probes/<format>/`, with starter fixtures committed until the user's recording.
+- **Probe tests:** fixture replays through `createProvider` for both formats (listing, passing probes, mixed runs, derived failure codes, fake-clock timing, sentinel leak checks), unit tests for the checks and the runner, and the opt-in live suite `tests/live/probes.live.test.ts` (`pnpm test:live`).
 
 ### Changed
 

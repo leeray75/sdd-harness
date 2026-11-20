@@ -14,3 +14,6 @@ pnpm-lock.yaml
 docs/design/
 docs/specs/
 .claude/
+
+# Recorded response bodies (pnpm record:probes) are kept byte for byte, as the server sent them
+tests/fixtures/probes/
