@@ -1,0 +1,7 @@
+# Checks the GitHub Actions used in .github/workflows weekly and opens pull requests for updates.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

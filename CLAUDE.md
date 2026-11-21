@@ -74,7 +74,7 @@ pnpm package           # unsigned electron-builder build for the current OS (not
 
 ### CI
 
-`.github/workflows/ci.yml` runs on every push to `main`, every pull request to `main`, and on demand (`workflow_dispatch`). It runs on GitHub-hosted runners, and every job sets up the toolchain the same way: checkout, `corepack enable`, `actions/setup-node` from `.nvmrc` with the pnpm cache, then `pnpm install --frozen-lockfile`.
+`.github/workflows/ci.yml` runs on every push to `main`, every pull request to `main`, and on demand (`workflow_dispatch`). It runs on GitHub-hosted runners, and every job sets up the toolchain the same way: checkout, `corepack enable`, `actions/setup-node` from `.nvmrc` with the pnpm cache, then `pnpm install --frozen-lockfile`. Dependabot (`.github/dependabot.yml`) checks the GitHub Actions in this workflow weekly, and its pull requests follow the same CI-green merge rule as any other.
 
 - **`check`** (Linux): `pnpm typecheck`, `pnpm lint`, `pnpm format:check` and `pnpm test`, each as its own step.
 - **`e2e`** (matrix: Windows, macOS and Linux; `fail-fast: false`): `pnpm e2e`, then `pnpm exec electron-builder --dir` for an unsigned package build that reuses the `out/` build. On Linux, a step first sets `kernel.apparmor_restrict_unprivileged_userns=0` with sysctl. A step then installs `fluxbox` and `x11-utils` (for `xprop`) with apt. The Linux e2e job runs the tests under `xvfb-run -a`, with fluxbox started in the background and waited for (up to about 10 s, via `xprop`) before `pnpm e2e` runs, so Maximize and Restore work as on a Linux desktop. Nothing is uploaded on success. On failure, `playwright-report/` and `test-results/` are uploaded per OS.

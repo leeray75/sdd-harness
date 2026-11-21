@@ -92,6 +92,7 @@ All notable changes to SDD Harness are recorded here. The format follows [Keep a
   - Rule events gain a `revert` kind, logged as an error, and a `network` kind, logged as info for `os` and as a warning for `proxy-only`. They are formatted as `rule reverted:` and `rule network:`.
   - `docs/agent-commands.md` lists the commands each job may run, what is protected and reverted, the network limit on each OS, and how to clear read-only bits after a crash.
 - **Command tests:** detection, the check, the lookup and `cmd.exe` line rules, the protected set and restore, the network choice, and end-to-end runs of Node stubs on temp roots (the `.cmd` stub only on Windows, the OS network check only where unshare or sandbox-exec exists).
+- **Dependabot for GitHub Actions** (`chore-ci-actions-node24`): `.github/dependabot.yml` checks the actions in the CI workflow weekly and opens a pull request for each update.
 
 ### Changed
 
@@ -116,6 +117,7 @@ All notable changes to SDD Harness are recorded here. The format follows [Keep a
 - The router takes an `onRuleEvent` dependency and emits one Rule event for every validated tool call. The `tool call denied` log line is replaced by the event's `rule blocked:` line.
 - `list_files` and `search_text` refuse a path inside `node_modules` (any case, trailing dots or spaces, either separator). `read_file` of one file there still works.
 - The reachability test now follows the policy table under the default context, in place of "every new tool is denied for every job".
+- **CI actions on Node 24** (`chore-ci-actions-node24`): `actions/checkout`, `actions/setup-node` and `actions/upload-artifact` moved from v4 to v7, which run on the Node 24 runtime instead of the deprecated Node 20 one. The workflow is otherwise unchanged.
 
 ### Fixed
 

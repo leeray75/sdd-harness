@@ -33,7 +33,7 @@ Toolchain (recorded as D14–D18 by `p0-toolchain-and-skeleton`): pnpm via Corep
 - `pnpm-workspace.yaml` has a pnpm-written `minimumReleaseAgeExclude: electron@45.3.4`; update it on each Electron bump.
 - ~~`pnpm e2e` and `pnpm package` were only run on Windows~~: CI now runs both on Windows, macOS and Linux; the macOS title-bar test passed on the macOS runner.
 - PR #5 was merged while its Ubuntu e2e job was red, and PR #6 before its e2e jobs finished; the `main` run after PR #6 (run 44429353486) is green on all jobs, so the fluxbox fix is confirmed. Wait for green checks before merging from now on.
-- GitHub warns that `actions/checkout@v4` and `actions/setup-node@v4` target the deprecated Node 20 runtime; bump them to the next major when convenient.
+- ~~GitHub warns that `actions/checkout@v4` and `actions/setup-node@v4` target the deprecated Node 20 runtime; bump them to the next major when convenient.~~: resolved by `chore-ci-actions-node24` (all three actions at v7, Node 24 runtime)
 - Title-bar drag regions (`-webkit-app-region`) have no automated check; confirm by hand in `pnpm dev`.
 - ~~`p0-design-tokens` replaces the local CSS variables in `src/renderer/titlebar.css`~~: done; the title bar uses the tokens.
 - One e2e run crashed at launch in the untouched smoke test (worker exit code 3221226505); the rerun passed. If it recurs, investigate it; CI now retries twice and keeps a trace, so a recurrence shows as a flaky test in the report.
@@ -55,4 +55,4 @@ Definition of done:
 - [x] The policy gate exists and denies by default, with unit tests and an e2e test of a denied tool call (`p0-process-layout`).
 - [x] New decisions are recorded (D14–D22 in `docs/decisions.md`); `CLAUDE.md` lists the commands and the CI section.
 
-Carried into later phases: the follow-ups above (allowlisted agent env before Phase 1; escaping agent strings and real tool execution in Phase 2; the TypeScript 6 pin; the Electron release-age exclusion; the Node 20 action warning; manual checks of drag regions and the gallery).
+Carried into later phases: the follow-ups above (allowlisted agent env before Phase 1; escaping agent strings and real tool execution in Phase 2; the TypeScript 6 pin; the Electron release-age exclusion; manual checks of drag regions and the gallery).
