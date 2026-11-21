@@ -50,21 +50,21 @@ The harness keeps the plugin's workflow and rules and moves them into the produc
 
 All decisions are settled as of 17 Nov 2026. The full record, with reasons, is in [`decisions.md`](decisions.md).
 
-| #   | Decision                   | Outcome                                                                                                                                                                                                               |
-| --- | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| D1  | What runs the agents       | The harness's own agent runtime with provider adapters. Workflow rules and tool permissions live in code; no Claude Code hooks at runtime                                                                             |
-| D2  | How models are reached     | Adapters for the Anthropic Messages API and OpenAI-compatible APIs. LiteLLM and agentgateway are supported as gateway providers                                                                                       |
-| D3  | Human-only actions         | Approve spec, approve result, close, change rules and edit an approved spec exist only as UI actions. No agent tool exists for them, and the main process accepts them only from a user click in the app's own window |
-| D4  | Rule enforcement           | In code: review round limit (3 by default, a project can lower it), commit and push done by the app only after result approval, spec files read-only to every agent after approval                                    |
-| D5  | Reuse from the sdd plugin  | Port the prompts, the document templates (PLAN, SPECS, tasks, SUBTASK), the tracker guides and the workflow states and events. Keep the `docs/specs/<feature>/` layout so existing specs open as history              |
-| D6  | Limits on running commands | Per-project allowlist (detected test and build commands), spec folder read-only while commands run, no network for the code writer. An OS sandbox or container per build is a later option                            |
-| D7  | Where state lives          | Workflow state and the approved spec's hash in the repo (`docs/specs/<feature>/` plus a small state file). Sessions, providers and routing in app data; secrets in the OS keychain                                    |
-| D8  | Tracker scope              | v1 reads tickets for planning. Creating the child ticket and moving ticket status come in v1.1                                                                                                                        |
-| D9  | Distribution               | Internal first: signed builds for the pilot team. Decide on a public release after the success metrics are measured                                                                                                   |
-| D10 | Theme                      | Dark only in v1; colors are tokens, so a light theme can follow                                                                                                                                                       |
-| D11 | Typed commands             | None. Every workflow action is a button; there are no slash commands, hidden or otherwise                                                                                                                             |
-| D12 | Pilot platforms            | Windows, macOS and Linux builds for the first pilot                                                                                                                                                                   |
-| D13 | Pilot providers            | Anthropic, any OpenAI-compatible server, LiteLLM and agentgateway. Cloud platforms (Bedrock, Azure, Vertex) come later                                                                                                |
+| #   | Decision                   | Outcome                                                                                                                                                                                                                                                             |
+| --- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| D1  | What runs the agents       | The harness's own agent runtime with provider adapters. Workflow rules and tool permissions live in code; no Claude Code hooks at runtime                                                                                                                           |
+| D2  | How models are reached     | Adapters for the Anthropic Messages API and OpenAI-compatible APIs. LiteLLM and agentgateway are supported as gateway providers                                                                                                                                     |
+| D3  | Human-only actions         | Approve spec, approve result, close, change rules and edit an approved spec exist only as UI actions. No agent tool exists for them, and the main process accepts them only from a user gesture (a click, or an Enter or Space press) in the app's own window (D33) |
+| D4  | Rule enforcement           | In code: review round limit (3 by default, a project can lower it), commit and push done by the app only after result approval, spec files read-only to every agent after approval                                                                                  |
+| D5  | Reuse from the sdd plugin  | Port the prompts, the document templates (PLAN, SPECS, tasks, SUBTASK), the tracker guides and the workflow states and events. Keep the `docs/specs/<feature>/` layout so existing specs open as history                                                            |
+| D6  | Limits on running commands | Per-project allowlist (detected test and build commands), spec folder read-only while commands run, no network for the code writer. An OS sandbox or container per build is a later option                                                                          |
+| D7  | Where state lives          | Workflow state and the approved spec's hash in the repo (`docs/specs/<feature>/` plus a small state file). Sessions, providers and routing in app data; secrets in the OS keychain                                                                                  |
+| D8  | Tracker scope              | v1 reads tickets for planning. Creating the child ticket and moving ticket status come in v1.1                                                                                                                                                                      |
+| D9  | Distribution               | Internal first: signed builds for the pilot team. Decide on a public release after the success metrics are measured                                                                                                                                                 |
+| D10 | Theme                      | Dark only in v1; colors are tokens, so a light theme can follow                                                                                                                                                                                                     |
+| D11 | Typed commands             | None. Every workflow action is a button; there are no slash commands, hidden or otherwise                                                                                                                                                                           |
+| D12 | Pilot platforms            | Windows, macOS and Linux builds for the first pilot                                                                                                                                                                                                                 |
+| D13 | Pilot providers            | Anthropic, any OpenAI-compatible server, LiteLLM and agentgateway. Cloud platforms (Bedrock, Azure, Vertex) come later                                                                                                                                              |
 
 ## Scope: v1 features
 
@@ -161,18 +161,18 @@ Acceptance:
 
 ## Non-functional requirements
 
-| Area               | Requirement                                                                                                                                                     |
-| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Platforms          | Windows 10/11 (local and WSL projects), macOS 13+, Ubuntu 22.04+; SSH servers and dev containers as project environments                                        |
-| Agent isolation    | Agents run in a separate process; every tool call is checked by the main process against the policy before it runs; commands run with the spec folder read-only |
-| Human-only actions | Accepted only from a user click in the app's own window; never reachable from an agent tool, a file or a web page                                               |
-| Secrets            | Keys in the OS keychain via `safeStorage`; never written to logs, sessions, exports or repos                                                                    |
-| Privacy            | No telemetry by default; "self-hosted only" is enforced in the provider client, not just in settings                                                            |
-| Untrusted input    | Tickets, docs and web pages are passed to agents as data; reader agents have no write tools                                                                     |
-| Fidelity           | The approved spec's hash, stored with the repo, is the source of truth for the lock                                                                             |
-| Performance        | Cold start under 3 s; document changes visible under 2 s; smooth streaming with 20 open sessions                                                                |
-| Accessibility      | WCAG 2.2 AA contrast, full keyboard use, visible focus, `prefers-reduced-motion` respected                                                                      |
-| Updates            | Signed builds, auto-update with release notes                                                                                                                   |
+| Area               | Requirement                                                                                                                                                                      |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Platforms          | Windows 10/11 (local and WSL projects), macOS 13+, Ubuntu 22.04+; SSH servers and dev containers as project environments                                                         |
+| Agent isolation    | Agents run in a separate process; every tool call is checked by the main process against the policy before it runs; commands run with the spec folder read-only                  |
+| Human-only actions | Accepted only from a user gesture (a click, or an Enter or Space press) in the app's own window, checked in main (D33); never reachable from an agent tool, a file or a web page |
+| Secrets            | Keys in the OS keychain via `safeStorage`; never written to logs, sessions, exports or repos                                                                                     |
+| Privacy            | No telemetry by default; "self-hosted only" is enforced in the provider client, not just in settings                                                                             |
+| Untrusted input    | Tickets, docs and web pages are passed to agents as data; reader agents have no write tools                                                                                      |
+| Fidelity           | The approved spec's hash, stored with the repo, is the source of truth for the lock                                                                                              |
+| Performance        | Cold start under 3 s; document changes visible under 2 s; smooth streaming with 20 open sessions                                                                                 |
+| Accessibility      | WCAG 2.2 AA contrast, full keyboard use, visible focus, `prefers-reduced-motion` respected                                                                                       |
+| Updates            | Signed builds, auto-update with release notes                                                                                                                                    |
 
 ## Success metrics
 

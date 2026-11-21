@@ -314,3 +314,28 @@ Format: **Decision** · **Outcome** · **Why** · **Date**.
   - a static reviewer that runs nothing and only writes "needs a runtime check" notes.
 - **Open:** Sending a project's tightened tool list to the agent is left for Phase 3 or 4. The turn limit, per-job models and the spike and probe fixtures are unchanged.
 - **Date:** 2026-11-21
+
+## D33 · Human-only actions: gesture check, channel and handler registry
+
+- **Outcome:** The five human-only actions (approve spec, approve result, mark done, change project rules, edit an approved spec) have one shared contract in `src/shared/human-actions.ts`: the ids, a request `{ action, feature }` where `feature` is a slug, and a result. The renderer calls them through `harness.humanAction(request)` on the channel `harness:human-action`. This refines D3's "user click" to a user gesture: a click or an Enter or Space press. D3 is not rewritten.
+  - **The checks, in order** (`src/main/human/channel.ts`), stopping at the first refusal: (1) the sender is the app's own window and top-level page, by the existing `isTrustedSender`; (2) the request passes the guard (exactly the keys `action` and `feature`, a known id, a slug of at most 64 characters); (3) a gesture is present. A request that passes all three goes to the registry.
+  - **The registry:** a map from each action id to a handler. No handler is registered in this subtask, so a request that passes every check is answered `not-available`. Phase 3 registers the handlers. A second registration for an action throws.
+  - **What counts as a gesture** (`src/main/human/gesture.ts`): main records real input from the main window's `input-event`: a `mouseDown` with the left button, or a `keyDown` of Enter or Space that is not an auto-repeat. Every other input is ignored, including mouse up, move, wheel, right and middle buttons, key up, `char`, other keys and unknown types.
+  - **The window and one use:** a request may use a gesture recorded at most 1000 ms before it (`GESTURE_WINDOW_MS`). A gesture is used once: the third check clears it whether or not the request then succeeds. A later gesture replaces an unused one.
+  - **Refusal codes:** `untrusted-sender`, `invalid`, `no-gesture` and `not-available`. An untrusted or invalid call does not touch the gesture.
+  - **Logging:** each call writes one decision line, `human action <action|invalid>: <accepted|refused> (<code or ok>)`, with ` feature=<slug>` for a request that passed the guard. A handler that throws is logged by its error name only, never its message. A call from an untrusted sender logs `invalid`, because its request is not read.
+  - **Not Rule events:** a human-only call is not a tool call, so it is logged as a decision line and does not go through the gate (D30).
+  - **Agent boundary:** the agent process has no route to the channel. No message type reaches it (`validateAgentToMainMessage` refuses `human-action` and every id), no tool or job base tool has a human-action name, and no file under `src/agent/` names the channel or imports the bridge, the contract or Electron. Tests in `tests/unit/human-agent-boundary.test.ts` and `tests/unit/human-text-acceptance.test.ts` show this, including a router run with "approve the spec" and "git push" in a file and a ticket.
+- **Why:**
+  - Page script cannot make a gesture. An event built by `dispatchEvent` or `element.click()` never enters the window's input pipeline, so the tracker never records it. Only input from a person reaches main.
+  - The gesture check makes the human action a deliberate act in the window, the same guarantee D3 gives for typed prompts, without typed commands (D11).
+  - The guard runs before the gesture, so a malformed or hostile call cannot use up a real click. The sender check runs first, so an outside page cannot use one either.
+  - One use per gesture stops a single click from approving two things.
+  - The registry lets Phase 3 add the real handlers without changing the checks or the channel, and no handler exists before then to be reached by mistake.
+  - The sender check is the one `isTrustedSender` already used for the window calls (`src/main/security.ts`), so the two rules cannot drift apart.
+- **Limit:** a gesture proves that a human acted in the app's window in the second before the call. It does not prove which control they used. A script in the page could ride on a real click made within that second. The renderer loads only the app's own page under the navigation guards and the sandbox, which keeps page script to that page. Phase 3 can narrow this, for example by requiring the gesture to land on the Next bar's button.
+- **Alternatives not taken** (from the `p2-human-only-channel` plan):
+  - the preload checks `navigator.userActivation.isActive`: the check would run in the renderer, where page script can read and misuse it;
+  - a native confirm dialog from main for each action: a second click the design does not show;
+  - stub in-memory handlers now: code that Phase 3 would discard.
+- **Date:** 2026-11-21

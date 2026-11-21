@@ -37,7 +37,7 @@ Give the four agent jobs their tools and enforce, in the main process, exactly w
 ## Decide during planning
 
 - ~~How "no network for the writer" is enforced on each OS, and what is documented as best effort~~ Settled in `p2-command-allowlist` (D31): a namespace on Linux and a sandbox profile on macOS, proxy variables elsewhere; best effort is documented in `docs/agent-commands.md`.
-- How a user gesture is verified for human-only actions
+- ~~How a user gesture is verified for human-only actions~~ Settled in `p2-human-only-channel` (D33): main records a left-button press or an Enter or Space press in the app window, usable for 1000 ms and once; see `docs/human-actions.md`.
 
 ## Suggested subtasks
 

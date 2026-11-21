@@ -24,6 +24,7 @@ The subtasks follow the suggested list in `phase-02-tool-policy.md`. Subtask 1 w
 - D19 amended by `p2-policy-engine`: the reader-only gate is replaced by the per-job policy, and the router emits a Rule event for every decision
 - D31 Agent commands: allowlist, Windows shims, file lock and revert, network limit (`p2-command-allowlist`); settles D29's open question on `.cmd`/`.bat`
 - D32 Agent jobs: definitions, prompts and advertised tools (`p2-jobs-and-prompts`)
+- D33 Human-only actions: gesture check, channel and handler registry (`p2-human-only-channel`); refines D3's "click" to a gesture
 
 ## Follow-ups
 
@@ -47,7 +48,7 @@ The subtasks follow the suggested list in `phase-02-tool-policy.md`. Subtask 1 w
   - The rule that a pull request is merged only when its CI run is green is now in `CLAUDE.md` and the phase doc, and the result-approval and close messages name the CI state.
 - Still to decide during planning (from the phase doc):
   - ~~how "no network for the writer" is enforced on each OS (`p2-command-allowlist`);~~ Settled in `p2-command-allowlist` (D31): unshare on Linux, sandbox-exec on macOS, proxy variables and offline flags elsewhere, reported per command as best effort;
-  - how a user gesture is verified (`p2-human-only-channel`).
+  - ~~how a user gesture is verified (`p2-human-only-channel`).~~ Settled in `p2-human-only-channel` (D33): a left-button press or an Enter or Space press in the app window, usable for 1000 ms and once.
 
 ## Phase summary
 
