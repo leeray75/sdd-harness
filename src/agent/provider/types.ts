@@ -41,6 +41,11 @@ export type StreamEvent =
 
 export interface ProviderRequest {
   model: string;
+  /**
+   * The system prompt for the run (D32). When unset or empty, the adapters send nothing for it,
+   * so the request is the same as before the field existed.
+   */
+  system?: string;
   messages: Message[];
   tools: ToolDefinition[];
   /** Upper bound on the reply's tokens. Adapters fall back to their own default when unset. */

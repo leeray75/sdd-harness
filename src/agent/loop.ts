@@ -1,35 +1,18 @@
-// Agent loop for the spike (D23). Asks a Provider for one model reply per turn, runs the one
-// read_file tool through an injected callTool, and feeds each result back to the model. It
-// imports no SDK: the provider adapters own the wire formats. It never reads the environment,
-// never logs, and never sees the key.
+// Agent loop (D23, D32). Asks a Provider for one model reply per turn. Each request carries the
+// run's job: its system prompt and the tools that job advertises. Tool calls run through an
+// injected callTool, and each result goes back to the model. It imports no SDK: the provider
+// adapters own the wire formats. It never reads the environment, never logs, and never sees the
+// key. The caller's job decides what the model may ask for; main's gate decides what runs.
 //
 // Unparseable arguments, non-object arguments and a throwing callTool go back to the model as
 // tool error text, never thrown.
 
-import type {
-  Message,
-  Provider,
-  StreamEvent,
-  ToolCall,
-  ToolDefinition,
-  Usage,
-} from './provider/types';
+import type { JobId } from '../shared/agent-protocol';
+import { JOB_PROMPTS, jobToolDefinitions } from './jobs';
+import type { Message, Provider, StreamEvent, ToolCall, Usage } from './provider/types';
 
 /** Most model requests one run makes. Tool calls in the last allowed reply are not run. */
 export const MAX_TURNS = 4;
-
-export const READ_FILE_TOOL: ToolDefinition = {
-  name: 'read_file',
-  description: "Read a text file under the agent's root and return its text.",
-  parameters: {
-    type: 'object',
-    properties: {
-      path: { type: 'string', description: 'Path of the file, relative to the root.' },
-    },
-    required: ['path'],
-    additionalProperties: false,
-  },
-};
 
 /** What the tool runner reports back: the output, or why the call did not complete. */
 export type ToolCallOutcome = { ok: true; output: string } | { ok: false; reason: string };
@@ -40,6 +23,8 @@ export type CallTool = (name: string, args: Record<string, unknown>) => Promise<
 export interface LoopInput {
   provider: Provider;
   model: string;
+  /** The job this run does. Its system prompt and advertised tools come from the job table. */
+  job: JobId;
   prompt: string;
   callTool: CallTool;
   /** Receives each streamed text chunk, in order. */
@@ -73,8 +58,9 @@ interface Reply {
 async function streamReply(input: LoopInput, messages: Message[]): Promise<Reply> {
   const stream = input.provider.stream({
     model: input.model,
+    system: JOB_PROMPTS[input.job].system,
     messages: [...messages],
-    tools: [READ_FILE_TOOL],
+    tools: jobToolDefinitions(input.job),
   });
   let text = '';
   const calls: ToolCall[] = [];

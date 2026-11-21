@@ -550,6 +550,38 @@ describe('anthropic adapter listing (AC3)', () => {
   });
 });
 
+describe('anthropic adapter system prompt (AC3, D32)', () => {
+  const USER_MESSAGE = { role: 'user', content: 'Read notes.txt and tell me what it says.' };
+
+  it('sends the system prompt as the system parameter, and keeps it out of the messages', async () => {
+    const fake = recordingFetch(() => sseResponse(FINAL_BODY));
+    await drain(bearerProvider(fake).stream({ ...REQUEST, system: 'You are the reader.' }));
+
+    const [call] = fake.calls;
+    expect(call?.body['system']).toBe('You are the reader.');
+    expect(call?.body['messages']).toEqual([USER_MESSAGE]);
+  });
+
+  it('sends no system parameter when the system prompt is unset, as before the field existed', async () => {
+    const fake = recordingFetch(() => sseResponse(FINAL_BODY));
+    await drain(bearerProvider(fake).stream(REQUEST));
+
+    const [call] = fake.calls;
+    expect(call?.body).not.toHaveProperty('system');
+    expect(call?.body['messages']).toEqual([USER_MESSAGE]);
+  });
+
+  it('sends no system parameter when the system prompt is an empty string', async () => {
+    const unset = recordingFetch(() => sseResponse(FINAL_BODY));
+    await drain(bearerProvider(unset).stream(REQUEST));
+    const empty = recordingFetch(() => sseResponse(FINAL_BODY));
+    await drain(bearerProvider(empty).stream({ ...REQUEST, system: '' }));
+
+    expect(empty.calls[0]?.body).not.toHaveProperty('system');
+    expect(empty.calls[0]?.body).toEqual(unset.calls[0]?.body);
+  });
+});
+
 describe('anthropic adapter tools field (p1-model-probes U1)', () => {
   it('omits the tools field from the request when the tool list is empty', async () => {
     const fake = recordingFetch(() => sseResponse(FINAL_BODY));

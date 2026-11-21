@@ -561,6 +561,63 @@ describe('openai adapter listing (AC2)', () => {
   });
 });
 
+describe('openai adapter system prompt (AC3, D32)', () => {
+  const USER_MESSAGE = { role: 'user', content: 'Read notes.txt and tell me what it says.' };
+
+  it('sends the system prompt as a leading system message, before the history', async () => {
+    const fake = recordingFetch(() => sseResponse(FINAL_BODY));
+    const provider = createOpenAIProvider({
+      baseURL: BASE_URL,
+      key: SENTINEL,
+      maxRetries: 0,
+      fetch: fake.fetch,
+    });
+    await drain(provider.stream({ ...REQUEST, system: 'You are the reader.' }));
+
+    expect(fake.calls[0]?.body['messages']).toEqual([
+      { role: 'system', content: 'You are the reader.' },
+      USER_MESSAGE,
+    ]);
+  });
+
+  it('sends no system message when the system prompt is unset, as before the field existed', async () => {
+    const fake = recordingFetch(() => sseResponse(FINAL_BODY));
+    const provider = createOpenAIProvider({
+      baseURL: BASE_URL,
+      key: SENTINEL,
+      maxRetries: 0,
+      fetch: fake.fetch,
+    });
+    await drain(provider.stream(REQUEST));
+
+    expect(fake.calls[0]?.body['messages']).toEqual([USER_MESSAGE]);
+  });
+
+  it('sends no system message when the system prompt is an empty string', async () => {
+    const unset = recordingFetch(() => sseResponse(FINAL_BODY));
+    await drain(
+      createOpenAIProvider({
+        baseURL: BASE_URL,
+        key: SENTINEL,
+        maxRetries: 0,
+        fetch: unset.fetch,
+      }).stream(REQUEST),
+    );
+    const empty = recordingFetch(() => sseResponse(FINAL_BODY));
+    await drain(
+      createOpenAIProvider({
+        baseURL: BASE_URL,
+        key: SENTINEL,
+        maxRetries: 0,
+        fetch: empty.fetch,
+      }).stream({ ...REQUEST, system: '' }),
+    );
+
+    expect(empty.calls[0]?.body['messages']).toEqual([USER_MESSAGE]);
+    expect(empty.calls[0]?.body).toEqual(unset.calls[0]?.body);
+  });
+});
+
 describe('openai adapter tools field (p1-model-probes U1)', () => {
   it('omits the tools field from the request when the tool list is empty', async () => {
     const fake = recordingFetch(() => sseResponse(FINAL_BODY));

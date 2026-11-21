@@ -223,7 +223,12 @@ async function* streamChat(
     const stream = await client.chat.completions.create(
       {
         model: request.model,
-        messages: toOpenAIMessages(request.messages),
+        // A system prompt leads the history as a system message. None is added when it is
+        // unset or empty (D32).
+        messages: [
+          ...(request.system ? [{ role: 'system' as const, content: request.system }] : []),
+          ...toOpenAIMessages(request.messages),
+        ],
         // No tools field when there are none: vLLM rejects an empty list (HTTP 400), so the
         // chat probe must not send one (p1-model-probes U1).
         ...(request.tools.length > 0 ? { tools: request.tools.map(toOpenAITool) } : {}),

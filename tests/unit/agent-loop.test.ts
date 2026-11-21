@@ -3,11 +3,13 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { describeError } from '../../src/agent/errors';
+import { JOB_PROMPTS, jobToolDefinitions } from '../../src/agent/jobs';
 import { addUsage, MAX_TURNS, runAgentLoop, type CallTool } from '../../src/agent/loop';
 import { createAnthropicProvider } from '../../src/agent/provider/anthropic';
 import { createOpenAIProvider } from '../../src/agent/provider/openai';
 import type { Provider, ProviderRequest, StreamEvent, Usage } from '../../src/agent/provider/types';
 import { redactor, REDACTED } from '../../src/main/secrets/redact';
+import { JOB_IDS } from '../../src/shared/agent-protocol';
 
 const FIXTURES = fileURLToPath(new URL('../fixtures/spike/', import.meta.url));
 const OPENAI_TOOL_CALL = readFileSync(join(FIXTURES, 'openai/turn1-tool-call.sse'), 'utf8');
@@ -86,7 +88,7 @@ async function run(
   callTool: CallTool = noopTool,
   onText: (t: string) => void = () => undefined,
 ) {
-  return runAgentLoop({ provider, model: MODEL, prompt: PROMPT, callTool, onText });
+  return runAgentLoop({ provider, model: MODEL, job: 'reader', prompt: PROMPT, callTool, onText });
 }
 
 afterEach(() => {
@@ -109,7 +111,13 @@ describe('runAgentLoop on a fake provider', () => {
     expect(callTool).toHaveBeenCalledTimes(1);
     expect(callTool).toHaveBeenCalledWith('read_file', { path: 'notes.txt' });
     expect(requests).toHaveLength(2);
-    expect(requests[0]?.tools.map((t) => t.name)).toEqual(['read_file']);
+    expect(requests[0]?.tools.map((t) => t.name)).toEqual([
+      'read_file',
+      'list_files',
+      'search_text',
+      'read_ticket',
+    ]);
+    expect(requests[0]?.system).toBe(JOB_PROMPTS.reader.system);
     expect(requests[1]?.messages).toEqual([
       { role: 'user', text: PROMPT },
       {
@@ -197,6 +205,71 @@ describe('runAgentLoop on a fake provider', () => {
   });
 });
 
+describe('runAgentLoop sends the job system prompt and tools (AC5, D32)', () => {
+  it('sends each job its own system prompt and advertised tools on every request of the run', async () => {
+    for (const job of JOB_IDS) {
+      const { provider, requests } = scriptedProvider([
+        toolReply('{"path":"a"}', 'c1'),
+        textReply('ok'),
+      ]);
+      await runAgentLoop({
+        provider,
+        model: MODEL,
+        job,
+        prompt: PROMPT,
+        callTool: async () => ({ ok: true, output: 'x' }),
+        onText: () => undefined,
+      });
+      expect(requests).toHaveLength(2);
+      for (const request of requests) {
+        expect(request.system).toBe(JOB_PROMPTS[job].system);
+        expect(request.tools).toEqual(jobToolDefinitions(job));
+      }
+    }
+  });
+
+  it('advertises the writer run_command and the reviewer no write tool', async () => {
+    const writer = scriptedProvider([textReply('ok')]);
+    await runAgentLoop({
+      provider: writer.provider,
+      model: MODEL,
+      job: 'writer',
+      prompt: PROMPT,
+      callTool: noopTool,
+      onText: () => undefined,
+    });
+    const reviewer = scriptedProvider([textReply('ok')]);
+    await runAgentLoop({
+      provider: reviewer.provider,
+      model: MODEL,
+      job: 'reviewer',
+      prompt: PROMPT,
+      callTool: noopTool,
+      onText: () => undefined,
+    });
+    const writerNames = writer.requests[0]?.tools.map((tool) => tool.name) ?? [];
+    const reviewerNames = reviewer.requests[0]?.tools.map((tool) => tool.name) ?? [];
+    expect(writerNames).toContain('run_command');
+    expect(reviewerNames).toContain('run_command');
+    expect(reviewerNames).not.toContain('write_file');
+    expect(reviewerNames).not.toContain('edit_file');
+  });
+
+  it('gives the run the job the caller names: a reviewer run is not sent the reader prompt', async () => {
+    const { provider, requests } = scriptedProvider([textReply('ok')]);
+    await runAgentLoop({
+      provider,
+      model: MODEL,
+      job: 'reviewer',
+      prompt: PROMPT,
+      callTool: noopTool,
+      onText: () => undefined,
+    });
+    expect(requests[0]?.system).not.toBe(JOB_PROMPTS.reader.system);
+    expect(requests[0]?.system).toBe(JOB_PROMPTS.reviewer.system);
+  });
+});
+
 describe('runAgentLoop usage (AC5)', () => {
   it('reports each turn usage and the run total', async () => {
     const { provider } = scriptedProvider([
@@ -261,6 +334,7 @@ describe('runAgentLoop fixture replay per format (AC9)', () => {
     const result = await runAgentLoop({
       provider,
       model: MODEL,
+      job: 'reader',
       prompt: PROMPT,
       callTool,
       onText: (text) => chunks.push(text),
@@ -292,6 +366,7 @@ describe('runAgentLoop fixture replay per format (AC9)', () => {
     const result = await runAgentLoop({
       provider,
       model: MODEL,
+      job: 'reader',
       prompt: PROMPT,
       callTool,
       onText: () => undefined,

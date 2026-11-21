@@ -2,12 +2,17 @@
 // preload or renderer access, and it talks to main only through process.parentPort.
 // It makes one self-check tool call when HARNESS_AGENT_SELFCHECK is '1' (main's gate denies
 // it). When HARNESS_AGENT_SPIKE is '1' it also runs the spike loop once: the loop starts when
-// main sends the run's `model-key` message (D25). A model streams a reply, asks for read_file,
-// main checks and runs the call, and the model finishes. The streamed text goes to stdout.
-// The key arrives only in that message and is held in memory; it is never read from the
-// environment and never written to stdout or stderr.
+// main sends the run's `model-key` message (D25). The spike runs as the reader job (D32). A model
+// streams a reply, asks for a tool the reader has (read_file here), main checks and runs the call,
+// and the model finishes. The streamed text goes to stdout. The key arrives only in that message
+// and is held in memory; it is never read from the environment and never written to stdout or
+// stderr.
 
-import { validateMainToAgentMessage, type AgentToMainMessage } from '../shared/agent-protocol';
+import {
+  validateMainToAgentMessage,
+  type AgentToMainMessage,
+  type JobId,
+} from '../shared/agent-protocol';
 import { describeError } from './errors';
 import { runAgentLoop, type ToolCallOutcome } from './loop';
 import { chooseSpikeProvider } from './spike-provider';
@@ -18,6 +23,8 @@ const SELFCHECK_ID = 'selfcheck-1';
 
 /** Set by main from the app's environment. The agent runs the spike loop once when it is '1'. */
 const SPIKE_FLAG = 'HARNESS_AGENT_SPIKE';
+/** The spike is the reader job: its prompt and its tools come from the job table (D32). */
+const SPIKE_JOB: JobId = 'reader';
 const SPIKE_TIMEOUT_MS = 30_000;
 const SPIKE_PROMPT =
   'Read the file notes.txt with the read_file tool, then answer in one sentence what it says.';
@@ -42,8 +49,12 @@ function send(message: AgentToMainMessage): void {
   port.postMessage(message);
 }
 
-/** Sends one read_file call to main as the reader job and waits for the result with its id. */
-function callToolViaMain(name: string, args: Record<string, unknown>): Promise<ToolCallOutcome> {
+/** Sends one tool call to main as the run's job and waits for the result with its id. */
+function callToolViaMain(
+  job: JobId,
+  name: string,
+  args: Record<string, unknown>,
+): Promise<ToolCallOutcome> {
   spikeCalls += 1;
   const id = `spike-${spikeCalls}`;
   return new Promise<ToolCallOutcome>((resolve) => {
@@ -53,7 +64,7 @@ function callToolViaMain(name: string, args: Record<string, unknown>): Promise<T
       resolve({ ok: false, reason: 'the tool call timed out after 30 seconds' });
     }, SPIKE_TIMEOUT_MS);
     waiting.set(id, { resolve, timer });
-    send({ type: 'tool-call-request', id, job: 'reader', tool: name, args });
+    send({ type: 'tool-call-request', id, job, tool: name, args });
     say(`sent spike tool call id=${id} tool=${name}`);
   });
 }
@@ -82,8 +93,9 @@ async function runSpike(key: string | null): Promise<void> {
     const result = await runAgentLoop({
       provider: choice.provider,
       model: choice.model,
+      job: SPIKE_JOB,
       prompt: SPIKE_PROMPT,
-      callTool: callToolViaMain,
+      callTool: (name, args) => callToolViaMain(SPIKE_JOB, name, args),
       onText: (text) => {
         process.stdout.write(text);
       },
