@@ -54,6 +54,7 @@ describe.skipIf(address === undefined).each(FORMATS)(
         const result = await runAgentLoop({
           provider: built.provider,
           model: modelOverride || SPIKE_DEFAULT_MODELS[format],
+          job: 'reader',
           prompt:
             'Read the file notes.txt with the read_file tool, then answer in one sentence what it says.',
           callTool: async (name, args) => {

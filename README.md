@@ -35,7 +35,7 @@ pnpm dev       # opens the app with hot reload
 
 ### Run the spike (dev only)
 
-The spike sends one prompt through the server named by `HARNESS_SPIKE_PRESET` (agentgateway by default), in the OpenAI-compatible format (the default) or the Anthropic Messages format (`HARNESS_SPIKE_PROVIDER=anthropic`, where the preset offers it). The model may ask for `read_file`, main checks the call and runs it inside one folder, and the model finishes its answer. Set these before `pnpm dev`:
+The spike sends one prompt through the server named by `HARNESS_SPIKE_PRESET` (agentgateway by default), in the OpenAI-compatible format (the default) or the Anthropic Messages format (`HARNESS_SPIKE_PROVIDER=anthropic`, where the preset offers it). The spike runs as the reader job (D32), so the model may ask for one of its read-only tools (`read_file`, `list_files`, `search_text` or `read_ticket`). Main checks each call and runs it, file tools stay inside the folder below, and the model finishes its answer. Set these before `pnpm dev`:
 
 | Variable                 | What it does                                                                                                                                                                                                                            |
 | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

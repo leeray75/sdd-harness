@@ -92,10 +92,17 @@ All notable changes to SDD Harness are recorded here. The format follows [Keep a
   - Rule events gain a `revert` kind, logged as an error, and a `network` kind, logged as info for `os` and as a warning for `proxy-only`. They are formatted as `rule reverted:` and `rule network:`.
   - `docs/agent-commands.md` lists the commands each job may run, what is protected and reverted, the network limit on each OS, and how to clear read-only bits after a crash.
 - **Command tests:** detection, the check, the lookup and `cmd.exe` line rules, the protected set and restore, the network choice, and end-to-end runs of Node stubs on temp roots (the `.cmd` stub only on Windows, the OS network check only where unshare or sandbox-exec exists).
+- **Agent job definitions** (`p2-jobs-and-prompts`, D32): `JOBS` gives each job's plain name (plans and chats, writes code, reviews code, reads big files) and `BASE_TOOLS` gives its base tools, in `src/shared/jobs.ts`.
+- **Advertised tools** (D32): `jobToolDefinitions(job)` gives a run its job's base tools from `TOOL_SPECS`, with the registry's names, descriptions and schemas.
+- **Job system prompts and task texts** (D32): `src/agent/jobs/` holds one system prompt per job and the five shared rules. The writer, reviewer and reader prompts are ported from the sdd plugin's agents, and the planner's is new. `WRITER_TASKS` and `REVIEWER_TASKS` hold the task texts Phase 3 sends. No file is read at run time.
+- **Provider `system` field** (D32): `ProviderRequest.system` is sent by the Anthropic adapter as the `system` parameter and by the OpenAI adapter as a leading system message. It is left out when unset or empty.
+- **`docs/agent-jobs.md`:** the four jobs and their tools, what each prompt tells the model, the task texts Phase 3 sends, and that main's gate enforces the rules.
 - **Dependabot for GitHub Actions** (`chore-ci-actions-node24`): `.github/dependabot.yml` checks the actions in the CI workflow weekly and opens a pull request for each update.
 
 ### Changed
 
+- The agent loop takes the run's `job`. Each request carries that job's system prompt and advertised tools (`jobToolDefinitions`), in place of the one hand-written `read_file` tool, which is removed. The spike runs as the reader, and its tool calls carry that job (D32).
+- `BASE_TOOLS` moved from `src/main/policy/policy-table.ts` to `src/shared/jobs.ts` with the same contents and order. The policy table re-exports it, so the gate and tightening are unchanged (D32).
 - `run_command` runs only through the project's command check. With a project root, the host builds the check from the detected commands, and the gate and the runner both use it. With no root, every command is still refused.
 - `runCommandInRoot` takes the job, the check and the event sink. The router passes each call's job to the runner (`ToolRunner` gains `job`).
 - `programRefusal` no longer refuses `.cmd` and `.bat` programs by name. The command check decides, and a Windows script runs only through the `cmd.exe` rule above; git stays refused.

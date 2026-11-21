@@ -229,6 +229,8 @@ async function* streamMessages(
       {
         model: request.model,
         max_tokens: request.maxTokens ?? defaultMaxTokens ?? DEFAULT_MAX_TOKENS,
+        // No system field when the prompt is unset or empty (D32).
+        ...(request.system ? { system: request.system } : {}),
         messages: toAnthropicMessages(request.messages),
         // No tools field when there are none, as in the openai adapter (p1-model-probes U1).
         ...(request.tools.length > 0 ? { tools: request.tools.map(toAnthropicTool) } : {}),

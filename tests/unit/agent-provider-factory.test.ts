@@ -53,6 +53,7 @@ function runLoop(provider: Parameters<typeof runAgentLoop>[0]['provider'], model
   return runAgentLoop({
     provider,
     model,
+    job: 'reader',
     prompt: 'Read the file notes.txt with the read_file tool, then answer.',
     callTool: async (name) =>
       name === 'read_file' ? { ok: true, output: TOOL_OUTPUT } : { ok: false, reason: 'no tool' },

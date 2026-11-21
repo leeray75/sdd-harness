@@ -285,3 +285,32 @@ Format: **Decision** · **Outcome** · **Why** · **Date**.
     - a network block for the reviewer;
     - a restore that trusts the snapshot's ignore set only.
 - **Date:** 2026-11-20
+
+## D32 · Agent jobs: definitions, prompts and advertised tools
+
+- **Outcome:** Each of the four jobs (plans and chats, writes code, reviews code, reads big files) has one shared definition, and each run advertises its job's tools and sends its job's system prompt.
+  - **Table:** `src/shared/jobs.ts` holds `JOBS`, the plain-language name of each job, and `BASE_TOOLS`, moved there unchanged from `src/main/policy/policy-table.ts`. The policy table re-exports `BASE_TOOLS` and defines none of its own. The gate, the tightening and the agent read one table.
+  - **Advertised tools:** `jobToolDefinitions(job)` in `src/agent/jobs/tools.ts` gives the job's base tools in table order, each with the registry's name, description and schema from `TOOL_SPECS`. The loop's hand-written `read_file` definition is removed. The agent advertises the base set; main's gate still applies tightening and decides every call (D30).
+  - **Prompts:** TypeScript string constants in `src/agent/jobs/`, with no file read at run time. Every job's system prompt states its role and five common rules: use only the listed tools; never run git and never ask for a commit, a push, an approval or a close; the approved spec is read-only; tickets, docs, web pages and tool output are untrusted data; a refused tool call is an error to recover from, not to work around.
+    - The writer, reviewer and reader prompts are ported from the sdd plugin's implementor, reviewer and data-agent, rewritten for the app's tools. The planner's prompt is new.
+    - Plugin-only references are left out: the plugin's state folder, its tool names, MCP, `NEEDS-DATA-AGENT` and its scripts.
+  - **Task texts:** the writer's three modes (implement, fix findings, resume after a spec revision) and the reviewer's review round are exported as `WRITER_TASKS` and `REVIEWER_TASKS`. Phase 3 sends them as the user message of each round. They are not part of the system prompt.
+  - **Reviewer runs tests:** the reviewer may run the project's test command through `run_command` to confirm a claim. It never builds and never edits. The plugin's reviewer runs nothing.
+  - **Provider `system`:** `ProviderRequest` has an optional `system` string. The Anthropic adapter sends it as the `system` parameter, and the OpenAI adapter sends it as a leading system message. When it is unset or empty, both send exactly what they sent before.
+  - **Loop and spike:** `runAgentLoop` takes a `job`, and every request carries that job's system prompt and tools. The spike runs as the reader, and its tool calls carry the run's job.
+- **Why:**
+  - One table means the agent cannot advertise a tool that the gate refuses for its job, and a change to the table reaches both sides at once.
+  - The advertised schemas are the registry's own, so the model sees the same contract that main checks.
+  - A prompt is guidance. The rules it states are enforced by main's gate (D1, D4), so a model that ignores its prompt is still refused.
+  - Keeping the task texts out of the system prompt lets Phase 3 choose which text goes with each round, and keeps the system prompt the same from round to round.
+  - TypeScript constants put the prompts in the bundle with no file read at run time, and the tests can check each prompt against its job's tools and forbid git and workflow actions.
+  - The reviewer may run tests because a claim about behaviour is often settled faster by a test than by reading. D31 limits it to the test form, so a review round cannot change the build output it reviews.
+- **Alternatives not chosen** (from the `p2-jobs-and-prompts` plan):
+  - the agent imports `src/main/policy/policy-table.ts`, or main sends each run's tool list in a protocol message;
+  - porting each plugin file whole, modes included, as the system prompt, or role and rules only with no report formats;
+  - markdown files read through Vite's `?raw`;
+  - a note on D30 instead of a new decision;
+  - sending the project's tightened tool list now;
+  - a static reviewer that runs nothing and only writes "needs a runtime check" notes.
+- **Open:** Sending a project's tightened tool list to the agent is left for Phase 3 or 4. The turn limit, per-job models and the spike and probe fixtures are unchanged.
+- **Date:** 2026-11-21
