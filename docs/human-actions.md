@@ -1,0 +1,97 @@
+# Human-only actions
+
+Five actions can change a feature's state in ways that only a person may decide: approve the spec, approve the result, mark the feature done, change the project's rules and edit an approved spec (D3). No agent tool exists for them. The app runs them only when a person has just used the app's own window. This page is the reference for how that works. The decision and its reasons are in [`decisions.md`](decisions.md#d33--human-only-actions-gesture-check-channel-and-handler-registry) (D33).
+
+## The five actions
+
+| Id                   | What the person does in the UI                              |
+| -------------------- | ----------------------------------------------------------- |
+| `approve-spec`       | Approves the spec and locks it                              |
+| `approve-result`     | Approves the build's result, so the app may commit and push |
+| `mark-done`          | Marks the feature done                                      |
+| `change-rules`       | Changes the project's rules                                 |
+| `edit-approved-spec` | Allows an edit to an approved spec                          |
+
+The ids are in `HUMAN_ACTION_IDS` in `src/shared/human-actions.ts`. The table above is the plain-language meaning; the UI copy belongs to Phase 3 and later.
+
+**Status:** no handler is registered yet (`p2-human-only-channel`). Every request that passes the checks is answered `not-available`. Phase 3 registers the real handlers.
+
+## The request and the result
+
+The renderer calls `window.harness.humanAction(request)`. The request is a plain object with exactly two fields:
+
+- `action`: one of the five ids above;
+- `feature`: a feature slug, which is lowercase letters and digits joined by single dashes, at most 64 characters (for example `p2-human-only-channel`).
+
+Nothing else is accepted: no extra field, no path, no free text. The result is either `{ ok: true }` or `{ ok: false, code, reason }`, where `code` is one of the four refusal codes below. A `reason` is fixed text and never repeats a value from the request.
+
+The contract is in `src/shared/human-actions.ts`. Its guard, `parseHumanActionRequest`, is the only place a request is read.
+
+## The checks, in order
+
+Main runs these in `handle()` in `src/main/human/channel.ts`, on the channel `harness:human-action`. Each check stops the call at its first refusal.
+
+1. **Sender.** The call must come from the app's own window and its top-level page. This is the same `isTrustedSender` check the window calls use (`src/main/security.ts`). A call from anywhere else is refused as `untrusted-sender`, and its request is not read.
+2. **Request.** The guard checks the request. A refused request is `invalid`, with the guard's reason.
+3. **Gesture.** Main must have recorded a gesture in the last 1000 ms, and it must be unused. Otherwise the call is `no-gesture`. A call that reaches this step uses the gesture, whatever the result of the later steps.
+4. **Registry.** If no handler is registered for the action, the call is `not-available`.
+5. **Handler.** The handler runs with the checked request, and its result is returned. If it throws, the caller gets `not-available` with the reason `the action failed`. The error is logged by its name only.
+
+Checks 1 and 2 do not touch the gesture, so an outside or malformed call cannot use up a real click.
+
+## What counts as a gesture
+
+Main records real input from the app's main window (`input-event` on its `webContents`). Page script cannot produce these events: a `dispatchEvent` or `element.click()` in the page never enters the window's input pipeline.
+
+| Input                                                             | Counts?                          |
+| ----------------------------------------------------------------- | -------------------------------- |
+| Left-button `mouseDown`                                           | Yes                              |
+| `keyDown` of Enter                                                | Yes, unless it is an auto-repeat |
+| `keyDown` of Space (`' '`)                                        | Yes, unless it is an auto-repeat |
+| Right or middle `mouseDown`, `mouseUp`, `mouseMove`, `mouseWheel` | No                               |
+| `keyUp`, `char`, any other key, an unknown type                   | No                               |
+
+A gesture stays usable for `GESTURE_WINDOW_MS` (1000 ms, in `src/main/human/gesture.ts`). Each gesture is used by one call. A later gesture replaces an unused one.
+
+## Refusal codes
+
+| Code               | Meaning                                                                               |
+| ------------------ | ------------------------------------------------------------------------------------- |
+| `untrusted-sender` | The call did not come from the app's own window and page.                             |
+| `invalid`          | The request failed the guard. The reason says which rule it broke, without the value. |
+| `no-gesture`       | No unused gesture from the last second.                                               |
+| `not-available`    | The request passed every check, but no handler is registered, or the handler failed.  |
+
+## Logging
+
+Every call writes exactly one decision line through the app's log (`src/main/log.ts`). A refused call writes to stderr, and an accepted one to stdout.
+
+```
+human action approve-spec: refused (no-gesture) feature=p2-human-only-channel
+human action approve-spec: refused (not-available) feature=demo
+human action invalid: refused (invalid)
+human action invalid: refused (untrusted-sender)
+human action approve-spec: accepted (ok) feature=demo
+```
+
+The line holds the action, the outcome, the code and, for a request that passed the guard, the feature. Nothing else from the request is logged, and no refused request's raw value is ever logged. If a handler throws, one extra line names the error (`handler threw (TypeError)`) and the error's message is not logged.
+
+## How Phase 3 registers a handler
+
+The channel is created in `src/main/index.ts`, and the handlers are registered on it. `register` throws if the action already has one.
+
+```ts
+humanActions.register('approve-spec', async (request) => {
+  // Check the workflow state, hash the spec and lock it, then return the result.
+  return { ok: true };
+});
+```
+
+A handler gets the checked `{ action, feature }` request only. It must not read anything else from the renderer, and it must not run a command, commit or push by itself: those belong to the workflow in Phase 3 and go through the same policy checks as the agents. A handler that refuses returns `{ ok: false, code, reason }` with one of the codes above.
+
+## Limits
+
+- **A gesture is not a choice of control.** It proves that a person acted in the app's window in the second before the call. It does not prove which button or key they used. A script in the page could ride on a real click made within that second. The renderer loads only the app's own page under the navigation guards and the sandbox, which keeps page script to that page. Phase 3 can narrow the check, for example by requiring the gesture to land on the Next bar's button.
+- **Assistive input.** A screen reader or a switch device that sends its activation another way may not produce a gesture. Keyboard users who activate a control with Enter or Space and mouse users are covered. The UI in Phase 5 needs a runtime check for the rest.
+- **No agent route.** The agent process cannot reach the channel: its protocol refuses such a message, no tool or job table names an action, and its source does not import the bridge or name the channel. These are checked by tests, not by the agent's own rules.
+- **Only in the app.** Refusals and decisions are logged, but they are not Rule events, because a human action is not a tool call (D30).

@@ -86,7 +86,7 @@ If the binary is still missing, run `node node_modules/electron/install.js` and 
 | File                                           | What it is                                                                      |
 | ---------------------------------------------- | ------------------------------------------------------------------------------- |
 | [`docs/PRD.md`](docs/PRD.md)                   | Product requirements: goals, features F1–F7, acceptance criteria, delivery plan |
-| [`docs/decisions.md`](docs/decisions.md)       | Settled decisions D1–D20                                                        |
+| [`docs/decisions.md`](docs/decisions.md)       | Settled decisions D1–D33                                                        |
 | [`docs/design-notes.md`](docs/design-notes.md) | Design system, components, screen behaviour, states                             |
 | [`docs/workflow.md`](docs/workflow.md)         | Workflow diagrams and who can do what                                           |
 | [`docs/design/`](docs/design/README.md)        | 16 screens: HTML source and PNG renders                                         |

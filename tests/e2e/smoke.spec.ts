@@ -58,7 +58,7 @@ test('shell boots with the bridge and no Node access in the renderer', async () 
     const harnessKeys = await page.evaluate(() =>
       Object.keys((globalThis as unknown as RendererGlobal).harness).sort(),
     );
-    expect(harnessKeys).toEqual(['getVersion', 'platform', 'window']);
+    expect(harnessKeys).toEqual(['getVersion', 'humanAction', 'platform', 'window']);
 
     // window.harness.window has exactly the caption controls.
     const windowKeys = await page.evaluate(() =>

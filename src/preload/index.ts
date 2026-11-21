@@ -6,12 +6,16 @@ import {
   toHarnessPlatform,
   type HarnessBridge,
 } from '../shared/bridge';
+import type { HumanActionRequest, HumanActionResult } from '../shared/human-actions';
 
 // The only object the renderer can reach. `ipcRenderer` stays inside this
 // module: it is used to make the call, never exposed.
 const harness: HarnessBridge = {
   getVersion: () => ipcRenderer.invoke(IPC_CHANNELS.getVersion) as Promise<string>,
   platform: toHarnessPlatform(process.platform),
+  // The request goes to main as it is; main checks it, the sender and the gesture.
+  humanAction: (request: HumanActionRequest) =>
+    ipcRenderer.invoke(IPC_CHANNELS.humanAction, request) as Promise<HumanActionResult>,
   window: {
     minimize: () => ipcRenderer.invoke(IPC_CHANNELS.windowMinimize) as Promise<void>,
     toggleMaximize: () => ipcRenderer.invoke(IPC_CHANNELS.windowToggleMaximize) as Promise<void>,

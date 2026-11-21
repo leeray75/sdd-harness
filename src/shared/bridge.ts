@@ -1,6 +1,8 @@
 // Contract between the preload bridge and the main process. Shared by both
 // sides, so it must not import Node, Electron or DOM APIs.
 
+import type { HumanActionRequest, HumanActionResult } from './human-actions';
+
 /** Name of the single global the preload exposes to the renderer. */
 export const BRIDGE_GLOBAL_NAME = 'harness' as const;
 
@@ -11,6 +13,7 @@ export const IPC_CHANNELS = {
   windowToggleMaximize: 'harness:window-toggle-maximize',
   windowClose: 'harness:window-close',
   windowIsMaximized: 'harness:window-is-maximized',
+  humanAction: 'harness:human-action',
 } as const;
 
 /** Event channel names. Main sends these to the renderer; each one must also be sent from src/main. */
@@ -41,4 +44,6 @@ export interface HarnessBridge {
   getVersion(): Promise<string>;
   platform: HarnessPlatform;
   window: HarnessWindowControls;
+  /** Asks main to run a human-only action. Main accepts it only right after a user gesture (D33). */
+  humanAction(request: HumanActionRequest): Promise<HumanActionResult>;
 }

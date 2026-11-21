@@ -4,6 +4,8 @@ import { pathToFileURL } from 'node:url';
 import { EVENT_CHANNELS, IPC_CHANNELS } from '../shared/bridge';
 import { tokens } from '../shared/tokens';
 import { startAgentHost } from './agent/host';
+import { createHumanActionChannel } from './human/channel';
+import { createGestureTracker } from './human/gesture';
 import { log } from './log';
 import {
   parseSecretsArgs,
@@ -28,6 +30,24 @@ const showGallery =
 const appUrl = showGallery ? `${pageUrl}#gallery` : pageUrl;
 
 let mainWindow: BrowserWindow | null = null;
+
+// One gesture tracker for the app (D33). The main window's input events feed it, and the
+// human-only channel asks it whether a real click or key press came just before a request.
+const gestureTracker = createGestureTracker({ now: () => performance.now() });
+
+// The human-only channel (D33). No action handler is registered yet: Phase 3 adds them, so
+// every request that passes the checks is answered `not-available` for now.
+const humanActions = createHumanActionChannel({
+  isTrustedSender: (sender) =>
+    isTrustedSender({
+      senderId: sender.senderId,
+      expectedId: mainWindow?.webContents.id,
+      frameUrl: sender.frameUrl,
+      appUrl,
+    }),
+  tracker: gestureTracker,
+  logger: log,
+});
 
 // macOS keeps its native traffic lights, drawn inside the 40px title bar.
 // Windows and Linux get a frameless window and draw their own caption buttons.
@@ -54,6 +74,11 @@ function createMainWindow(): BrowserWindow {
   });
 
   applyNavigationGuards(win.webContents, appUrl);
+
+  // Real input to this window counts as a user gesture (D33). Page script cannot produce it.
+  win.webContents.on('input-event', (_event, input) => {
+    gestureTracker.record(input);
+  });
 
   // Tell the renderer whenever the maximized state may have changed.
   const sendMaximizedChanged = () => {
@@ -123,6 +148,14 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.windowIsMaximized, (event: IpcMainInvokeEvent) => {
     return trustedMainWindow(event).isMaximized();
+  });
+
+  // The channel checks the sender, the request and the gesture itself, and logs each call (D33).
+  ipcMain.handle(IPC_CHANNELS.humanAction, (event: IpcMainInvokeEvent, raw: unknown) => {
+    return humanActions.handle(
+      { senderId: event.sender.id, frameUrl: event.senderFrame?.url },
+      raw,
+    );
   });
 }
 
