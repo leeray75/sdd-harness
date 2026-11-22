@@ -110,6 +110,11 @@ All notable changes to SDD Harness are recorded here. The format follows [Keep a
   - It classifies every event as human-only, user or app, and maps the three human-only events to the D33 actions `approve-spec` and `mark-done`.
   - Tests compare the table with a literal copy of the plugin's config, for every node and event pair, and check the stage labels, the `build-done` gate and the module's imports.
 - **`docs/workflow-engine.md`:** the engine reference: nodes, events, transitions, stage mapping and labels, event kinds and the human-action map.
+- **Document layer** (`p3-spec-docs`, D35): the plugin's v0.18.0 templates as constants with `fillTemplate` (`src/shared/spec-docs.ts`); the `docs/specs/<feature>/` layout and path helpers, which refuse traversal; and parsers for PLAN.md, SPECS.md, tasks.md and build-ledger.md that never throw.
+  - `src/shared/spec-detect.ts` detects a folder's node and stage with the plugin's precedence, minus the session-marker and subagent inputs, and takes the approval as an input.
+  - `src/main/workflow/spec-folders.ts` scans `docs/specs/` read-only: symlinks and junctions are skipped, reads are capped, and an unreadable file is reported. A plugin-written folder opens with its stage.
+  - The four templates and the `p3-state-machine` folder are vendored byte for byte under `tests/fixtures/sdd-plugin/`, with a README. The 20 finished folders of this repo are detected as Done.
+  - `docs/workflow-engine.md` gains the "Document layer" and "Detecting a folder's node" sections.
 
 ### Changed
 

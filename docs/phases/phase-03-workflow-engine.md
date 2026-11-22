@@ -36,6 +36,7 @@ Run a whole feature headlessly: plan, spec lock, build and review rounds, pause,
 ## Decided during planning
 
 - State machine: hand-written typed table, no XState, in `src/shared/workflow.ts` (D34, `p3-state-machine`)
+- Document layer: templates, folder layout, parsers and folder detection in `src/shared/spec-docs.ts` and `src/shared/spec-detect.ts`, with the scanner in `src/main/workflow/spec-folders.ts` (D35, `p3-spec-docs`)
 - State file name and format: to decide in `p3-spec-lock`
 
 ## Suggested subtasks
@@ -49,6 +50,8 @@ A starting point. Claude adjusts it in step 2 and you confirm.
 | 3   | `p3-build-loop`         | Rounds, limit, pause for spec problem, ask for changes, ledger/changes/SUMMARY                 |
 | 4   | `p3-ship`               | Result approval, commit and push by the app, close                                             |
 | 5   | `p3-headless-e2e`       | Fake provider and an end-to-end test of a full feature on a fixture repo                       |
+
+Subtask 2 was split in two (see the progress file): `p3-spec-docs` (templates, layout, parsers, folder detection and the scanner, D35) and `p3-spec-lock` (the state file, hash lock and file watching).
 
 ## Definition of done
 

@@ -17,3 +17,6 @@ docs/specs/
 
 # Recorded response bodies (pnpm record:probes) are kept byte for byte, as the server sent them
 tests/fixtures/probes/
+
+# Copies of the sdd plugin's templates and feature folders are kept byte for byte (p3-spec-docs)
+tests/fixtures/sdd-plugin/
