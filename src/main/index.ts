@@ -3,9 +3,10 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { EVENT_CHANNELS, IPC_CHANNELS } from '../shared/bridge';
 import { tokens } from '../shared/tokens';
-import { startAgentHost } from './agent/host';
+import { startAgentHost, type LiveSupplier } from './agent/host';
 import { createHumanActionChannel } from './human/channel';
 import { createGestureTracker } from './human/gesture';
+import { createSpecHandlers } from './human/spec-handlers';
 import { log } from './log';
 import {
   parseSecretsArgs,
@@ -16,6 +17,8 @@ import {
 import { createElectronSecretStore } from './secrets/electron';
 import { readSecretFromPipe } from './secrets/pipe';
 import { applyNavigationGuards, isTrustedSender } from './security';
+import { specStateOf } from './policy/context';
+import { createSpecLockWatcher, type SpecLockWatcher } from './workflow/spec-watch';
 
 // electron-vite sets ELECTRON_RENDERER_URL only under `electron-vite dev`.
 // Otherwise the app loads the built page from disk.
@@ -35,8 +38,9 @@ let mainWindow: BrowserWindow | null = null;
 // human-only channel asks it whether a real click or key press came just before a request.
 const gestureTracker = createGestureTracker({ now: () => performance.now() });
 
-// The human-only channel (D33). No action handler is registered yet: Phase 3 adds them, so
-// every request that passes the checks is answered `not-available` for now.
+// The human-only channel (D33). The spec-lock handlers are registered by startSpecLock when a
+// project root exists (D36). With no root, every request that passes the checks is answered
+// `not-available`.
 const humanActions = createHumanActionChannel({
   isTrustedSender: (sender) =>
     isTrustedSender({
@@ -160,6 +164,36 @@ function registerIpcHandlers(): void {
 }
 
 /**
+ * The project root the app works in: the spike root today (D27, HARNESS_SPIKE_ROOT). With no root,
+ * no spec lock is started and no spec handler is registered.
+ */
+const projectRoot = process.env['HARNESS_SPIKE_ROOT'] || undefined;
+
+/**
+ * Registers the spec-lock handlers on the human-only channel and starts the lock watcher for the
+ * project root (p3-spec-lock, D36). Each handler refreshes the watcher after a change.
+ */
+function startSpecLock(root: string): SpecLockWatcher {
+  const lock = createSpecLockWatcher({
+    root,
+    onChange: (value) => {
+      const feature = value.feature === null ? '' : ` feature=${value.feature}`;
+      log.info(`spec lock: ${value.approval}${feature}`);
+    },
+  });
+  const handlers = createSpecHandlers({
+    root,
+    now: () => new Date(),
+    onLockChanged: () => lock.refresh(),
+  });
+  humanActions.register('approve-spec', handlers['approve-spec']);
+  humanActions.register('edit-approved-spec', handlers['edit-approved-spec']);
+  void lock.refresh();
+  app.once('before-quit', () => lock.close());
+  return lock;
+}
+
+/**
  * The dev-only secrets command (D25, AC12). Set only for an unpackaged run with the switches;
  * a packaged app ignores them.
  */
@@ -208,7 +242,17 @@ if (secretsCommand) {
   void app.whenReady().then(() => {
     registerIpcHandlers();
     mainWindow = createMainWindow();
-    startAgentHost();
+    // Each agent tool call reads the open feature and its spec state from the watcher (D36).
+    // With no project root there is no lock, so the agent gets the default context.
+    let live: LiveSupplier | undefined;
+    if (projectRoot) {
+      const lock = startSpecLock(projectRoot);
+      live = () => {
+        const value = lock.current();
+        return { feature: value.feature, spec: specStateOf(value.approval) };
+      };
+    }
+    startAgentHost(live);
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {

@@ -45,7 +45,7 @@ The spike sends one prompt through the server named by `HARNESS_SPIKE_PRESET` (a
 | `HARNESS_SPIKE_PROVIDER` | The wire format: `openai` or `anthropic`. The default is the preset's first format; a format the preset does not offer skips the spike with a message                                                                                   |
 | `HARNESS_SPIKE_HEADERS`  | Extra headers as `Name: value`, one per line. `Authorization`, `x-api-key`, `anthropic-version`, `Content-Type`, `Content-Length` and `Host` are refused (D27)                                                                          |
 | `HARNESS_SPIKE_MODEL`    | The model name. Default `qwen3.8-flash-next-nothink` for openai, `claude-haiku-5-5` for anthropic                                                                                                                                       |
-| `HARNESS_SPIKE_ROOT`     | The one folder `read_file` may read inside. Absolute paths and paths that leave it are refused                                                                                                                                          |
+| `HARNESS_SPIKE_ROOT`     | The one folder `read_file` may read inside. Absolute paths and paths that leave it are refused. It is also the project whose `docs/specs/` the approval lock reads, and with it set the spec handlers are registered (D36)              |
 
 The provider key is not an environment variable. Store it in the app's secret store first (dev only; the value is never on the command line, and the script builds the app first when `out/` is missing):
 
@@ -83,17 +83,17 @@ If the binary is still missing, run `node node_modules/electron/install.js` and 
 
 ## Docs
 
-| File                                                 | What it is                                                                                                                                              |
-| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`docs/PRD.md`](docs/PRD.md)                         | Product requirements: goals, features F1–F7, acceptance criteria, delivery plan                                                                         |
-| [`docs/decisions.md`](docs/decisions.md)             | Settled decisions D1–D35                                                                                                                                |
-| [`docs/design-notes.md`](docs/design-notes.md)       | Design system, components, screen behaviour, states                                                                                                     |
-| [`docs/workflow.md`](docs/workflow.md)               | Workflow diagrams and who can do what                                                                                                                   |
-| [`docs/workflow-engine.md`](docs/workflow-engine.md) | Workflow engine reference: nodes, events, transitions, stages, event kinds, the document layer and folder detection (table in `src/shared/workflow.ts`) |
-| [`docs/design/`](docs/design/README.md)              | 16 screens: HTML source and PNG renders                                                                                                                 |
-| [`docs/roadmap.md`](docs/roadmap.md)                 | Ten phases from scaffold to pilot, with status                                                                                                          |
-| [`docs/phases/`](docs/phases/README.md)              | One document per phase: open it in a new Claude Code chat to run that phase                                                                             |
-| `docs/specs/`                                        | Feature specs written by the sdd plugin during development                                                                                              |
+| File                                                 | What it is                                                                                                                                                             |
+| ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`docs/PRD.md`](docs/PRD.md)                         | Product requirements: goals, features F1–F7, acceptance criteria, delivery plan                                                                                        |
+| [`docs/decisions.md`](docs/decisions.md)             | Settled decisions D1–D36                                                                                                                                               |
+| [`docs/design-notes.md`](docs/design-notes.md)       | Design system, components, screen behaviour, states                                                                                                                    |
+| [`docs/workflow.md`](docs/workflow.md)               | Workflow diagrams and who can do what                                                                                                                                  |
+| [`docs/workflow-engine.md`](docs/workflow-engine.md) | Workflow engine reference: nodes, events, transitions, stages, event kinds, the document layer, folder detection and the spec lock (table in `src/shared/workflow.ts`) |
+| [`docs/design/`](docs/design/README.md)              | 16 screens: HTML source and PNG renders                                                                                                                                |
+| [`docs/roadmap.md`](docs/roadmap.md)                 | Ten phases from scaffold to pilot, with status                                                                                                                         |
+| [`docs/phases/`](docs/phases/README.md)              | One document per phase: open it in a new Claude Code chat to run that phase                                                                                            |
+| `docs/specs/`                                        | Feature specs written by the sdd plugin during development                                                                                                             |
 
 ## Building it with Claude Code and the sdd plugin
 

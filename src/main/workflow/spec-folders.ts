@@ -48,7 +48,10 @@ export interface SpecFolder {
   newestMtime: number;
 }
 
-/** The approval of one feature, by name. The default is `none`, with no lock. */
+/**
+ * The approval of one feature, by name. The default is `none`, with no lock. It may throw: the scan
+ * then reads that folder as `unchecked`.
+ */
 export type ApprovalOf = (feature: string) => Approval;
 
 const ABSENT: FileState = { state: 'absent', reason: '', mtimeMs: -1, truncated: false };
@@ -229,7 +232,14 @@ export async function scanSpecFolders(
     .sort();
   const folders: SpecFolder[] = [];
   for (const name of names) {
-    const folder = await readSpecFolder(projectRoot, name, approvalOf(name));
+    // A throwing callback must not reject the scan: that folder is read as unchecked (p3-spec-lock).
+    let approval: Approval;
+    try {
+      approval = approvalOf(name);
+    } catch {
+      approval = 'unchecked';
+    }
+    const folder = await readSpecFolder(projectRoot, name, approval);
     if (folder) folders.push(folder);
   }
   return folders;

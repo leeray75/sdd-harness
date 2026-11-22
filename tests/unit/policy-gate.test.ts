@@ -9,6 +9,8 @@ import {
   type CommandCheck,
   type PolicyContext,
   type SpecState,
+  effectiveFeature,
+  specStateOf,
 } from '../../src/main/policy/context';
 import { BASE_TOOLS } from '../../src/main/policy/policy-table';
 import { makeCommandCheck } from '../../src/main/policy/command-allowlist';
@@ -496,5 +498,79 @@ describe('checkToolCall: AC3 gate with a detected allowlist', () => {
   it('keeps the deny-all default when no allowlist is set', () => {
     const decision = call('writer', 'run_command', { program: 'npm', args: ['test'] });
     expect(decision.reason).toBe('commands are not allowed yet: no allowlist is configured');
+  });
+});
+
+// AC6 (p3-spec-lock, D36): the live spec state from the approval lock.
+describe('checkToolCall: AC6 the live spec state (D36)', () => {
+  const SPEC_PATH = 'docs/specs/f/SPECS.md';
+  const STATE_PATH = 'docs/specs/.sdd-state.json';
+  const APPROVED_REASON = 'not allowed: the spec is approved; spec files are read-only';
+  const LOCKED_REASON =
+    "not allowed: the spec's approval can't be checked, so nothing can be written";
+
+  it('maps each approval value to a spec state', () => {
+    expect(specStateOf('approved')).toBe('approved');
+    expect(specStateOf('changed')).toBe('draft');
+    expect(specStateOf('unchecked')).toBe('locked');
+    expect(specStateOf('none')).toBe('none');
+  });
+
+  it('denies the planner and the writer a write to the approved spec, with the approved reason', () => {
+    const approved = context({ feature: 'f', spec: 'approved' });
+    expect(
+      reasonOf(call('planner', 'write_file', { path: SPEC_PATH, content: 'x' }, approved)),
+    ).toBe(APPROVED_REASON);
+    expect(
+      reasonOf(call('writer', 'write_file', { path: SPEC_PATH, content: 'x' }, approved)),
+    ).toBe(APPROVED_REASON);
+  });
+
+  it('denies the writer source writes while the spec is changed (draft)', () => {
+    const draft = context({ feature: 'f', spec: specStateOf('changed') });
+    expect(reasonOf(call('writer', 'write_file', { path: 'src/a.ts', content: 'x' }, draft))).toBe(
+      'not allowed: source files can be edited only after the spec is approved',
+    );
+  });
+
+  it('denies every job a spec or source write when the approval is unchecked (locked)', () => {
+    const locked = context({ feature: 'f', spec: 'locked' });
+    for (const job of ['planner', 'writer'] as const) {
+      for (const path of [SPEC_PATH, 'docs/specs/f/notes.md', 'src/a.ts']) {
+        expect(
+          reasonOf(call(job, 'write_file', { path, content: 'x' }, locked)),
+          `${job} ${path}`,
+        ).toBe(LOCKED_REASON);
+        expect(
+          reasonOf(call(job, 'edit_file', { path, old_text: 'a', new_text: 'b' }, locked)),
+          `${job} edit ${path}`,
+        ).toBe(LOCKED_REASON);
+      }
+    }
+    for (const job of JOB_IDS) {
+      expect(call(job, 'write_file', { path: 'src/a.ts', content: 'x' }, locked).allow).toBe(false);
+    }
+  });
+
+  it('denies the state file to every job, under every spec state', () => {
+    for (const spec of ['none', 'draft', 'approved', 'locked'] as const) {
+      const ctx = context({ feature: 'f', spec });
+      for (const job of ['planner', 'writer'] as const) {
+        expect(
+          call(job, 'write_file', { path: STATE_PATH, content: '{}' }, ctx).allow,
+          `${job} ${spec}`,
+        ).toBe(false);
+      }
+    }
+  });
+
+  it('refuses slugs the shared rules reject, and keeps valid ones', () => {
+    expect(effectiveFeature('a--b')).toBeNull();
+    expect(effectiveFeature('-a')).toBeNull();
+    expect(effectiveFeature('a-')).toBeNull();
+    expect(effectiveFeature('x'.repeat(65))).toBeNull();
+    expect(effectiveFeature('x'.repeat(64))).toBe('x'.repeat(64));
+    expect(effectiveFeature('p3-spec-lock')).toBe('p3-spec-lock');
+    expect(effectiveFeature(null)).toBeNull();
   });
 });

@@ -36,6 +36,8 @@ const PLANNER_SCOPE =
 const WRITER_SPEC = "not allowed: spec files can't be written by the code writer";
 const WRITER_SOURCE_LOCKED =
   'not allowed: source files can be edited only after the spec is approved';
+const SPEC_UNCHECKED =
+  "not allowed: the spec's approval can't be checked, so nothing can be written";
 const ALLOWED = 'allowed';
 
 function deny(request: ToolCallRequest, reason: string): PolicyDecision {
@@ -66,6 +68,13 @@ function writeReason(
   }
   if (area.kind === 'git') {
     return GIT_PATH;
+  }
+  // An unchecked approval (D36) fails closed: no spec or source file is written by any job.
+  if (
+    context.spec === 'locked' &&
+    (area.kind === 'spec-doc' || area.kind === 'spec-other' || area.kind === 'source')
+  ) {
+    return SPEC_UNCHECKED;
   }
   if (job === 'planner') {
     if (feature === null) {

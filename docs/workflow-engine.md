@@ -158,7 +158,7 @@ The document layer reads and writes the sdd documents of one feature folder, `do
 
 ## Detecting a folder's node
 
-`detectFolder(input)` in `src/shared/spec-detect.ts` gives a folder's `{ node, stage, round, source }` from its approval and its files. The approval is an input: `none` (no lock), `approved`, `changed` or `unchecked`. The lock and its state file come with `p3-spec-lock`. The precedence follows the plugin's `hooks/detect.ts` (v0.18.0); the first rule that matches wins:
+`detectFolder(input)` in `src/shared/spec-detect.ts` gives a folder's `{ node, stage, round, source }` from its approval and its files. The approval is an input: `none` (no lock), `approved`, `changed` or `unchecked`. The Spec lock section below says how each value is read. The precedence follows the plugin's `hooks/detect.ts` (v0.18.0); the first rule that matches wins:
 
 1. Approval `changed` gives `spec-changed`, whatever the ledger says.
 2. Approval `none` gives:
@@ -180,9 +180,50 @@ The document layer reads and writes the sdd documents of one feature folder, `do
 
 The plugin's session marker and its seen-subagent inputs are not ported, so a folder is read from its files and the approval alone. D35 records why. A plugin-written folder that has finished, with SUMMARY.md and a `done` ledger, detects as `closed` (stage Done) with approval `none`. This holds for the 20 finished folders of this repo and the vendored `p3-state-machine` folder.
 
+## Spec lock
+
+The approval lock says whether a feature's spec is approved (D36). Its pure part is `src/shared/spec-state.ts`. The file reads, writes, hashing and the scan are in `src/main/workflow/spec-lock.ts`, the watcher is in `src/main/workflow/spec-watch.ts`, and the two handlers are in `src/main/human/spec-handlers.ts`.
+
+**The state file.** `docs/specs/.sdd-state.json` has exactly five keys: `version` (1), `feature` (a slug), `sha256` (64 lowercase hex characters), `approvedAt` (ISO 8601 in UTC) and `editing` (a boolean). It is read with a 4 KiB cap. A file that is a symbolic link, not a file, too large, not JSON, the wrong version or otherwise invalid is `unreadable`, with a fixed reason, and nothing is thrown. It is written to `<file>.<random>.tmp` and renamed over the old file, and a failed write removes its temp file.
+
+**The hash.** `sha256` is the SHA-256 of the feature's `SPECS.md` after one leading byte order mark is dropped and every CRLF becomes LF. The frontmatter is part of the text, so approval writes `status: approved` before it hashes the file. A re-save with CRLF or a byte order mark does not change the hash.
+
+**The approval.** `approvalFor(lock, feature, hash)` gives one value per feature:
+
+| Value       | When                                                                                  |
+| ----------- | ------------------------------------------------------------------------------------- |
+| `none`      | No state file, or the file names another feature.                                     |
+| `unchecked` | The state file is unreadable, or the locked spec is missing, unreadable or too large. |
+| `changed`   | `editing` is true, or the hash differs.                                               |
+| `approved`  | The hash matches and `editing` is false.                                              |
+
+`detectFolder` takes this value (see [Detecting a folder's node](#detecting-a-folders-node)). The agent gate maps it to a spec state, `specStateOf` in `src/main/policy/context.ts`: `approved` gives `approved`, `changed` gives `draft`, `unchecked` gives `locked` and `none` gives `none`. With `locked`, no job may write a spec file or a source file, and the state file is denied to every job.
+
+**The current feature.** The state file's feature while the file is valid. Otherwise the folder with the newest modification time, and a tie goes to the smaller slug. An approved feature stays current until it is closed, and `p3-ship` clears the file then.
+
+**Watching.** `createSpecLockWatcher` watches `docs/specs/` (for the state file) and the current feature's folder (for its `SPECS.md`), with non-recursive `fs.watch`. An event starts a refresh after 150 ms. A refresh re-reads the state and re-hashes the spec, and `onChange` runs only when the value changes. `current()` gives the last value, which is `unchecked` until the first refresh. A watcher that errors is dropped, and the next refresh arms it again. Nothing is called after `close()`.
+
+**Handlers.** `approve-spec` and `edit-approved-spec` are registered on the human-only channel (D33) when a project root exists, which is `HARNESS_SPIKE_ROOT` for now. Both are reached only through the channel's checks. A refusal is `{ ok: false, code: 'refused', reason }` with a fixed reason, changes no file, and never throws.
+
+- `approve-spec` refuses when SPECS.md is missing, unreadable or too large, when it lacks a Goals or an Acceptance criteria heading, or when it is already approved with the same hash. Otherwise it sets `status: approved` in SPECS.md, writes the state file with `editing: false` and the current time, and refreshes the watcher. If the state write fails, it puts SPECS.md back as it was.
+- `edit-approved-spec` refuses unless the state file is readable, names this feature, and the approval is `approved`. Otherwise it sets `editing: true` and keeps the hash. The spec then reads as `changed`.
+
+**Agent context.** `startAgentHost` takes an optional supplier of the open feature and its spec state. Each tool call's context is the base context with the supplier's current values (D30). Without a supplier, the default context is used: no feature, spec state `none`.
+
+**Limits.**
+
+- The gate reads the watcher's last value. A missed event leaves it stale until the next event or refresh.
+- The watcher arms the folders that exist at each refresh. If `docs/specs/` is created later, the next refresh arms it.
+- The file symlink tests are skipped where Windows refuses file symlinks.
+
 ## Where the code is
 
 - `src/shared/workflow.ts`: the ids, the table, the functions, the stages, the event kinds and the human map.
+- `src/shared/spec-state.ts`: the state file's parser and serializer, the hash input, the approval values, the frontmatter status setter and the headings check.
+- `src/main/workflow/spec-lock.ts`: the state file's reads and writes, the SPECS.md hash, `approvalOf`, `currentFeature` and `scanSpecFoldersWithLock`.
+- `src/main/workflow/spec-watch.ts`: the lock watcher.
+- `src/main/human/spec-handlers.ts`: the `approve-spec` and `edit-approved-spec` handlers.
+- `tests/unit/spec-state.test.ts`, `spec-lock.test.ts`, `spec-watch.test.ts`, `spec-handlers.test.ts`, `host-context.test.ts`: the lock, the watcher, the handlers and the host's context.
 - `src/shared/spec-docs.ts`: the templates, the fill function, the layout and path helpers, and the four parsers.
 - `src/shared/spec-detect.ts`: `detectFolder` and its types.
 - `src/main/workflow/spec-folders.ts`: the scanner, `readSpecFolder`, `readSpecFolderAt` and `scanSpecFolders`.
@@ -196,4 +237,4 @@ The plugin's session marker and its seen-subagent inputs are not ported, so a fo
 
 ## Extending this page
 
-Later Phase 3 subtasks add their part here: the spec lock (`p3-spec-lock`), the build loop (`p3-build-loop`) and shipping (`p3-ship`). Each one adds its handlers and any new state or event to this page and to the table, with a decision in `decisions.md` when the table changes. The spec lock supplies the approval that `detectFolder` takes as an input.
+Later Phase 3 subtasks add their part here: the build loop (`p3-build-loop`) and shipping (`p3-ship`, which clears the state file on close). Each one adds its handlers and any new state or event to this page and to the table, with a decision in `decisions.md` when the table changes. The spec lock (D36) supplies the approval that `detectFolder` takes as an input.
