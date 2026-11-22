@@ -3,10 +3,22 @@
 // only reads it. Pure: no Electron or file-system imports.
 
 import type { JobId } from '../../shared/agent-protocol';
+import type { Approval } from '../../shared/spec-detect';
+import { FEATURE_SLUG_PATTERN, MAX_FEATURE_LENGTH } from '../../shared/human-actions';
 import type { Tightening } from './tightening';
 
-/** The spec state as the gate sees it. Real workflow states arrive in Phase 3. */
-export type SpecState = 'none' | 'draft' | 'approved';
+/**
+ * The spec state as the gate sees it (D36). `none`: no feature is locked. `draft`: the locked
+ * spec was edited since its approval. `approved`: the locked spec is unchanged. `locked`: the
+ * approval can't be checked (the state file or the spec can't be read), so nothing is written.
+ */
+export type SpecState = 'none' | 'draft' | 'approved' | 'locked';
+
+/** The live values the gate reads per call: the feature open and its spec state. */
+export interface LiveSpec {
+  feature: string | null;
+  spec: SpecState;
+}
 
 /** One command request as the command check receives it. */
 export interface CommandCall {
@@ -22,18 +34,34 @@ export type CommandCheck = (
 ) => { allow: true } | { allow: false; reason: string };
 
 export interface PolicyContext {
-  /** Feature slug. Anything not matching FEATURE_SLUG_PATTERN is treated as null. */
+  /** Feature slug. Anything not matching the shared slug rules is treated as null. */
   feature: string | null;
   spec: SpecState;
   tightening: Tightening;
   commandCheck: CommandCheck;
 }
 
-const FEATURE_SLUG_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
+/** The spec state for an approval value: approved, changed (draft), unchecked (locked) or none. */
+export function specStateOf(approval: Approval): SpecState {
+  switch (approval) {
+    case 'approved':
+      return 'approved';
+    case 'changed':
+      return 'draft';
+    case 'unchecked':
+      return 'locked';
+    case 'none':
+      return 'none';
+  }
+}
 
 /** The feature slug to use, or null when none is open or the value is not a valid slug. */
 export function effectiveFeature(feature: string | null): string | null {
-  if (feature === null || !FEATURE_SLUG_PATTERN.test(feature)) {
+  if (
+    feature === null ||
+    feature.length > MAX_FEATURE_LENGTH ||
+    !FEATURE_SLUG_PATTERN.test(feature)
+  ) {
     return null;
   }
   return feature;

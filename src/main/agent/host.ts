@@ -22,6 +22,7 @@ import {
   DEFAULT_POLICY_CONTEXT,
   denyAllCommands,
   type CommandCheck,
+  type LiveSpec,
   type PolicyContext,
 } from '../policy/context';
 import { checkToolCall } from '../policy/gate';
@@ -79,19 +80,48 @@ export interface ToolRunnerOptions {
   onRuleEvent?: (event: RuleEvent) => void;
 }
 
+/** Gives the open feature and its spec state at the moment of a call (D36). */
+export type LiveSupplier = () => LiveSpec;
+
+/**
+ * The context for one call: the base context, with the feature and the spec state from the live
+ * supplier when there is one. With no supplier, the base context is used as it is.
+ */
+export function contextFor(base: PolicyContext, live?: LiveSupplier): PolicyContext {
+  if (live === undefined) {
+    return base;
+  }
+  const { feature, spec } = live();
+  return { ...base, feature, spec };
+}
+
 /**
  * The command policy for a root (D31): the allowlist detected from the root's markers, used by
- * the gate and by the runner. With no root, the default context stays deny-all.
+ * the gate and by the runner. With no root, the default context stays deny-all. `contextNow`
+ * gives each call's context, following the live supplier (D36) when one is given.
  */
-export function commandPolicyFor(root: string | undefined): {
+export function commandPolicyFor(
+  root: string | undefined,
+  live?: LiveSupplier,
+): {
   policyContext: PolicyContext;
   commandCheck: CommandCheck;
+  contextNow: () => PolicyContext;
 } {
   if (!root) {
-    return { policyContext: DEFAULT_POLICY_CONTEXT, commandCheck: denyAllCommands };
+    return {
+      policyContext: DEFAULT_POLICY_CONTEXT,
+      commandCheck: denyAllCommands,
+      contextNow: () => contextFor(DEFAULT_POLICY_CONTEXT, live),
+    };
   }
   const commandCheck = makeCommandCheck(detectCommands(rootMarkerFiles(root)));
-  return { policyContext: { ...DEFAULT_POLICY_CONTEXT, commandCheck }, commandCheck };
+  const policyContext: PolicyContext = { ...DEFAULT_POLICY_CONTEXT, commandCheck };
+  return {
+    policyContext,
+    commandCheck,
+    contextNow: () => contextFor(policyContext, live),
+  };
 }
 
 const NO_SUCH_TOOL = 'no such tool';
@@ -214,9 +244,10 @@ function forwardLines(stream: NodeJS.ReadableStream | null, toStderr: boolean): 
 
 /**
  * Forks the agent after app ready and routes its messages. The agent is not restarted:
- * an unexpected exit is logged with its code and nothing else happens.
+ * an unexpected exit is logged with its code and nothing else happens. `live` gives the open
+ * feature and its spec state for each tool call (D36); without it the default context is used.
  */
-export function startAgentHost(): void {
+export function startAgentHost(live?: LiveSupplier): void {
   let stopping = false;
 
   const child: UtilityProcess = utilityProcess.fork(join(__dirname, 'agent.js'), [], {
@@ -230,10 +261,10 @@ export function startAgentHost(): void {
 
   // The command policy is built once from the root's markers (D31); with no root it stays deny-all.
   const root = process.env[SPIKE_ROOT_VAR];
-  const { policyContext, commandCheck } = commandPolicyFor(root);
+  const { commandCheck, contextNow } = commandPolicyFor(root, live);
   const runTool = makeToolRunner(root, { commandCheck, onRuleEvent: logRuleEvent(log) });
   const routerDeps: RouterDeps = {
-    checkToolCall: (request) => checkToolCall(request, policyContext),
+    checkToolCall: (request) => checkToolCall(request, contextNow()),
     runTool,
     onRuleEvent: logRuleEvent(log),
     logger: log,

@@ -91,7 +91,7 @@ Acceptance:
 ### F2 · Workflow engine
 
 - States and events ported from the plugin (D5) into a hand-written table in `src/shared/workflow.ts` (D34), shown to users as six stages: Start, Plan, Spec, Build, Review, Done. Reference: [`workflow-engine.md`](workflow-engine.md).
-- Documents: the plugin's four templates and the `docs/specs/<feature>/` layout, with parsers, and a folder detector that gives each existing folder its node and stage from its files (D35, `p3-spec-docs`). The approval comes from the spec lock.
+- Documents: the plugin's four templates and the `docs/specs/<feature>/` layout, with parsers, and a folder detector that gives each existing folder its node and stage from its files (D35, `p3-spec-docs`). The approval comes from the spec lock (D36, `p3-spec-lock`).
 - Spec lock by hash; editing an approved spec moves it to "approve again".
 - Review loop with the round limit; pause when the reviewer reports a spec problem; Ask for changes after the build (counted separately); close.
 
@@ -99,7 +99,7 @@ Acceptance:
 
 - [ ] After the last allowed round the build stops and asks the user.
 - [ ] Nothing is committed before the user approves the result.
-- [ ] Existing `docs/specs/<feature>/` folders open with the right stage. Folders are detected from their files (D35, `p3-spec-docs`); the live approval state comes with `p3-spec-lock`.
+- [x] Existing `docs/specs/<feature>/` folders open with the right stage. Folders are detected from their files (D35, `p3-spec-docs`), and the approval comes from the spec lock (D36, `p3-spec-lock`).
 
 ### F3 · Projects and environments
 

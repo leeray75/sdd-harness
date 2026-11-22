@@ -56,7 +56,7 @@ Placeholders in angle brackets, such as `<feature>` and `<n>`, are filled in by 
 
 - Every tool call is checked in main against the job's policy before it runs (D30). The prompt cannot widen what the job may do.
 - A refused call comes back to the model as a tool error with a fixed reason. The prompt tells the model to recover from it, not to work around it.
-- The approved spec folder is read-only to every agent. Agents never run git. The app commits and pushes, and only after the user approves the result (D4).
+- The approved spec folder is read-only to every agent. The spec state comes from the approval lock (D36): a changed spec blocks source writes, and an approval that can't be checked blocks every spec and source write. Agents never run git. The app commits and pushes, and only after the user approves the result (D4).
 - Each decision, allowed or denied, is logged as a Rule event (D30).
 
 ## Notes

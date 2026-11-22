@@ -19,11 +19,12 @@ The suggested subtask 2 (`p3-spec-docs-and-lock`) is split in two, because templ
 
 - D34: the workflow table is hand-written in `src/shared/workflow.ts`, with the stage mapping, the data-agent overlay, the event kinds and the human-action map (`p3-state-machine`).
 - D35: the document layer. The templates, folder layout, parsers and folder detector are pure shared modules, the scanner is in main, the plugin's session-marker and subagent inputs are dropped, and the approval is an input (`p3-spec-docs`).
+- D36: the spec lock. The state file, the hash input, the approval values, the watcher, the two handlers, the `refused` code and the gate's spec state. It amends D34 (`EDIT_SPEC` may come from `edit-approved-spec`) (`p3-spec-lock`).
 
 ## Decided during planning
 
 - State machine: hand-written typed table, no XState (`p3-state-machine`).
-- State file name and format: to decide in `p3-spec-lock`.
+- State file name and format: decided in `p3-spec-lock` (D36). The file is `docs/specs/.sdd-state.json`.
 
 ## Follow-ups
 
@@ -33,12 +34,18 @@ The suggested subtask 2 (`p3-spec-docs-and-lock`) is split in two, because templ
   - `docs/roadmap.md` still lists Phase 3 as "not started". Set it to "in progress" with the progress link at the next roadmap edit (done in this commit).
   - `EVENT_KINDS` is a starting classification. `p3-spec-lock`, `p3-build-loop` and `p3-ship` may amend D34 when they wire events to handlers and agent results.
 - From `p3-spec-docs`:
-  - The slug pattern in `src/main/policy/context.ts` is looser than the shared `FEATURE_SLUG_PATTERN`. Unifying the two is a follow-up (PLAN, out of scope here).
-  - The approval callback of `scanSpecFolders` is synchronous. `p3-spec-lock` may need an async form when it reads the state file.
+  - Resolved in `p3-spec-lock`: `src/main/policy/context.ts` uses the shared `FEATURE_SLUG_PATTERN` and length, and the local pattern is gone.
+  - Resolved in `p3-spec-lock`: the approval callback of `scanSpecFolders` stays synchronous. The lock is read, and the locked spec hashed, before the scan.
   - The test for a file symlink is skipped where Windows refuses file symlinks (no developer mode). It runs on the Linux `check` job and in any environment that allows them; the directory junction case always runs.
-  - `p3-spec-lock` supplies the approval that `detectFolder` takes as an input, and the current-feature choice that the plugin's "newest folder" rule made.
-  - `scanSpecFolders` does not guard the caller's `approvalOf` callback, so one that throws rejects the scan (reviewer note, not a defect). `p3-spec-lock` can guard it where it supplies the callback.
+  - Done in `p3-spec-lock` (D36): it supplies the approval that `detectFolder` takes as an input, and the current-feature choice, which follows the state file and falls back to the newest folder.
+  - Resolved in `p3-spec-lock`: `scanSpecFolders` guards its `approvalOf` callback, and a throwing one reads its folder as `unchecked`.
   - The work and the close commit came in together as PR #22. Its `check` job is green (PR run 45036939521, main run 45036948955); the `e2e` jobs were still running when this row was written. PR #21's main run (45033938509) ended green.
+- From `p3-spec-lock`:
+  - The agent gate reads the watcher's last value through `current()`. A missed watch event leaves that value stale until the next event or refresh. Each refresh re-hashes, so this is bounded but not zero. Decide in the pilot whether the gate should refresh before each call.
+  - An unreadable state file makes every folder `unchecked`, and `approve-spec` replaces that file when a person approves a spec.
+  - Nothing raises `EDIT_SPEC` yet. `edit-approved-spec` sets `editing`, and `p3-build-loop` connects the event (D34, amended by D36).
+  - `tests/e2e/human-action.spec.ts` expects `not-available` for `approve-spec`. It passes because the e2e launch sets no `HARNESS_SPIKE_ROOT`, so the spec handlers are not registered. A run with a root set would need those expectations changed.
+  - The lock's file-symlink tests skip where Windows refuses file symlinks, as the `p3-spec-docs` test does.
 - The sdd plugin's own templates in the separate `repos/claude` repo are not changed by this phase. A later change there could carry the docs item into the plugin's subtask briefs (out of this repo, raised in `p3-state-machine`).
 
 ## Phase summary

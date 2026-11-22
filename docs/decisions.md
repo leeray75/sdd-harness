@@ -348,6 +348,7 @@ Format: **Decision** · **Outcome** · **Why** · **Date**.
   - **Event kinds:** each event is `human-only`, `user` or `app`. Human-only: `APPROVE_SPEC`, `REAPPROVE`, `CLOSE`. User: `START`, `APPROVE_PLAN`, `START_BUILD`, `REVISE`, `REQUEST_CHANGES`, `START_NEXT`. App: the other nine events.
   - **Human map:** `APPROVE_SPEC` and `REAPPROVE` map to the D33 action `approve-spec`; `CLOSE` maps to `mark-done`. Its keys are exactly the human-only events. `approve-result` has no event: the feature stays in `build-done`, and `p3-ship` handles it. `edit-approved-spec` and `change-rules` raise no event; a saved spec change is seen as `EDIT_SPEC`.
   - The event kinds are a starting classification. Later Phase 3 subtasks may amend them, as D19 was amended.
+  - **Amended:** 2026-11-22, p3-spec-lock: `EDIT_SPEC` may also come from `edit-approved-spec`, which records an edit to an approved spec (D36).
 - **Why:**
   - A plain table with pure functions can be read by main now and by the renderer later, and it has no runtime dependency to vendor.
   - A test compares the ids and all 12 x 18 pairs with a literal copy of the plugin's config, so any change to the port is deliberate.
@@ -386,4 +387,29 @@ Format: **Decision** · **Outcome** · **Why** · **Date**.
   - filling the guidance placeholders too: they are prose for the planner, not data;
   - reading `status: done` as a closed signal: it breaks parity with the plugin (the frontmatter `status` is parsed but not used for the node);
   - unifying the slug pattern of `src/main/policy/context.ts` with `FEATURE_SLUG_PATTERN` now: out of scope, and a follow-up.
+- **Date:** 2026-11-22
+
+## D36 · Spec lock: state file, approval values, watcher, handlers and the gate's spec state
+
+- **Outcome:** A feature's approval is recorded in the repo, in `docs/specs/.sdd-state.json` (D4, D7). The pure part is `src/shared/spec-state.ts`. The file reads, writes, hashing and scan are in `src/main/workflow/spec-lock.ts`.
+  - **State file:** a version-1 JSON object with exactly five keys: `version`, `feature` (a slug), `sha256` (64 lowercase hex characters), `approvedAt` (ISO 8601 in UTC) and `editing` (a boolean). It is read with a 4 KiB cap. A file that is missing, a symbolic link, a non-file, oversized, malformed, the wrong version or otherwise invalid is reported, and nothing is thrown. Writes go to a `<file>.<random>.tmp` in the same folder and are renamed over the file, and a failed write removes its temp file.
+  - **Hash input:** the SHA-256 of the feature's SPECS.md after one leading byte order mark is dropped and every CRLF becomes LF. The frontmatter is part of the text, so approval writes `status: approved` first and then hashes the result.
+  - **Approval values:** `none` when there is no state file or it names another feature; `unchecked` when the state file is unreadable, or the locked spec is missing, unreadable or over the cap; `changed` when `editing` is true or the hash differs; `approved` otherwise. `detectFolder` takes the value (D35).
+  - **Gate mapping:** `approved` is `approved`, `changed` is `draft`, `unchecked` is `locked` and `none` is `none` (`specStateOf`). With `locked`, no job may write a spec or source file. The state file is denied to every job. This settles the spec-state line of D30's context.
+  - **Watcher:** `src/main/workflow/spec-watch.ts` uses non-recursive `fs.watch` on `docs/specs/` and on the current feature's folder. An event starts a debounced refresh, which re-reads the state and re-hashes the spec. `onChange` runs only when the value changes. Before the first refresh the value is `unchecked`.
+  - **Current feature:** the state file's feature when the file is valid, else the folder with the newest modification time (a tie goes to the smaller slug).
+  - **Handlers:** `approve-spec` and `edit-approved-spec` are registered on the D33 channel when a project root exists (`HARNESS_SPIKE_ROOT`). They refuse with `code: 'refused'` and a fixed reason, and they never throw. `approve-spec` refuses a spec that is missing, unreadable, over the cap, without the Goals or Acceptance criteria headings, or already approved with the same hash. It writes the status and the state file, and puts SPECS.md back if the state write fails. `edit-approved-spec` refuses unless the approval is `approved` for that feature, and then sets `editing` and keeps the hash.
+  - **Agent context:** `startAgentHost` takes an optional live supplier of the feature and spec state. Each tool call's context is the base context with the supplier's current values (D30).
+  - **Amends D34:** `EDIT_SPEC` may also come from `edit-approved-spec`.
+- **Why:**
+  - A hash of the spec is the one fact a person's approval can be checked against (D4, D7). Dropping the BOM and turning CRLF into LF keeps a re-save on Windows from looking like an edit.
+  - `editing` lets a person allow a change without touching the file. The spec then reads as `changed` until it is approved again.
+  - `unchecked` fails closed. When the lock cannot be read, the app cannot tell whether the spec is approved, so writes stop.
+  - Every refresh re-reads and re-hashes, so a missed watch event cannot keep an old value for long.
+  - The current feature follows the lock, so an approved feature stays current until it is closed. `p3-ship` clears the file on close.
+- **Alternatives not taken:**
+  - the lock in `.claude/sdd/`: that folder is the plugin's own and is git-ignored, and the approval has to live in the repo (D7);
+  - reading an unreadable lock as `none`: the gate would then allow writes it cannot check;
+  - a recursive watch or a timer that polls: non-recursive watches and a re-hash on every refresh are enough;
+  - clearing the lock in this subtask: close belongs to `p3-ship`.
 - **Date:** 2026-11-22

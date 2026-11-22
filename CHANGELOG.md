@@ -115,6 +115,7 @@ All notable changes to SDD Harness are recorded here. The format follows [Keep a
   - `src/main/workflow/spec-folders.ts` scans `docs/specs/` read-only: symlinks and junctions are skipped, reads are capped, and an unreadable file is reported. A plugin-written folder opens with its stage.
   - The four templates and the `p3-state-machine` folder are vendored byte for byte under `tests/fixtures/sdd-plugin/`, with a README. The 20 finished folders of this repo are detected as Done.
   - `docs/workflow-engine.md` gains the "Document layer" and "Detecting a folder's node" sections.
+- **Spec lock** (`p3-spec-lock`, D36): the approval lives in `docs/specs/.sdd-state.json` (feature, SHA-256 of SPECS.md, approval time, `editing` flag), read with a size cap and written by rename. A watcher re-hashes the active spec when it or the state file changes. The `approve-spec` and `edit-approved-spec` handlers run on the human-only channel and refuse with fixed reasons, and they register when a project root is set. Folder detection now gets the real approval, and an unchecked approval locks spec and source writes for every agent.
 
 ### Changed
 
@@ -124,6 +125,7 @@ All notable changes to SDD Harness are recorded here. The format follows [Keep a
 - `runCommandInRoot` takes the job, the check and the event sink. The router passes each call's job to the runner (`ToolRunner` gains `job`).
 - `programRefusal` no longer refuses `.cmd` and `.bat` programs by name. The command check decides, and a Windows script runs only through the `cmd.exe` rule above; git stays refused.
 - `RuleEvent` is a union: the allow and deny decisions are unchanged, and the revert and network kinds are added. The application's log gains a `warn` level for proxy-only network events.
+- The agent gate's spec state comes from the approval lock (D36): `SpecState` gains `locked`, and each tool call reads the open feature and its state from the lock watcher. `effectiveFeature` uses the shared slug rules, so `a--b` and a slug over 64 characters are refused. `HumanActionRefusal` gains `refused`.
 - The OpenAI-compatible and Anthropic adapters take an extra headers option. A `/v1` at the end of an Anthropic-format base URL is stripped, so `http://h:4100/v1` posts to `/v1/messages` (it gave `/v1/v1/messages` before).
 - An empty-string key is sent as the `no-key-set` placeholder in both adapters, as a `null` key already was (it was sent as an empty token before).
 - `HARNESS_SPIKE_BASE_URL` may be unset when the preset has a default address. A spike refusal (an unknown preset or format, a bad address or header) is reported as `spike skipped: <reason>`, and the start line is `spike started preset=<id> provider=<format> model=<model>`.

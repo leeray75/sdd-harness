@@ -27,8 +27,12 @@ export interface HumanActionRequest {
   feature: string;
 }
 
-/** Why a request was refused. `untrusted-sender`: not the app's window. `invalid`: the guard failed. */
-export type HumanActionRefusal = 'untrusted-sender' | 'invalid' | 'no-gesture' | 'not-available';
+/**
+ * Why a request was refused. `untrusted-sender`: not the app's window. `invalid`: the guard failed.
+ * `refused`: a registered handler declined, with its own fixed reason (p3-spec-lock, D36).
+ */
+export type HumanActionRefusal =
+  'untrusted-sender' | 'invalid' | 'no-gesture' | 'not-available' | 'refused';
 
 export type HumanActionResult =
   { ok: true } | { ok: false; code: HumanActionRefusal; reason: string };

@@ -37,7 +37,7 @@ Run a whole feature headlessly: plan, spec lock, build and review rounds, pause,
 
 - State machine: hand-written typed table, no XState, in `src/shared/workflow.ts` (D34, `p3-state-machine`)
 - Document layer: templates, folder layout, parsers and folder detection in `src/shared/spec-docs.ts` and `src/shared/spec-detect.ts`, with the scanner in `src/main/workflow/spec-folders.ts` (D35, `p3-spec-docs`)
-- State file name and format: to decide in `p3-spec-lock`
+- State file name and format: `docs/specs/.sdd-state.json`, a version-1 JSON file with the locked feature, the spec's SHA-256, the approval time and an `editing` flag, decided in `p3-spec-lock` (D36)
 
 ## Suggested subtasks
 
