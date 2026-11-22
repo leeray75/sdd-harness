@@ -7,7 +7,7 @@ Each file here starts one Claude Code chat session for one phase of the [roadmap
 1. Open a **new** Claude Code chat in this repo with the sdd plugin loaded.
 2. Send: `Read docs/phases/phase-NN-<name>.md and follow its instructions.`
 3. Claude reads the context, proposes the phase's subtasks (each one sdd feature named `pN-<slug>`), asks you to confirm, and writes `docs/phases/phase-NN-progress.md`.
-4. For each subtask:
+4. For each subtask, Claude's brief includes the docs item in its acceptance criteria: the CHANGELOG entry under `## [Unreleased]`, every stale doc (`CLAUDE.md`, `README.md`, `docs/PRD.md`, `docs/workflow.md`, the phase doc and the progress file's follow-ups), and any useful new doc named in the spec, all done in the build on the feature branch. Then:
    1. Type `/sdd:start`, choose "no spec, describe it in chat", and paste the brief Claude gave you.
    2. Answer the planning questions, approve the plan, `/sdd:approve <feature>`, build, approve the result, `/sdd:close`.
    3. Claude updates the progress file and gives you the exact `/compact` command with a focus message. Run it.

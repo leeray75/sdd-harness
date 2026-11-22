@@ -104,6 +104,12 @@ All notable changes to SDD Harness are recorded here. The format follows [Keep a
 - **`docs/human-actions.md`:** the five actions, the request and result, the checks in order, what counts as a gesture, the refusal codes, the logging, how Phase 3 registers a handler, and the limits.
 - **`docs/agent-jobs.md`:** the four jobs and their tools, what each prompt tells the model, the task texts Phase 3 sends, and that main's gate enforces the rules.
 - **Dependabot for GitHub Actions** (`chore-ci-actions-node24`): `.github/dependabot.yml` checks the actions in the CI workflow weekly and opens a pull request for each update.
+- **Workflow table** (`p3-state-machine`, D34): `src/shared/workflow.ts` ports the sdd plugin's v0.18.0 states and events as a hand-written typed table, with no state-machine dependency.
+  - It holds 12 nodes, 18 events and the 21 transitions, with `legalEvents`, `nextNode` and `transition`, which reports an illegal event with a fixed reason.
+  - It maps the 11 path nodes to the six stages (Start, Plan, Spec, Build, Review, Done), with "Build, paused" for the paused node. `data-agent` is an overlay with no stage.
+  - It classifies every event as human-only, user or app, and maps the three human-only events to the D33 actions `approve-spec` and `mark-done`.
+  - Tests compare the table with a literal copy of the plugin's config, for every node and event pair, and check the stage labels, the `build-done` gate and the module's imports.
+- **`docs/workflow-engine.md`:** the engine reference: nodes, events, transitions, stage mapping and labels, event kinds and the human-action map.
 
 ### Changed
 

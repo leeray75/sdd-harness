@@ -339,3 +339,26 @@ Format: **Decision** · **Outcome** · **Why** · **Date**.
   - a native confirm dialog from main for each action: a second click the design does not show;
   - stub in-memory handlers now: code that Phase 3 would discard.
 - **Date:** 2026-11-21
+
+## D34 · Workflow table: hand-written, stage mapping, data-agent overlay, event kinds and human map
+
+- **Outcome:** The sdd workflow's twelve nodes, eighteen events and their transitions are one hand-written typed table in `src/shared/workflow.ts`. It is ported from the plugin's `hooks/machine.ts` (v0.18.0) as plain readonly data, with pure functions `legalEvents`, `nextNode` and `transition` (the last reports an illegal event with a fixed reason). There is no state-machine dependency.
+  - **Stage mapping:** each of the eleven path nodes maps to one of the six stages (Start, Plan, Spec, Build, Review, Done) per `docs/workflow.md`. `paused` is Build with a paused flag, labelled "Build, paused". `build-done` is Review.
+  - **Data-agent overlay:** `data-agent` stays in the table so the port is exact, but it has no stage (`isOverlay`). Callers show the stage of the path node it left.
+  - **Event kinds:** each event is `human-only`, `user` or `app`. Human-only: `APPROVE_SPEC`, `REAPPROVE`, `CLOSE`. User: `START`, `APPROVE_PLAN`, `START_BUILD`, `REVISE`, `REQUEST_CHANGES`, `START_NEXT`. App: the other nine events.
+  - **Human map:** `APPROVE_SPEC` and `REAPPROVE` map to the D33 action `approve-spec`; `CLOSE` maps to `mark-done`. Its keys are exactly the human-only events. `approve-result` has no event: the feature stays in `build-done`, and `p3-ship` handles it. `edit-approved-spec` and `change-rules` raise no event; a saved spec change is seen as `EDIT_SPEC`.
+  - The event kinds are a starting classification. Later Phase 3 subtasks may amend them, as D19 was amended.
+- **Why:**
+  - A plain table with pure functions can be read by main now and by the renderer later, and it has no runtime dependency to vendor.
+  - A test compares the ids and all 12 x 18 pairs with a literal copy of the plugin's config, so any change to the port is deliberate.
+  - The stage mapping gives the six user stages one source, so the UI never shows an internal id.
+  - Keeping `data-agent` in the table keeps the port exact. Its overlay status comes from the design: it never moves the path.
+  - The event kinds and the human map give later subtasks the data to enforce that only a person triggers the human-only events, and that no app event leaves `build-done`.
+- **Alternatives not taken** (from the `p3-state-machine` plan):
+  - XState from npm, as the plugin uses: a runtime dependency for a table of 21 transitions;
+  - the table in `src/main/workflow/`, main only: the renderer could not read the labels and kinds without a copy;
+  - mapping `data-agent` to Plan, or dropping it from the table: the first changes the stage view, the second breaks parity with the plugin;
+  - adding a result-approved node or event: breaks exact parity with the plugin, and `approve-result` is handled by `p3-ship`;
+  - `EDIT_SPEC` as human-only as well: an edit is an app-seen event, and the human check happens at approval;
+  - two event kinds only, with user folded into app: loses the distinction the UI needs for who may trigger each event.
+- **Date:** 2026-11-22

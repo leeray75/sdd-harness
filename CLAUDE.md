@@ -11,10 +11,11 @@ This repo is itself built with the **sdd plugin** for Claude Code: every feature
 ## Read before planning any feature
 
 1. `docs/PRD.md`: goals, the seven v1 features (F1–F7) with acceptance criteria, non-functional requirements, delivery order.
-2. `docs/decisions.md`: settled decisions D1–D13. Do not re-open them in a plan; if a feature needs a new decision, ask and add it as the next D-number.
+2. `docs/decisions.md`: settled decisions D1–D34. Do not re-open them in a plan; if a feature needs a new decision, ask and add it as the next D-number.
 3. `docs/design-notes.md`: tokens, components, screen behaviour, states not drawn, rules the UI must show.
 4. `docs/workflow.md`: the workflow diagrams, who can do what, and stage-to-state mapping.
-5. The screens named by the feature in `docs/design/screens/*.dc.html` (exact values) and `docs/design/png/*.png` (layout at a glance). The `<x-dc>`/`<helmet>`/`support.js` wrapper is from the design tool; ignore it.
+5. `docs/workflow-engine.md`: the sdd workflow's nodes, events and transitions, the stage mapping, the event kinds and the human-action map. The one table is `src/shared/workflow.ts` (D34).
+6. The screens named by the feature in `docs/design/screens/*.dc.html` (exact values) and `docs/design/png/*.png` (layout at a glance). The `<x-dc>`/`<helmet>`/`support.js` wrapper is from the design tool; ignore it.
 
 ## Build order and phases
 
