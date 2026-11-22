@@ -17,7 +17,7 @@ The suggested subtask 2 (`p3-spec-docs-and-lock`) is split in two, because templ
 
 ## Decisions added
 
-- (none yet; D34 is planned by `p3-state-machine`)
+- D34: the workflow table is hand-written in `src/shared/workflow.ts`, with the stage mapping, the data-agent overlay, the event kinds and the human-action map (`p3-state-machine`).
 
 ## Decided during planning
 
@@ -26,7 +26,7 @@ The suggested subtask 2 (`p3-spec-docs-and-lock`) is split in two, because templ
 
 ## Follow-ups
 
-- (none yet)
+- The sdd plugin's own templates in the separate `repos/claude` repo are not changed by this phase. A later change there could carry the docs item into the plugin's subtask briefs (out of this repo, raised in `p3-state-machine`).
 
 ## Phase summary
 

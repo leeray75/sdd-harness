@@ -90,7 +90,7 @@ Acceptance:
 
 ### F2 · Workflow engine
 
-- States and events ported from the plugin (D5), shown to users as six stages: Start, Plan, Spec, Build, Review, Done.
+- States and events ported from the plugin (D5) into a hand-written table in `src/shared/workflow.ts` (D34), shown to users as six stages: Start, Plan, Spec, Build, Review, Done. Reference: [`workflow-engine.md`](workflow-engine.md).
 - Spec lock by hash; editing an approved spec moves it to "approve again".
 - Review loop with the round limit; pause when the reviewer reports a spec problem; Ask for changes after the build (counted separately); close.
 

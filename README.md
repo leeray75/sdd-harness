@@ -2,7 +2,7 @@
 
 An Electron desktop app for spec-driven development: plan a feature with an AI, approve its spec, let separate agents build and review it, approve the result, ship. Any hosted or self-hosted model per job; the workflow rules are enforced by the app.
 
-Status: **Phase 0 (scaffold) in progress.** See [`docs/roadmap.md`](docs/roadmap.md) and [`docs/phases/phase-00-progress.md`](docs/phases/phase-00-progress.md).
+Status: **Phase 3 (workflow engine) in progress**; Phases 0–2 are done. See [`docs/roadmap.md`](docs/roadmap.md) and [`docs/phases/phase-03-progress.md`](docs/phases/phase-03-progress.md).
 
 ## Development setup
 
@@ -83,16 +83,17 @@ If the binary is still missing, run `node node_modules/electron/install.js` and 
 
 ## Docs
 
-| File                                           | What it is                                                                      |
-| ---------------------------------------------- | ------------------------------------------------------------------------------- |
-| [`docs/PRD.md`](docs/PRD.md)                   | Product requirements: goals, features F1–F7, acceptance criteria, delivery plan |
-| [`docs/decisions.md`](docs/decisions.md)       | Settled decisions D1–D33                                                        |
-| [`docs/design-notes.md`](docs/design-notes.md) | Design system, components, screen behaviour, states                             |
-| [`docs/workflow.md`](docs/workflow.md)         | Workflow diagrams and who can do what                                           |
-| [`docs/design/`](docs/design/README.md)        | 16 screens: HTML source and PNG renders                                         |
-| [`docs/roadmap.md`](docs/roadmap.md)           | Ten phases from scaffold to pilot, with status                                  |
-| [`docs/phases/`](docs/phases/README.md)        | One document per phase: open it in a new Claude Code chat to run that phase     |
-| `docs/specs/`                                  | Feature specs written by the sdd plugin during development                      |
+| File                                                 | What it is                                                                                                     |
+| ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| [`docs/PRD.md`](docs/PRD.md)                         | Product requirements: goals, features F1–F7, acceptance criteria, delivery plan                                |
+| [`docs/decisions.md`](docs/decisions.md)             | Settled decisions D1–D34                                                                                       |
+| [`docs/design-notes.md`](docs/design-notes.md)       | Design system, components, screen behaviour, states                                                            |
+| [`docs/workflow.md`](docs/workflow.md)               | Workflow diagrams and who can do what                                                                          |
+| [`docs/workflow-engine.md`](docs/workflow-engine.md) | Workflow engine reference: nodes, events, transitions, stages, event kinds (table in `src/shared/workflow.ts`) |
+| [`docs/design/`](docs/design/README.md)              | 16 screens: HTML source and PNG renders                                                                        |
+| [`docs/roadmap.md`](docs/roadmap.md)                 | Ten phases from scaffold to pilot, with status                                                                 |
+| [`docs/phases/`](docs/phases/README.md)              | One document per phase: open it in a new Claude Code chat to run that phase                                    |
+| `docs/specs/`                                        | Feature specs written by the sdd plugin during development                                                     |
 
 ## Building it with Claude Code and the sdd plugin
 
