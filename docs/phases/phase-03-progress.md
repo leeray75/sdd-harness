@@ -18,6 +18,7 @@ The suggested subtask 2 (`p3-spec-docs-and-lock`) is split in two, because templ
 ## Decisions added
 
 - D34: the workflow table is hand-written in `src/shared/workflow.ts`, with the stage mapping, the data-agent overlay, the event kinds and the human-action map (`p3-state-machine`).
+- D35: the document layer. The templates, folder layout, parsers and folder detector are pure shared modules, the scanner is in main, the plugin's session-marker and subagent inputs are dropped, and the approval is an input (`p3-spec-docs`).
 
 ## Decided during planning
 
@@ -31,6 +32,11 @@ The suggested subtask 2 (`p3-spec-docs-and-lock`) is split in two, because templ
   - The work came in as PR #20, and its `main` CI run (45033757830) is green. The close commit came in separately as PR #21. Its CI runs (PR 45033923980, main 45033938509) were still in progress when this row was written.
   - `docs/roadmap.md` still lists Phase 3 as "not started". Set it to "in progress" with the progress link at the next roadmap edit (done in this commit).
   - `EVENT_KINDS` is a starting classification. `p3-spec-lock`, `p3-build-loop` and `p3-ship` may amend D34 when they wire events to handlers and agent results.
+- From `p3-spec-docs`:
+  - The slug pattern in `src/main/policy/context.ts` is looser than the shared `FEATURE_SLUG_PATTERN`. Unifying the two is a follow-up (PLAN, out of scope here).
+  - The approval callback of `scanSpecFolders` is synchronous. `p3-spec-lock` may need an async form when it reads the state file.
+  - The test for a file symlink is skipped where Windows refuses file symlinks (no developer mode). It runs on the Linux `check` job and in any environment that allows them; the directory junction case always runs.
+  - `p3-spec-lock` supplies the approval that `detectFolder` takes as an input, and the current-feature choice that the plugin's "newest folder" rule made.
 - The sdd plugin's own templates in the separate `repos/claude` repo are not changed by this phase. A later change there could carry the docs item into the plugin's subtask briefs (out of this repo, raised in `p3-state-machine`).
 
 ## Phase summary

@@ -2,7 +2,7 @@
 
 The sdd workflow's states, events and transitions are one typed table in `src/shared/workflow.ts`. This page is the reference for that table: the nodes, the events, the transitions, the six stages a user sees, the event kinds and the map from the human-only events to the D33 actions. The decision and its reasons are in [`decisions.md`](decisions.md#d34--workflow-table-hand-written-stage-mapping-data-agent-overlay-event-kinds-and-human-map) (D34). The table is ported from the sdd plugin's `hooks/machine.ts` at v0.18.0, and a test holds a literal copy of that config to keep the two equal.
 
-The table is plain data with pure functions. It imports nothing outside `src/shared/`, and it uses no Node, Electron or DOM API, so main and the renderer can both read it.
+The table is plain data with pure functions. It imports nothing outside `src/shared/`, and it uses no Node, Electron or DOM API, so main and the renderer can both read it. The document layer (D35), which reads a feature's sdd documents and detects its node, is described in the last two sections.
 
 ## Nodes
 
@@ -131,13 +131,69 @@ No human-only event is classified as app.
 
 Two D33 actions have no event here. `approve-result` does not change the table: the feature stays in `build-done`, and the shipping subtask (`p3-ship`) handles it. `edit-approved-spec` and `change-rules` raise no event themselves: a saved spec change is seen as `EDIT_SPEC`.
 
+## Document layer
+
+The document layer reads and writes the sdd documents of one feature folder, `docs/specs/<feature>/` (D35). Its pure part is in `src/shared/spec-docs.ts`, and it imports nothing outside `src/shared/`. The scanner that reads a project's folders is in `src/main/workflow/spec-folders.ts`.
+
+**Templates.** `TEMPLATES` holds the plugin's four v0.18.0 templates (`plan`, `specs`, `tasks` and `subtask`), verbatim. `fillTemplate(kind, fields)` fills the five placeholders below and leaves every other `<...>` guidance text as it is. A field that is left out, or is an empty string, leaves its placeholder in place. A feature slug that fails validation gives `{ ok: false, reason }`; nothing is thrown.
+
+| Placeholder      | Filled from                        | When the field is left out |
+| ---------------- | ---------------------------------- | -------------------------- |
+| `<feature>`      | `feature` (required, a valid slug) | not applicable             |
+| `<Feature name>` | `title`                            | the feature slug           |
+| `<STORY-ID>`     | `ticket`                           | stays                      |
+| `<story title>`  | `storyTitle`                       | stays                      |
+| `<YYYY-MM-DD>`   | `date`                             | stays                      |
+
+**Layout.** `SPECS_DIR` is `docs/specs`. `SPEC_FILES` lists the seven names a feature folder can hold: `PLAN.md`, `SPECS.md`, `tasks.md`, `SUBTASK.md`, `build-ledger.md`, `changes.md` and `SUMMARY.md`. `isFeatureSlug` checks a slug against `FEATURE_SLUG_PATTERN` and `MAX_FEATURE_LENGTH` (`src/shared/human-actions.ts`). `specFilePath(feature, file)` gives `docs/specs/<feature>/<file>`, and null for a bad slug, a name not in the list, a separator, a traversal, an absolute path or a value that is not a string.
+
+**Parsers.** Each takes the file's text, or `null` when the file is absent, and returns `present` with the fields it reads and a `problems` list. None throws. CRLF text and a byte order mark are read the same way.
+
+- `parsePlan`: the first `Status:` value of PLAN.md.
+- `parseSpecs`: the `status` and `ticket` of the frontmatter in SPECS.md. The status is reported; it does not decide the node.
+- `parseTasks`: the checked and open checkboxes, counted as the plugin counts them.
+- `parseLedger`: `state`, `revision`, `resumeOnApprove` (`resume on approve: yes`), `currentRound` (`current round:`) and `phase` (`implementing`, `reviewing` or empty). A malformed value is reported and read as absent.
+
+**Scanner.** `readSpecFolder(projectRoot, feature, approval)` reads one folder, and `scanSpecFolders(projectRoot, approvalOf)` returns every valid folder sorted by slug, each with its files, parsed files, detection and newest known-file mtime. The scanner uses `lstat`, so symbolic links and junctions are skipped, and it reads at most 256 KiB of each file. A folder with no known file is skipped. An unreadable file is reported in its state and its problems, and nothing is thrown. `docs/specs` missing gives an empty list.
+
+## Detecting a folder's node
+
+`detectFolder(input)` in `src/shared/spec-detect.ts` gives a folder's `{ node, stage, round, source }` from its approval and its files. The approval is an input: `none` (no lock), `approved`, `changed` or `unchecked`. The lock and its state file come with `p3-spec-lock`. The precedence follows the plugin's `hooks/detect.ts` (v0.18.0); the first rule that matches wins:
+
+1. Approval `changed` gives `spec-changed`, whatever the ledger says.
+2. Approval `none` gives:
+   - `closed` when SUMMARY.md exists;
+   - else `spec-drafted` when SPECS.md exists;
+   - else `plan-approved` when PLAN.md has Status `approved`;
+   - else `planning` when PLAN.md exists;
+   - else `idle`.
+
+   The ledger is ignored: a build needs an approved spec.
+
+3. Approval `approved` or `unchecked` (read as approved) gives:
+   - `paused` when the ledger's state is `paused-for-revision`;
+   - else `build-done` when the ledger's state is `done`, or SUMMARY.md exists and the ledger is not `running`;
+   - else, when the ledger's state is `running`, the `phase:` value (source `phase`), or `implementing` when the phase is empty (source `ledger`);
+   - else `spec-approved`.
+
+`round` is the ledger's current round while the node is `implementing` or `reviewing`, and null otherwise. `source` is null unless the build is running.
+
+The plugin's session marker and its seen-subagent inputs are not ported, so a folder is read from its files and the approval alone. D35 records why. A plugin-written folder that has finished, with SUMMARY.md and a `done` ledger, detects as `closed` (stage Done) with approval `none`. This holds for the 20 finished folders of this repo and the vendored `p3-state-machine` folder.
+
 ## Where the code is
 
 - `src/shared/workflow.ts`: the ids, the table, the functions, the stages, the event kinds and the human map.
+- `src/shared/spec-docs.ts`: the templates, the fill function, the layout and path helpers, and the four parsers.
+- `src/shared/spec-detect.ts`: `detectFolder` and its types.
+- `src/main/workflow/spec-folders.ts`: the scanner, `readSpecFolder`, `readSpecFolderAt` and `scanSpecFolders`.
 - `tests/unit/workflow-machine.test.ts`: the parity with the plugin's config, and the legal events and transitions.
 - `tests/unit/workflow-stages.test.ts`: the stage mapping, the labels and the `build-done` gate.
 - `tests/unit/workflow-events.test.ts`: the event kinds, the human map and the module's imports.
+- `tests/unit/spec-docs-templates.test.ts`, `spec-docs-paths.test.ts` and `spec-docs-parse.test.ts`: the templates and fill, the layout and paths, and the parsers.
+- `tests/unit/spec-detect.test.ts`: a fixture for every branch of the precedence, and the purity scan of both shared document modules.
+- `tests/unit/spec-folders.test.ts`: the temp-folder scans, the vendored plugin folder, and this repo's finished folders.
+- `tests/fixtures/sdd-plugin/`: the templates and the `p3-state-machine` folder, copied from the plugin (see its README).
 
 ## Extending this page
 
-Later Phase 3 subtasks add their part here: the spec lock (`p3-spec-lock`), the build loop (`p3-build-loop`) and shipping (`p3-ship`). Each one adds its handlers and any new state or event to this page and to the table, with a decision in `decisions.md` when the table changes.
+Later Phase 3 subtasks add their part here: the spec lock (`p3-spec-lock`), the build loop (`p3-build-loop`) and shipping (`p3-ship`). Each one adds its handlers and any new state or event to this page and to the table, with a decision in `decisions.md` when the table changes. The spec lock supplies the approval that `detectFolder` takes as an input.

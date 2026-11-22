@@ -362,3 +362,28 @@ Format: **Decision** · **Outcome** · **Why** · **Date**.
   - `EDIT_SPEC` as human-only as well: an edit is an app-seen event, and the human check happens at approval;
   - two event kinds only, with user folded into app: loses the distinction the UI needs for who may trigger each event.
 - **Date:** 2026-11-22
+
+## D35 · Document layer: templates, folder layout, parsers and folder detection
+
+- **Outcome:** The harness can write and read the sdd documents of a feature folder, `docs/specs/<feature>/`. The pure part is in two shared modules, with no Node, Electron or DOM API:
+  - `src/shared/spec-docs.ts`: the plugin's four v0.18.0 templates as constants (`TEMPLATES`, verbatim), with `fillTemplate`, which fills the five known placeholders and refuses an invalid slug with an error result; the folder layout (`SPECS_DIR`, `SPEC_FILES`, `isFeatureSlug`, `specFilePath`); and the parsers for PLAN.md, SPECS.md, tasks.md and build-ledger.md, which never throw.
+  - `src/shared/spec-detect.ts`: `detectFolder`, which maps a folder's files and its approval to a workflow node and stage (`src/shared/workflow.ts`). It follows the precedence of the plugin's `hooks/detect.ts` (v0.18.0), minus the two inputs in the next bullet.
+  - `src/main/workflow/spec-folders.ts`: the main-side scanner, `readSpecFolder` and `scanSpecFolders`, on `node:fs/promises`. It is read-only, does not follow symbolic links or junctions, caps each read, and reports an unreadable file without throwing.
+  - **Dropped inputs:** the plugin's session marker and seen-subagent inputs are not ported. The ledger's `phase:` line alone picks implementing or reviewing (source `phase`); a running ledger with no phase line is implementing (source `ledger`); new work with no file is idle. The plugin's pane text is UI copy and is not ported.
+  - **Approval is an input:** `detectFolder` takes the approval (`none`, `approved`, `changed` or `unchecked`). The approval lock and its state file come with `p3-spec-lock`.
+  - **Vendored copies:** the four templates and one plugin-written feature folder (`p3-state-machine`) are copied byte for byte under `tests/fixtures/sdd-plugin/`, with a README that names the version. Tests compare the constants with the templates, and read the folder as closed. The list of deliberate template changes is empty.
+- **Why:**
+  - D5 says existing folders open as history. The plugin's precedence gives each folder its stage from its files, so a plugin-written folder opens at the right stage without the plugin's hooks.
+  - The shared modules are pure, as D34 is, so the renderer can read the same templates, parsers and detector later without a copy.
+  - The plugin's marker and subagent inputs describe a live session, which the harness does not have yet. The ledger's `phase:` line is the step `p3-build-loop` will write on every step, so it can replace them.
+  - Byte-for-byte copies make a plugin change visible as a failing test, where a literal copy in the test could drift unnoticed.
+- **Alternatives not taken** (from the `p3-spec-docs` plan):
+  - one shared file with everything pure, and the templates and parsers in `src/main/workflow/`: the renderer would need a copy later;
+  - keeping the session marker and the subagent inputs as unused optional inputs, to keep the port line for line;
+  - a literal copy of the templates inside the test, as `workflow-machine.test.ts` does: a plugin change would not be seen;
+  - returning the plugin's newest-folder choice now: it is the approval-dependent choice, and `p3-spec-lock` makes it;
+  - harness-specific template wording now: no need yet, and the parity list stays empty;
+  - filling the guidance placeholders too: they are prose for the planner, not data;
+  - reading `status: done` as a closed signal: it breaks parity with the plugin (the frontmatter `status` is parsed but not used for the node);
+  - unifying the slug pattern of `src/main/policy/context.ts` with `FEATURE_SLUG_PATTERN` now: out of scope, and a follow-up.
+- **Date:** 2026-11-22
