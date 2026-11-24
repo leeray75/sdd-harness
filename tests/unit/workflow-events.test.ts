@@ -5,9 +5,9 @@ import { HUMAN_ACTION_IDS } from '../../src/shared/human-actions';
 import { EVENT_IDS, EVENT_KINDS, HUMAN_EVENT_ACTIONS } from '../../src/shared/workflow';
 
 describe('event kinds (AC6)', () => {
-  it('classifies all eighteen events, and only those', () => {
+  it('classifies all twenty-one events, and only those', () => {
     expect(Object.keys(EVENT_KINDS).sort()).toEqual([...EVENT_IDS].sort());
-    expect(Object.keys(EVENT_KINDS)).toHaveLength(18);
+    expect(Object.keys(EVENT_KINDS)).toHaveLength(21);
   });
 
   it('marks APPROVE_SPEC, REAPPROVE and CLOSE as human-only', () => {
@@ -15,7 +15,7 @@ describe('event kinds (AC6)', () => {
     expect(humanOnly).toEqual(['APPROVE_SPEC', 'REAPPROVE', 'CLOSE']);
   });
 
-  it('marks the six user events as user', () => {
+  it('marks the eight user events as user', () => {
     const user = EVENT_IDS.filter((event) => EVENT_KINDS[event] === 'user');
     expect(user).toEqual([
       'START',
@@ -24,10 +24,12 @@ describe('event kinds (AC6)', () => {
       'REVISE',
       'REQUEST_CHANGES',
       'START_NEXT',
+      'CONTINUE',
+      'STOP_BUILD',
     ]);
   });
 
-  it('marks the nine app events as app', () => {
+  it('marks the ten app events as app', () => {
     const app = EVENT_IDS.filter((event) => EVENT_KINDS[event] === 'app');
     expect(app).toEqual([
       'DRAFT_SPEC',
@@ -39,6 +41,7 @@ describe('event kinds (AC6)', () => {
       'DATA_START',
       'DATA_STOP',
       'DATA_STOP_BUILD',
+      'END_BUILD',
     ]);
   });
 

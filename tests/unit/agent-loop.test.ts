@@ -7,7 +7,13 @@ import { JOB_PROMPTS, jobToolDefinitions } from '../../src/agent/jobs';
 import { addUsage, MAX_TURNS, runAgentLoop, type CallTool } from '../../src/agent/loop';
 import { createAnthropicProvider } from '../../src/agent/provider/anthropic';
 import { createOpenAIProvider } from '../../src/agent/provider/openai';
-import type { Provider, ProviderRequest, StreamEvent, Usage } from '../../src/agent/provider/types';
+import type {
+  Message,
+  Provider,
+  ProviderRequest,
+  StreamEvent,
+  Usage,
+} from '../../src/agent/provider/types';
 import { redactor, REDACTED } from '../../src/main/secrets/redact';
 import { JOB_IDS } from '../../src/shared/agent-protocol';
 
@@ -472,5 +478,86 @@ describe('runAgentLoop output', () => {
     });
     await run(provider, async () => ({ ok: true, output: 'Spike note' }));
     expect(out.join('')).not.toContain(SENTINEL);
+  });
+});
+
+describe('runAgentLoop options: maxTurns, history and messages', () => {
+  const runWith = (
+    provider: Provider,
+    options: { maxTurns?: number; history?: Message[] },
+    callTool: CallTool = noopTool,
+  ) =>
+    runAgentLoop({
+      provider,
+      model: MODEL,
+      job: 'reader',
+      prompt: PROMPT,
+      callTool,
+      onText: () => undefined,
+      ...options,
+    });
+
+  it('keeps the default of MAX_TURNS for a missing, zero, fractional or negative cap', async () => {
+    for (const maxTurns of [undefined, 0, -2, 2.5]) {
+      const { provider, requests } = scriptedProvider([toolReply('{"path":"a.txt"}')]);
+      const result = await runWith(provider, { maxTurns });
+      expect(requests).toHaveLength(MAX_TURNS);
+      expect(result).toMatchObject({ stopped: 'turn-limit', turns: MAX_TURNS });
+    }
+  });
+
+  it('raises the cap to maxTurns and does not run calls from the last reply', async () => {
+    const { provider, requests } = scriptedProvider([toolReply('{"path":"a.txt"}')]);
+    const callTool = vi.fn<CallTool>(async () => ({ ok: true, output: 'a' }));
+    const result = await runWith(provider, { maxTurns: 7 }, callTool);
+    expect(requests).toHaveLength(7);
+    expect(callTool).toHaveBeenCalledTimes(6);
+    expect(result).toMatchObject({ stopped: 'turn-limit', turns: 7 });
+  });
+
+  it('sends the history before the prompt, and does not change the history', async () => {
+    const history: Message[] = [
+      { role: 'user', text: 'earlier prompt' },
+      { role: 'assistant', text: 'earlier reply', toolCalls: [] },
+    ];
+    const snapshot = structuredClone(history);
+    const { provider, requests } = scriptedProvider([textReply('ok')]);
+    await runWith(provider, { history });
+    expect(requests[0]?.messages).toEqual([...snapshot, { role: 'user', text: PROMPT }]);
+    expect(history).toEqual(snapshot);
+  });
+
+  it('returns the full message list, which continues as the next run history', async () => {
+    const { provider, requests } = scriptedProvider([
+      toolReply('{"path":"notes.txt"}', 'call_a'),
+      textReply('It says a note.'),
+      textReply('Second answer.'),
+    ]);
+    const callTool = vi.fn<CallTool>(async () => ({ ok: true, output: SPIKE_NOTE }));
+    const first = await runWith(provider, {}, callTool);
+    expect(first.messages).toEqual([
+      { role: 'user', text: PROMPT },
+      {
+        role: 'assistant',
+        text: '',
+        toolCalls: [{ id: 'call_a', name: 'read_file', arguments: '{"path":"notes.txt"}' }],
+      },
+      { role: 'tool', toolCallId: 'call_a', content: SPIKE_NOTE },
+      { role: 'assistant', text: 'It says a note.', toolCalls: [] },
+    ]);
+    const second = await runAgentLoop({
+      provider,
+      model: MODEL,
+      job: 'reader',
+      prompt: 'Follow-up.',
+      callTool,
+      onText: () => undefined,
+      history: first.messages,
+    });
+    expect(requests[2]?.messages).toEqual([
+      ...first.messages,
+      { role: 'user', text: 'Follow-up.' },
+    ]);
+    expect(second.messages).toHaveLength(first.messages.length + 2);
   });
 });

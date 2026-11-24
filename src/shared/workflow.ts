@@ -1,5 +1,6 @@
-// The sdd workflow table (D34): the twelve nodes, the eighteen events and the transitions between
-// them, ported by hand from the sdd plugin's hooks/machine.ts (v0.18.0). Shared code, so it
+// The sdd workflow table (D34): the twelve nodes, the twenty-one events and the transitions between
+// them, ported by hand from the sdd plugin's hooks/machine.ts (v0.18.0). The last three events,
+// CONTINUE, STOP_BUILD and END_BUILD, are the app's additions for the build loop (D37). Shared code, so it
 // imports only from src/shared/ and no Node, Electron or DOM API. It holds plain data and pure
 // functions; it has no state-machine dependency and changes nothing at run time.
 //
@@ -38,7 +39,10 @@ export const PATH_IDS: readonly PathId[] = NODE_IDS.filter(
   (id): id is PathId => id !== 'data-agent',
 );
 
-/** The eighteen event ids, in the plugin's order (the documented flow's order). */
+/**
+ * The twenty-one event ids: the plugin's eighteen in the plugin's order (the documented flow's
+ * order), then CONTINUE, STOP_BUILD and END_BUILD (D37).
+ */
 export const EVENT_IDS = [
   'START',
   'APPROVE_PLAN',
@@ -58,6 +62,9 @@ export const EVENT_IDS = [
   'DATA_START',
   'DATA_STOP',
   'DATA_STOP_BUILD',
+  'CONTINUE',
+  'STOP_BUILD',
+  'END_BUILD',
 ] as const;
 
 export type EventId = (typeof EVENT_IDS)[number];
@@ -67,7 +74,7 @@ export function isNodeId(value: unknown): value is NodeId {
   return typeof value === 'string' && (NODE_IDS as readonly string[]).includes(value);
 }
 
-/** True when `value` is one of the eighteen event ids. */
+/** True when `value` is one of the twenty-one event ids. */
 export function isEventId(value: unknown): value is EventId {
   return typeof value === 'string' && (EVENT_IDS as readonly string[]).includes(value);
 }
@@ -90,13 +97,25 @@ export const TRANSITIONS: Readonly<Record<NodeId, Readonly<Partial<Record<EventI
   'spec-drafted': { APPROVE_SPEC: 'spec-approved' },
   'spec-approved': { EDIT_SPEC: 'spec-changed', START_BUILD: 'implementing' },
   'spec-changed': { REAPPROVE: 'implementing' },
-  implementing: { IMPLEMENTED: 'reviewing', SPEC_PROBLEM: 'paused', DATA_START: 'data-agent' },
+  implementing: {
+    IMPLEMENTED: 'reviewing',
+    SPEC_PROBLEM: 'paused',
+    DATA_START: 'data-agent',
+    END_BUILD: 'build-done',
+  },
   reviewing: {
     REVIEW_ISSUES: 'implementing',
     REVIEW_PASSED: 'build-done',
     SPEC_PROBLEM: 'paused',
+    END_BUILD: 'build-done',
   },
-  paused: { REVISE: 'spec-changed', REAPPROVE: 'implementing' },
+  paused: {
+    REVISE: 'spec-changed',
+    REAPPROVE: 'implementing',
+    CONTINUE: 'implementing',
+    STOP_BUILD: 'build-done',
+    END_BUILD: 'build-done',
+  },
   'build-done': { CLOSE: 'closed', REQUEST_CHANGES: 'implementing' },
   closed: { START_NEXT: 'planning' },
   'data-agent': { DATA_STOP: 'planning', DATA_STOP_BUILD: 'implementing' },
@@ -219,6 +238,9 @@ export const EVENT_KINDS: Readonly<Record<EventId, EventKind>> = {
   DATA_START: 'app',
   DATA_STOP: 'app',
   DATA_STOP_BUILD: 'app',
+  CONTINUE: 'user',
+  STOP_BUILD: 'user',
+  END_BUILD: 'app',
 };
 
 /** The human-only events, which are the keys of HUMAN_EVENT_ACTIONS. */

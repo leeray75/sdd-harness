@@ -31,6 +31,8 @@ const CASES: Array<[string, PathArea]> = [
   ['docs/specs/f/Tasks.MD', specDoc('f', 'tasks.md')],
   ['docs/specs/f/subtask.md', specDoc('f', 'subtask.md')],
   ['docs/specs/f/plan.md', specDoc('f', 'plan.md')],
+  ['docs/specs/f/changes.md', specDoc('f', 'changes.md')],
+  ['docs/specs/F/Changes.MD', specDoc('f', 'changes.md')],
   ['docs/specs/f/.. /x.md', SPEC_OTHER],
   // outside the root
   ['C:/x', OUTSIDE],
@@ -46,6 +48,7 @@ const CASES: Array<[string, PathArea]> = [
   // spec folder, but not a planning doc
   ['docs/specs', SPEC_OTHER],
   ['docs/specs/f/state.json', SPEC_OTHER],
+  ['docs/specs/.sdd-state.json', SPEC_OTHER],
   ['docs/specs/f/build-ledger.md', SPEC_OTHER],
   ['docs/specs/f/SUMMARY.md', SPEC_OTHER],
   ['docs/specs/f/x/SPECS.md', SPEC_OTHER],

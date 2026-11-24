@@ -32,6 +32,11 @@ export interface SpecHandlersDeps {
   now: () => Date;
   /** Called after a successful change, so the watcher re-reads the lock. Errors are ignored. */
   onLockChanged: () => unknown;
+  /**
+   * Asked before an edit is recorded (D37). The build controller of the feature answers: it allows
+   * the edit only before the build starts. Unset means every edit that passes the checks is allowed.
+   */
+  onEditRequested?: (feature: string) => { ok: true } | { ok: false; reason: string };
 }
 
 export interface SpecHandlers {
@@ -115,6 +120,10 @@ export function createSpecHandlers(deps: SpecHandlersDeps): SpecHandlers {
     if (lock.feature !== feature) return refuse(OTHER_FEATURE);
     const hash = await hashSpec(root, feature);
     if (approvalFor(lock, feature, hash) !== 'approved') return refuse(NOT_APPROVED);
+    if (deps.onEditRequested) {
+      const answer = deps.onEditRequested(feature);
+      if (!answer.ok) return refuse(answer.reason);
+    }
 
     const saved = await writeSpecState(root, { ...lock, editing: true });
     if (!saved.ok) return refuse(EDIT_WRITE_FAILED);

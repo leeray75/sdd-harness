@@ -14,7 +14,7 @@ Five actions can change a feature's state in ways that only a person may decide:
 
 The ids are in `HUMAN_ACTION_IDS` in `src/shared/human-actions.ts`. The table above is the plain-language meaning; the UI copy belongs to Phase 3 and later.
 
-**Status:** `approve-spec` and `edit-approved-spec` have handlers from `p3-spec-lock` (D36). They are registered when a project root exists (`HARNESS_SPIKE_ROOT`). Without a root, every request that passes the checks is answered `not-available`. The other three actions have no handler yet: `approve-result` and `mark-done` come with `p3-ship`, and `change-rules` is not scheduled.
+**Status:** `approve-spec` and `edit-approved-spec` have handlers from `p3-spec-lock` (D36). They are registered when a project root exists (`HARNESS_SPIKE_ROOT`). Without a root, every request that passes the checks is answered `not-available`. `edit-approved-spec` also asks the feature's build controller before it records the edit (D37): the edit is refused once a build has started. The other three actions have no handler yet: `approve-result` and `mark-done` come with `p3-ship`, and `change-rules` is not scheduled.
 
 ## The request and the result
 

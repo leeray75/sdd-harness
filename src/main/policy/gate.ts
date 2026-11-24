@@ -34,6 +34,8 @@ const SPEC_APPROVED = 'not allowed: the spec is approved; spec files are read-on
 const PLANNER_SCOPE =
   "not allowed: the planner can write only PLAN.md, SPECS.md, tasks.md and SUBTASK.md in the current feature's spec folder";
 const WRITER_SPEC = "not allowed: spec files can't be written by the code writer";
+/** The two spec files the writer may write once the spec is approved (D37). */
+const WRITER_OWN_SPEC_DOCS: ReadonlySet<string> = new Set(['tasks.md', 'changes.md']);
 const WRITER_SOURCE_LOCKED =
   'not allowed: source files can be edited only after the spec is approved';
 const SPEC_UNCHECKED =
@@ -83,10 +85,22 @@ function writeReason(
     if (context.spec === 'approved') {
       return SPEC_APPROVED;
     }
-    const ownPlanningDoc = area.kind === 'spec-doc' && area.feature === feature;
+    const ownPlanningDoc =
+      area.kind === 'spec-doc' && area.feature === feature && area.name !== 'changes.md';
     return ownPlanningDoc ? null : PLANNER_SCOPE;
   }
   if (job === 'writer') {
+    // D37: once the spec is approved, the writer may keep its own feature's tasks.md (the ticks)
+    // and changes.md (the record). Every other spec file stays read-only to it.
+    if (
+      context.spec === 'approved' &&
+      area.kind === 'spec-doc' &&
+      feature !== null &&
+      area.feature === feature &&
+      WRITER_OWN_SPEC_DOCS.has(area.name)
+    ) {
+      return null;
+    }
     if (area.kind === 'spec-doc' || area.kind === 'spec-other') {
       return context.spec === 'approved' ? SPEC_APPROVED : WRITER_SPEC;
     }

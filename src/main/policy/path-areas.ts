@@ -9,7 +9,14 @@ export type PathArea =
   | { kind: 'spec-other' }
   | { kind: 'source' };
 
-export const SPEC_DOC_NAMES = ['plan.md', 'specs.md', 'tasks.md', 'subtask.md'] as const;
+// changes.md (D37) is the writer's record of what it touched; the planner never writes it.
+export const SPEC_DOC_NAMES = [
+  'plan.md',
+  'specs.md',
+  'tasks.md',
+  'subtask.md',
+  'changes.md',
+] as const;
 
 export type SpecDocName = (typeof SPEC_DOC_NAMES)[number];
 
