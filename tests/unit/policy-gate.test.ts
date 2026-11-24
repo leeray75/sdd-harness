@@ -502,6 +502,137 @@ describe('checkToolCall: AC3 gate with a detected allowlist', () => {
 });
 
 // AC6 (p3-spec-lock, D36): the live spec state from the approval lock.
+describe('checkToolCall: D37 the writer keeps its own tasks.md and changes.md', () => {
+  const ctx = (spec: SpecState, feature: string | null = 'f') => context({ feature, spec });
+  const OWN = ['docs/specs/f/tasks.md', 'docs/specs/f/changes.md'];
+  const OTHER_FILES = [
+    'docs/specs/f/build-ledger.md',
+    'docs/specs/f/SUMMARY.md',
+    'docs/specs/f/SPECS.md',
+    'docs/specs/f/plan.md',
+    'docs/specs/f/subtask.md',
+    'docs/specs/.sdd-state.json',
+    'docs/specs/g/tasks.md',
+    'docs/specs/g/changes.md',
+  ];
+  const WRITER_SPEC_REASON = "not allowed: spec files can't be written by the code writer";
+  const APPROVED_REASON = 'not allowed: the spec is approved; spec files are read-only';
+  const LOCKED_REASON =
+    "not allowed: the spec's approval can't be checked, so nothing can be written";
+  const PLANNER_REASON =
+    "not allowed: the planner can write only PLAN.md, SPECS.md, tasks.md and SUBTASK.md in the current feature's spec folder";
+
+  it('allows the writer write_file and edit_file of its feature tasks.md and changes.md once approved', () => {
+    for (const path of OWN) {
+      expectAllowed(call('writer', 'write_file', { path, content: 'x' }, ctx('approved')));
+      expectAllowed(
+        call('writer', 'edit_file', { path, old_text: 'a', new_text: 'b' }, ctx('approved')),
+      );
+    }
+  });
+
+  it('denies the writer those two files before approval, with the existing spec reason', () => {
+    for (const spec of ['none', 'draft'] as const) {
+      for (const path of OWN) {
+        expect(
+          reasonOf(call('writer', 'write_file', { path, content: 'x' }, ctx(spec))),
+          `${spec} ${path}`,
+        ).toBe(WRITER_SPEC_REASON);
+      }
+    }
+  });
+
+  it('denies the writer every other spec file, and another feature, once approved', () => {
+    for (const path of OTHER_FILES) {
+      expect(
+        reasonOf(call('writer', 'write_file', { path, content: 'x' }, ctx('approved'))),
+        path,
+      ).toBe(APPROVED_REASON);
+    }
+  });
+
+  it('denies the writer its own files while the approval is unchecked', () => {
+    for (const path of OWN) {
+      expect(
+        reasonOf(call('writer', 'write_file', { path, content: 'x' }, ctx('locked'))),
+        path,
+      ).toBe(LOCKED_REASON);
+    }
+  });
+
+  it('denies every job the ledger, SUMMARY and the state file under every spec state', () => {
+    for (const spec of [...SPEC_STATES, 'locked'] as const) {
+      for (const job of JOB_IDS) {
+        for (const path of [
+          'docs/specs/f/build-ledger.md',
+          'docs/specs/f/SUMMARY.md',
+          'docs/specs/.sdd-state.json',
+        ]) {
+          expect(
+            call(job, 'write_file', { path, content: 'x' }, ctx(spec)).allow,
+            `${job} ${spec} ${path}`,
+          ).toBe(false);
+          expect(
+            call(job, 'edit_file', { path, old_text: 'a', new_text: 'b' }, ctx(spec)).allow,
+            `${job} edit ${spec} ${path}`,
+          ).toBe(false);
+        }
+      }
+    }
+  });
+
+  it('keeps the planner out of changes.md, before and after approval', () => {
+    for (const spec of ['none', 'draft'] as const) {
+      expect(
+        reasonOf(
+          call(
+            'planner',
+            'write_file',
+            { path: 'docs/specs/f/changes.md', content: 'x' },
+            ctx(spec),
+          ),
+        ),
+      ).toBe(PLANNER_REASON);
+    }
+    expect(
+      reasonOf(
+        call(
+          'planner',
+          'write_file',
+          { path: 'docs/specs/f/changes.md', content: 'x' },
+          ctx('approved'),
+        ),
+      ),
+    ).toBe(APPROVED_REASON);
+  });
+
+  it('still lets the planner write its own planning docs before approval', () => {
+    for (const path of ['docs/specs/f/PLAN.md', 'docs/specs/f/SPECS.md', 'docs/specs/f/tasks.md']) {
+      expectAllowed(call('planner', 'write_file', { path, content: 'x' }, ctx('none')));
+    }
+  });
+
+  it('keeps the reviewer and the reader from writing any file, even the writer files', () => {
+    for (const job of ['reviewer', 'reader'] as const) {
+      for (const path of OWN) {
+        expect(call(job, 'write_file', { path, content: 'x' }, ctx('approved')).allow, job).toBe(
+          false,
+        );
+      }
+    }
+  });
+
+  it('denies a git commit run through run_command, under the default command check', () => {
+    const decision = call(
+      'writer',
+      'run_command',
+      { program: 'git', args: ['commit', '-m', 'x'] },
+      ctx('approved'),
+    );
+    expect(decision.allow).toBe(false);
+  });
+});
+
 describe('checkToolCall: AC6 the live spec state (D36)', () => {
   const SPEC_PATH = 'docs/specs/f/SPECS.md';
   const STATE_PATH = 'docs/specs/.sdd-state.json';

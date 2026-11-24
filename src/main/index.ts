@@ -18,6 +18,7 @@ import { createElectronSecretStore } from './secrets/electron';
 import { readSecretFromPipe } from './secrets/pipe';
 import { applyNavigationGuards, isTrustedSender } from './security';
 import { specStateOf } from './policy/context';
+import type { BuildController } from './workflow/build-loop';
 import { createSpecLockWatcher, type SpecLockWatcher } from './workflow/spec-watch';
 
 // electron-vite sets ELECTRON_RENDERER_URL only under `electron-vite dev`.
@@ -169,6 +170,9 @@ function registerIpcHandlers(): void {
  */
 const projectRoot = process.env['HARNESS_SPIKE_ROOT'] || undefined;
 
+/** The build controller of each feature that has a build (D37). Filled when a build starts. */
+const buildControllers = new Map<string, BuildController>();
+
 /**
  * Registers the spec-lock handlers on the human-only channel and starts the lock watcher for the
  * project root (p3-spec-lock, D36). Each handler refreshes the watcher after a change.
@@ -181,10 +185,16 @@ function startSpecLock(root: string): SpecLockWatcher {
       log.info(`spec lock: ${value.approval}${feature}`);
     },
   });
+  // The build controllers by feature (D37). None is created at startup in this phase, so until a
+  // build starts, an edit of an approved spec is allowed as before.
   const handlers = createSpecHandlers({
     root,
     now: () => new Date(),
     onLockChanged: () => lock.refresh(),
+    onEditRequested: (feature) => {
+      const controller = buildControllers.get(feature);
+      return controller ? controller.requestEdit() : { ok: true };
+    },
   });
   humanActions.register('approve-spec', handlers['approve-spec']);
   humanActions.register('edit-approved-spec', handlers['edit-approved-spec']);

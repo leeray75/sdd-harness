@@ -270,7 +270,9 @@ describe('F1: each job gets its fixed tool set, in main', () => {
         }
       }
     }
-  });
+    // The timeout is longer than the default 5 s, because the test runs every job and state through
+    // the gate, and under a full parallel run it has gone over 5 s (U1-1, revision 1).
+  }, 20_000);
 });
 
 describe('F1: the spec folder is writable only by the planner before approval', () => {

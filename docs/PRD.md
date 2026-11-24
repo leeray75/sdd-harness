@@ -97,7 +97,7 @@ Acceptance:
 
 Acceptance:
 
-- [ ] After the last allowed round the build stops and asks the user.
+- [x] After the last allowed round the build stops and asks the user.
 - [ ] Nothing is committed before the user approves the result.
 - [x] Existing `docs/specs/<feature>/` folders open with the right stage. Folders are detected from their files (D35, `p3-spec-docs`), and the approval comes from the spec lock (D36, `p3-spec-lock`).
 

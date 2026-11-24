@@ -25,7 +25,7 @@ There are twelve nodes (`NODE_IDS`). Eleven are the steps of one feature's path 
 
 ## Events
 
-There are eighteen events (`EVENT_IDS`), in the plugin's order.
+There are twenty-one events (`EVENT_IDS`): the plugin's eighteen, in the plugin's order, then `CONTINUE`, `STOP_BUILD` and `END_BUILD`, which the build loop adds (D37).
 
 | Event             | Kind       | Meaning                                             |
 | ----------------- | ---------- | --------------------------------------------------- |
@@ -47,10 +47,13 @@ There are eighteen events (`EVENT_IDS`), in the plugin's order.
 | `DATA_START`      | app        | A data agent starts, from planning or implementing. |
 | `DATA_STOP`       | app        | The data agent stops, back to planning.             |
 | `DATA_STOP_BUILD` | app        | The data agent stops, back to implementing.         |
+| `CONTINUE`        | user       | Continue the paused build from its step (D37).      |
+| `STOP_BUILD`      | user       | Stop the paused build; the build ends (D37).        |
+| `END_BUILD`       | app        | The build ends without a verdict (D37).             |
 
 ## Transitions
 
-There are 21 legal transitions. Any other (node, event) pair is illegal. The table holds them as `TRANSITIONS`: for each node, the events it accepts and the node each one leads to.
+There are 26 legal transitions. Five of them were added by D37: `CONTINUE`, `STOP_BUILD` and `END_BUILD` from `paused`, and `END_BUILD` from `implementing` and `reviewing`. Any other (node, event) pair is illegal. The table holds them as `TRANSITIONS`: for each node, the events it accepts and the node each one leads to.
 
 | From            | Event             | To              |
 | --------------- | ----------------- | --------------- |
@@ -114,8 +117,8 @@ The six stage labels never equal or contain an internal node or event id, and a 
 Every event has one kind (`EVENT_KINDS`):
 
 - **human-only:** only a person may trigger it, through a D33 human action in the app's window: `APPROVE_SPEC`, `REAPPROVE`, `CLOSE`.
-- **user:** a person's choice in the UI: `START`, `APPROVE_PLAN`, `START_BUILD`, `REVISE`, `REQUEST_CHANGES`, `START_NEXT`.
-- **app:** the app's own work or an agent's report: the other nine events.
+- **user:** a person's choice in the UI: `START`, `APPROVE_PLAN`, `START_BUILD`, `REVISE`, `REQUEST_CHANGES`, `START_NEXT`, `CONTINUE`, `STOP_BUILD`.
+- **app:** the app's own work or an agent's report: the other ten events.
 
 No human-only event is classified as app.
 
@@ -216,6 +219,42 @@ The approval lock says whether a feature's spec is approved (D36). Its pure part
 - The watcher arms the folders that exist at each refresh. If `docs/specs/` is created later, the next refresh arms it.
 - The file symlink tests are skipped where Windows refuses file symlinks.
 
+## Build loop
+
+The build loop runs one feature's build in the main process (D37). Its controller is `src/main/workflow/build-loop.ts`, and the jobs run through an injected runner in `src/main/workflow/job-runner.ts`. The reports are parsed by `src/shared/build-reports.ts`, and the two documents are rendered by `src/shared/build-docs.ts`.
+
+**The round.** The writer runs Mode 1 (`WRITER_TASKS.implement`). Then review round n runs, and the decision follows:
+
+- **PASS:** REVIEW_PASSED, outcome Clean.
+- **ISSUES at the limit:** REVIEW_PASSED, outcome Open issues remain. The findings are listed under Open issues, and there is no fourth review.
+- **ISSUES below the limit:** REVIEW_ISSUES, then the writer in Mode 2 (`WRITER_TASKS.fixFindings`) with every finding unedited, then IMPLEMENTED and review round n+1.
+
+The limit is 3 by default. A build option may set 1, 2 or 3 and no other value (`roundLimit`). The round counter counts the reviews of the current revision.
+
+**Pauses.** A `NEEDS-SPEC-CHANGE` in the writer's report or analysis, or a `spec-change` finding in a review, pauses the build after the step that found it. The step's other findings are carried. The ledger gets `state: paused-for-revision`, `resume on approve: no`, and a Spec problems entry that names the step.
+
+The person's choice is one of three:
+
+- `continue`: the problem is recorded as a deviation ("user chose: continue"). If there is a writer step to run, CONTINUE follows, and the step runs again with the carried findings (a review pause re-runs its decision, so the writer analyzes the findings in Mode 2). The counter is not reset. If nothing is left to run, the build ends instead: a review pause with no findings to fix, a change round, or a pause at the last allowed round. Then END_BUILD moves paused to build-done, with no IMPLEMENTED, and SUMMARY.md says Open issues remain, with the deviation and any remaining findings listed under it.
+- `revise`: REVISE, to spec-changed. The ledger gets `resume on approve: yes` and one more revision. A revision has no cap.
+- `stop`: STOP_BUILD, to build-done. The ledger is done and SUMMARY.md gets the outcome Stopped by the user.
+
+When the spec is approved again (`approved()`, called by main after `approve-spec`), REAPPROVE takes the build to implementing, the writer runs Mode 3 with the carried findings, and the reviews restart at round 1.
+
+**Change rounds.** After a build is done, `requestChanges(items)` sends the user's items to the same writer in Mode 2, then the same reviewer reviews once. It is recorded as `User-requested change round U<k>`, and it does not count against the limit. The label `U<k>` is the round in the prompts and in the reviewer's heading (`## Review round U<k>`), and `parseReview` returns it as the string `U<k>`. Issues left at the end of the round are listed under Open issues, and the round does not loop.
+
+**Sessions.** The writer and the reviewer each keep their own history, and each run returns the messages to pass on. A report that fails its parser gets one restatement in the same history. A second failure, or a run that fails (provider error or turn limit), ends the build with END_BUILD from implementing or reviewing: the node is build-done, the ledger is done, and SUMMARY.md says Open issues remain with the reason. No fake IMPLEMENTED or REVIEW_PASSED is raised.
+
+**Turn caps.** A job run's model requests are capped at 40 for the writer and 20 for the reviewer. The agent loop's default (4) is unchanged. A run that stops at its cap fails with "did not finish within its turn limit".
+
+**Gate.** The writer may write its feature's `tasks.md` and `changes.md` once the spec is approved. Every other spec file, the ledger, SUMMARY and the state file stay denied to every job (D30, amended by D37). Each tool call goes through `checkToolCall` before its runner, and a denied call returns the gate's reason to the model as a tool error.
+
+**Documents.** The controller writes only `build-ledger.md` and `SUMMARY.md` in the feature's folder, through a temp file and a rename. The ledger's header is what `parseLedger` and `detectFolder` read: after each writer step or review, the detector gives implementing or reviewing with the current round. A paused ledger gives paused, and a finished one gives build-done. Free text is flattened to one line, so no value can start a label line. SUMMARY.md has the sections of the plugin's summary: What was built, Files changed (copied from `changes.md`), Acceptance criteria, Needs a runtime check, Review ledger, Spec revisions, Rejected findings, Open issues, Git state and Next steps.
+
+**No git.** The controller runs no git and makes no commit. Its commands go through the job runner's tool registry, which has no git tool, and `run_command` goes through the D31 allowlist.
+
+**Refusals.** Every call is checked against the node first. An illegal call, or one made while a step runs, is refused with a fixed reason and changes nothing. `requestEdit()` is the EDIT_SPEC hook for `edit-approved-spec` (`src/main/human/spec-handlers.ts`): it moves spec-approved to spec-changed, and it refuses once the build has started.
+
 ## Where the code is
 
 - `src/shared/workflow.ts`: the ids, the table, the functions, the stages, the event kinds and the human map.
@@ -224,6 +263,11 @@ The approval lock says whether a feature's spec is approved (D36). Its pure part
 - `src/main/workflow/spec-watch.ts`: the lock watcher.
 - `src/main/human/spec-handlers.ts`: the `approve-spec` and `edit-approved-spec` handlers.
 - `tests/unit/spec-state.test.ts`, `spec-lock.test.ts`, `spec-watch.test.ts`, `spec-handlers.test.ts`, `host-context.test.ts`: the lock, the watcher, the handlers and the host's context.
+- `src/shared/build-reports.ts`: the three report parsers (`parseImplementationReport`, `parseFindingsAnalysis`, `parseReview`).
+- `src/shared/build-docs.ts`: `renderLedger` and `renderSummary`, and the turn caps the ledger states.
+- `src/main/workflow/build-loop.ts`: `roundLimit`, `createBuildController` and the controller.
+- `src/main/workflow/job-runner.ts`: `createInProcessJobRunner`, the gate check of each tool call and the turn caps.
+- `tests/unit/build-reports.test.ts`, `build-docs.test.ts`, `job-runner.test.ts`, `build-loop.test.ts`: the parsers, the documents, the runner and the controller. `tests/support/scripted-provider.ts` replays the jobs' turns.
 - `src/shared/spec-docs.ts`: the templates, the fill function, the layout and path helpers, and the four parsers.
 - `src/shared/spec-detect.ts`: `detectFolder` and its types.
 - `src/main/workflow/spec-folders.ts`: the scanner, `readSpecFolder`, `readSpecFolderAt` and `scanSpecFolders`.
@@ -237,4 +281,4 @@ The approval lock says whether a feature's spec is approved (D36). Its pure part
 
 ## Extending this page
 
-Later Phase 3 subtasks add their part here: the build loop (`p3-build-loop`) and shipping (`p3-ship`, which clears the state file on close). Each one adds its handlers and any new state or event to this page and to the table, with a decision in `decisions.md` when the table changes. The spec lock (D36) supplies the approval that `detectFolder` takes as an input.
+The build loop (`p3-build-loop`) is described above. Later Phase 3 subtasks add their part here: shipping (`p3-ship`, which clears the state file on close, and the approve-result and commit steps). Each one adds its handlers and any new state or event to this page and to the table, with a decision in `decisions.md` when the table changes. The spec lock (D36) supplies the approval that `detectFolder` takes as an input.

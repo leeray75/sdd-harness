@@ -413,3 +413,39 @@ Format: **Decision** · **Outcome** · **Why** · **Date**.
   - a recursive watch or a timer that polls: non-recursive watches and a re-hash on every refresh are enough;
   - clearing the lock in this subtask: close belongs to `p3-ship`.
 - **Date:** 2026-11-22
+
+## D37 · Build loop: controller, injected jobs, round limit, pauses, change rounds and documents
+
+- **Outcome:** `src/main/workflow/build-loop.ts` runs one feature's build in main. Writer Mode 1, then review round n, then the decision: PASS ends Clean; ISSUES at the limit ends Open issues remain; ISSUES below the limit sends every finding to the writer in Mode 2, then review round n+1. Every node change goes through `transition()` (D34). The controller writes only `build-ledger.md` and `SUMMARY.md`, through `writeAtomic`, and runs no git and makes no commit.
+  - **Jobs:** the jobs run through an injected `JobRunner` (`src/main/workflow/job-runner.ts`). Each tool call is checked by `checkToolCall` (D30) before the tool runner runs it. The turn caps are 40 for the writer and 20 for the reviewer. A run that stops at its cap fails the build. The writer and the reviewer each keep their own history across rounds.
+  - **Round limit:** 3 by default. A build option may set 1, 2 or 3, and nothing else. A limit in project settings is Phase 4.
+  - **Pauses:** a `NEEDS-SPEC-CHANGE` from the writer, or a spec-change finding from the reviewer, pauses the build once the step that found it has finished. The step's other findings are carried. The person then chooses:
+    - `continue` records the problem as a deviation with "user chose: continue", and resumes at the same step with the round counter unchanged. When nothing is left to run, it ends the build instead (see below);
+    - `revise` moves to spec-changed. The next approval runs writer Mode 3 with the carried findings, and the reviews restart at round 1;
+    - `stop` ends the build as Stopped by the user.
+
+    A revision has no cap. The carried findings after a writer pause are the step's findings minus the ones the writer marked NEEDS-SPEC-CHANGE. A Mode 1 pause carries none.
+
+  - **Ending without a verdict (revision 1):** `END_BUILD` (kind app) moves implementing, reviewing or paused to build-done. The controller raises it in two cases, and never raises a fake `IMPLEMENTED`:
+    - a failed step: a run that returns `ok: false` (a provider error or the turn limit), or a report still unreadable after one restatement;
+    - a `continue` with nothing left to run: a review pause with no findings to fix (every finding was spec-change), a change round, or a pause at the last allowed round.
+
+    Both end with the outcome Open issues remain. The reason, or the deviation and the remaining findings, are listed under Open issues, so the node and the ledger and SUMMARY agree.
+
+  - **Change rounds:** after a build is done, `requestChanges` sends the user's items to the same writer in Mode 2, then the same reviewer reviews once. The round is recorded as `User-requested change round U<k>`, and it does not count against the limit. Issues left at the end of a change round are listed under Open issues, and the round does not loop.
+  - **Documents:** `build-ledger.md` and `SUMMARY.md` are written in the plugin's formats (`src/shared/build-docs.ts`), which `parseLedger` and `detectFolder` read. Free text is flattened to one line, so no value starts a label line. The reports are parsed by `src/shared/build-reports.ts`. A report that fails its parser gets one restatement in the same history, and a second failure ends the build.
+  - **Change-round label:** the label `U<k>` is the round in the prompts (the `<n>` of the writer's fix task and the reviewer's task), and the reviewer's heading is `## Review round U<k>`. `parseReview` accepts it and returns the round as the string `U<k>`. The round counter is not changed.
+  - **Writer's files (amends D30):** once the spec is approved, the writer may write its own feature's `tasks.md` (the ticks) and `changes.md` (the record). `changes.md` joins the spec-doc names, and the planner may not write it. Every other spec file, the ledger, SUMMARY and the state file stay denied to every job.
+  - **Workflow events (amends D34):** `CONTINUE` and `STOP_BUILD` are user events, legal only in `paused`. `CONTINUE` enters `implementing` only when there is a writer step to run; the carried findings then go to the writer (Mode 2 for a review pause, or the writer's own step for a writer pause). `END_BUILD` is an app event, legal from `implementing`, `reviewing` and `paused` to `build-done`, for the two cases above. The table has 21 events and 26 legal transitions.
+  - **EDIT_SPEC:** `edit-approved-spec` first asks the feature's build controller through an optional hook (`onEditRequested`, `src/main/human/spec-handlers.ts`). The controller allows the edit only while it is at spec-approved, before the build starts. No controller is created at startup in this phase, so the app's behaviour is unchanged.
+  - **Not in this decision:** a UI or IPC for the controller, running the jobs in the agent process over IPC, and the headless end-to-end test (`p3-headless-e2e`).
+- **Why:**
+  - One controller in main keeps the round, the pause and the ledger together. Every node change goes through the table that the plugin's machine is ported to (D34).
+  - An injected runner lets the whole loop run under a scripted provider with no network (G7). Each tool call still passes the same gate as the agent path.
+  - The limit is the plugin's rule. A pause keeps the counter, so a person can continue without the loop starting over. A revision resets it, because the spec the reviews judged has changed.
+  - A change round does not count against the limit, because it follows a finished build and the user asked for it. It is reviewed once, and any issues go to the user.
+- **Alternatives not taken:**
+  - keeping the writer's conversation in the ledger or in a file: the loop's `history` keeps it in memory, and the ledger keeps the record;
+  - a cap on revisions: the person decides when the spec is right;
+  - another review after a change round that finds issues: one change request gives one review, and the issues go to the user.
+- **Date:** 2026-11-23

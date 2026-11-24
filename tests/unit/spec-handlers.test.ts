@@ -87,6 +87,7 @@ function harness(
     gesture?: boolean;
     now?: () => Date;
     onLockChanged?: () => unknown;
+    onEditRequested?: (feature: string) => { ok: true } | { ok: false; reason: string };
   } = {},
 ): Harness {
   const info = vi.fn<(message: string) => void>();
@@ -96,6 +97,7 @@ function harness(
     root,
     now: options.now ?? (() => NOW),
     onLockChanged,
+    ...(options.onEditRequested === undefined ? {} : { onEditRequested: options.onEditRequested }),
   });
   const approve = vi.fn(handlers['approve-spec']);
   const edit = vi.fn(handlers['edit-approved-spec']);
@@ -285,6 +287,45 @@ describe('edit-approved-spec (AC4)', () => {
     );
     expect(await approvalOf(root, 'p3-x')).toBe('changed');
     expect(h.onLockChanged).toHaveBeenCalledTimes(2);
+  });
+
+  it('with the hook allowing, records the edit and calls the hook with the feature', async () => {
+    await put('p3-x/SPECS.md', SPEC);
+    const hook = vi.fn<(feature: string) => { ok: true }>(() => ({ ok: true }));
+    const h = harness({ onEditRequested: hook });
+    await call(h, 'approve-spec');
+    expect(await call(h, 'edit-approved-spec')).toEqual({ ok: true });
+    expect(hook).toHaveBeenCalledWith('p3-x');
+    const after = await readSpecState(root);
+    expect(after.kind === 'ok' && after.state.editing).toBe(true);
+  });
+
+  it('with the hook refusing, returns its reason and records nothing', async () => {
+    await put('p3-x/SPECS.md', SPEC);
+    const hook = vi.fn<(feature: string) => { ok: false; reason: string }>(() => ({
+      ok: false,
+      reason: 'the build has started, so the spec cannot be edited',
+    }));
+    const h = harness({ onEditRequested: hook });
+    await call(h, 'approve-spec');
+    const before = await readSpecState(root);
+    expect(await call(h, 'edit-approved-spec')).toEqual({
+      ok: false,
+      code: 'refused',
+      reason: 'the build has started, so the spec cannot be edited',
+    });
+    expect(hook).toHaveBeenCalledTimes(1);
+    const after = await readSpecState(root);
+    expect(after.kind === 'ok' && after.state.editing).toBe(false);
+    expect(after).toEqual(before);
+    expect(await approvalOf(root, 'p3-x')).toBe('approved');
+  });
+
+  it('does not ask the hook when the approval checks already refuse', async () => {
+    const hook = vi.fn<(feature: string) => { ok: true }>(() => ({ ok: true }));
+    const h = harness({ onEditRequested: hook });
+    expect((await call(h, 'edit-approved-spec')).ok).toBe(false);
+    expect(hook).not.toHaveBeenCalled();
   });
 
   it('refuses with no state file, a state for another feature, and an unapproved spec', async () => {

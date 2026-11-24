@@ -86,7 +86,9 @@ describe('the finished folders of this repo (AC5)', () => {
       expect(folder.detection.node, folder.feature).toBe('closed');
       expect(folder.detection.stage, folder.feature).toEqual({ stage: 'done', paused: false });
     }
-  });
+    // The timeout is longer than the default 5 s: this scans every feature folder of the repo, and
+    // under a full parallel run the scan has gone over 5 s (U1-1, revision 1). Alone it takes ~0.1 s.
+  }, 20_000);
 });
 
 describe('scanSpecFolders on temp folders (AC6)', () => {

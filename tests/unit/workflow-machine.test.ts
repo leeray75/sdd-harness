@@ -53,7 +53,17 @@ const PLUGIN_EVENT_IDS = [
   'DATA_STOP_BUILD',
 ];
 
+// The app's two additions for the build loop (D37, amends D34). They come after the plugin's list.
+const HARNESS_EVENT_IDS = ['CONTINUE', 'STOP_BUILD', 'END_BUILD'];
+
+const HARNESS_STATES: Record<string, Record<string, string>> = {
+  implementing: { END_BUILD: 'build-done' },
+  reviewing: { END_BUILD: 'build-done' },
+  paused: { CONTINUE: 'implementing', STOP_BUILD: 'build-done', END_BUILD: 'build-done' },
+};
+
 const PLUGIN_STATES: Record<string, { on: Record<string, string> }> = {
+  // Plugin states; the build-loop events are in HARNESS_STATES above.
   idle: { on: { START: 'planning' } },
   planning: { on: { APPROVE_PLAN: 'plan-approved', DATA_START: 'data-agent' } },
   'plan-approved': { on: { DRAFT_SPEC: 'spec-drafted' } },
@@ -72,6 +82,11 @@ const PLUGIN_STATES: Record<string, { on: Record<string, string> }> = {
   'data-agent': { on: { DATA_STOP: 'planning', DATA_STOP_BUILD: 'implementing' } },
 };
 
+/** The target the plugin copy or the build-loop additions give for a pair, or undefined. */
+function expectedTarget(node: string, event: string): string | undefined {
+  return PLUGIN_STATES[node]?.on[event] ?? HARNESS_STATES[node]?.[event];
+}
+
 describe('workflow ids match the plugin v0.18.0 (AC1)', () => {
   it('NODE_IDS equals the plugin list, order included', () => {
     expect([...NODE_IDS]).toEqual(PLUGIN_NODE_IDS);
@@ -83,9 +98,9 @@ describe('workflow ids match the plugin v0.18.0 (AC1)', () => {
     expect(PATH_IDS).toHaveLength(11);
   });
 
-  it('EVENT_IDS equals the plugin list, order included', () => {
-    expect([...EVENT_IDS]).toEqual(PLUGIN_EVENT_IDS);
-    expect(EVENT_IDS).toHaveLength(18);
+  it('EVENT_IDS equals the plugin list, then the two build-loop events, order included', () => {
+    expect([...EVENT_IDS]).toEqual([...PLUGIN_EVENT_IDS, ...HARNESS_EVENT_IDS]);
+    expect(EVENT_IDS).toHaveLength(21);
   });
 
   it('INITIAL_NODE is idle', () => {
@@ -110,12 +125,12 @@ describe('workflow ids match the plugin v0.18.0 (AC1)', () => {
 });
 
 describe('TRANSITIONS match the plugin config for every (node, event) pair (AC2)', () => {
-  it('walks all 12 x 18 pairs: each plugin transition is present, nothing else is legal', () => {
+  it('walks all 12 x 21 pairs: each plugin or build-loop transition is present, nothing else is legal', () => {
     let legal = 0;
     const table: Record<string, Record<string, string | undefined>> = TRANSITIONS;
     for (const node of PLUGIN_NODE_IDS) {
-      for (const event of PLUGIN_EVENT_IDS) {
-        const expected = PLUGIN_STATES[node]?.on[event];
+      for (const event of EVENT_IDS) {
+        const expected = expectedTarget(node, event);
         const actual = table[node]?.[event];
         expect(actual, `${node} + ${event}`).toBe(expected);
         if (expected !== undefined) {
@@ -123,7 +138,7 @@ describe('TRANSITIONS match the plugin config for every (node, event) pair (AC2)
         }
       }
     }
-    expect(legal).toBe(21);
+    expect(legal).toBe(26);
   });
 
   it('has the same keys as the plugin states, one entry per node', () => {
@@ -136,9 +151,25 @@ describe('legalEvents, nextNode and transition (AC3)', () => {
   it('legalEvents returns the node events in EVENT_IDS order', () => {
     expect(legalEvents('planning')).toEqual(['APPROVE_PLAN', 'DATA_START']);
     expect(legalEvents('spec-approved')).toEqual(['EDIT_SPEC', 'START_BUILD']);
-    expect(legalEvents('implementing')).toEqual(['IMPLEMENTED', 'SPEC_PROBLEM', 'DATA_START']);
-    expect(legalEvents('reviewing')).toEqual(['REVIEW_ISSUES', 'REVIEW_PASSED', 'SPEC_PROBLEM']);
-    expect(legalEvents('paused')).toEqual(['REVISE', 'REAPPROVE']);
+    expect(legalEvents('implementing')).toEqual([
+      'IMPLEMENTED',
+      'SPEC_PROBLEM',
+      'DATA_START',
+      'END_BUILD',
+    ]);
+    expect(legalEvents('reviewing')).toEqual([
+      'REVIEW_ISSUES',
+      'REVIEW_PASSED',
+      'SPEC_PROBLEM',
+      'END_BUILD',
+    ]);
+    expect(legalEvents('paused')).toEqual([
+      'REVISE',
+      'REAPPROVE',
+      'CONTINUE',
+      'STOP_BUILD',
+      'END_BUILD',
+    ]);
     expect(legalEvents('idle')).toEqual(['START']);
   });
 
@@ -147,7 +178,7 @@ describe('legalEvents, nextNode and transition (AC3)', () => {
       if (!isNodeId(node)) {
         throw new Error(`${node} is not a node id`);
       }
-      const expected = PLUGIN_EVENT_IDS.filter((event) => PLUGIN_STATES[node]?.on[event]);
+      const expected = EVENT_IDS.filter((event) => expectedTarget(node, event) !== undefined);
       expect(legalEvents(node)).toEqual(expected);
     }
   });

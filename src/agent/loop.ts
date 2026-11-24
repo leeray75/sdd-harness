@@ -29,6 +29,10 @@ export interface LoopInput {
   callTool: CallTool;
   /** Receives each streamed text chunk, in order. */
   onText: (text: string) => void;
+  /** Most model requests this run makes. A value below 1 or not an integer means MAX_TURNS. */
+  maxTurns?: number;
+  /** Earlier messages of the same job's conversation, sent before the prompt. Not changed. */
+  history?: Message[];
 }
 
 export interface LoopUsage {
@@ -46,6 +50,11 @@ export interface LoopResult {
   /** Text of the last reply. */
   text: string;
   usage: LoopUsage;
+  /**
+   * The run's full message list: the history, the prompt, the assistant turns and the tool
+   * results. Passed back as the next run's history to continue the conversation.
+   */
+  messages: Message[];
 }
 
 interface Reply {
@@ -141,22 +150,34 @@ export function addUsage(total: Usage | null, turn: Usage | null): Usage | null 
   return sum;
 }
 
-/** Runs the loop: one user prompt, up to MAX_TURNS model requests, tool calls run in between. */
+/** The turn cap of a run: a positive integer as given, otherwise MAX_TURNS. */
+function turnCap(maxTurns: number | undefined): number {
+  return maxTurns !== undefined && Number.isInteger(maxTurns) && maxTurns >= 1
+    ? maxTurns
+    : MAX_TURNS;
+}
+
+/**
+ * Runs the loop: the history, then one user prompt, up to the turn cap of model requests, tool
+ * calls run in between. With no history and no cap, the requests are the same as before.
+ */
 export async function runAgentLoop(input: LoopInput): Promise<LoopResult> {
-  const messages: Message[] = [{ role: 'user', text: input.prompt }];
+  const cap = turnCap(input.maxTurns);
+  const messages: Message[] = [...(input.history ?? []), { role: 'user', text: input.prompt }];
   const perTurn: (Usage | null)[] = [];
   let total: Usage | null = null;
   let text = '';
   const usageOf = (): LoopUsage => ({ perTurn: [...perTurn], total });
-  for (let turn = 1; turn <= MAX_TURNS; turn++) {
+  for (let turn = 1; turn <= cap; turn++) {
     const reply = await streamReply(input, messages);
     text = reply.text;
     perTurn.push(reply.usage);
     total = addUsage(total, reply.usage);
     if (reply.calls.length === 0) {
-      return { stopped: 'answered', turns: turn, text, usage: usageOf() };
+      messages.push({ role: 'assistant', text: reply.text, toolCalls: [] });
+      return { stopped: 'answered', turns: turn, text, usage: usageOf(), messages };
     }
-    if (turn === MAX_TURNS) {
+    if (turn === cap) {
       break;
     }
     messages.push({ role: 'assistant', text: reply.text, toolCalls: reply.calls });
@@ -165,5 +186,5 @@ export async function runAgentLoop(input: LoopInput): Promise<LoopResult> {
       messages.push({ role: 'tool', toolCallId: call.id, content });
     }
   }
-  return { stopped: 'turn-limit', turns: MAX_TURNS, text, usage: usageOf() };
+  return { stopped: 'turn-limit', turns: cap, text, usage: usageOf(), messages };
 }
