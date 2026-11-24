@@ -11,7 +11,7 @@ The suggested subtask 2 (`p3-spec-docs-and-lock`) is split in two, because templ
 | 1   | p3-state-machine | Hand-written typed table of the plugin's states and events, stage mapping and labels, legal next events, event kinds and the human-action map                                                   | done    | [SUMMARY](../specs/p3-state-machine/SUMMARY.md) | `d261b51` (PR #20; work `b24f5c3`), close `63bb4b2` (PR #21; `9afaec9`) |
 | 2   | p3-spec-docs     | Ported templates (PLAN, SPECS, tasks, SUBTASK), the `docs/specs/<feature>/` layout, and reading existing folders (and the ledger) to the right stage                                            | done    | [SUMMARY](../specs/p3-spec-docs/SUMMARY.md)     | `e5eda75` (PR #22; work `d05f094`, close `c94b250`)                     |
 | 3   | p3-spec-lock     | Small state file in the repo, approved-spec hash, spec-changed detection by file watching, approve-spec and edit-approved-spec handlers                                                         | done    | [SUMMARY](../specs/p3-spec-lock/SUMMARY.md)     | `60b9f41` (PR #23; work `1f1ea98`, close `1ae8d3b`)                     |
-| 4   | p3-build-loop    | Writer then reviewer rounds, round limit (3, project can lower), spec-problem pause, ask for changes counted separately, ledger, changes and SUMMARY; a minimal scripted provider for its tests | pending |                                                 |                                                                         |
+| 4   | p3-build-loop    | Writer then reviewer rounds, round limit (3, project can lower), spec-problem pause, ask for changes counted separately, ledger, changes and SUMMARY; a minimal scripted provider for its tests | done    | [SUMMARY](../specs/p3-build-loop/SUMMARY.md)    | `12918ce` (PR #24; work `8b7c024`, close `0b13ee5`)                     |
 | 5   | p3-ship          | Result approval, commit and push by the app with the commit format, close (mark-done handler)                                                                                                   | pending |                                                 |                                                                         |
 | 6   | p3-headless-e2e  | Scripted fake provider and an end-to-end test of a full feature on a fixture repo, plus a real plugin `docs/specs` folder opening with the right stage                                          | pending |                                                 |                                                                         |
 
@@ -20,7 +20,7 @@ The suggested subtask 2 (`p3-spec-docs-and-lock`) is split in two, because templ
 - D34: the workflow table is hand-written in `src/shared/workflow.ts`, with the stage mapping, the data-agent overlay, the event kinds and the human-action map (`p3-state-machine`).
 - D35: the document layer. The templates, folder layout, parsers and folder detector are pure shared modules, the scanner is in main, the plugin's session-marker and subagent inputs are dropped, and the approval is an input (`p3-spec-docs`).
 - D36: the spec lock. The state file, the hash input, the approval values, the watcher, the two handlers, the `refused` code and the gate's spec state. It amends D34 (`EDIT_SPEC` may come from `edit-approved-spec`) (`p3-spec-lock`).
-- D37: the build loop. The controller in main, the injected job runner with its turn caps, the round limit option, the pause choices with no revision cap, the change rounds, the two documents and the writer's own spec files. It amends D30 (the gate) and D34 (`CONTINUE` and `STOP_BUILD`) (`p3-build-loop`).
+- D37: the build loop. The controller in main, the injected job runner with its turn caps, the round limit option, the pause choices with no revision cap, the change rounds, the two documents and the writer's own spec files. It amends D30 (the gate) and D34 (`CONTINUE` and `STOP_BUILD`, and `END_BUILD` from revision 1) (`p3-build-loop`).
 
 ## Decided during planning
 
@@ -47,7 +47,7 @@ The suggested subtask 2 (`p3-spec-docs-and-lock`) is split in two, because templ
   - Nothing raises `EDIT_SPEC` yet. `edit-approved-spec` sets `editing`, and `p3-build-loop` connects the event (D34, amended by D36).
   - `tests/e2e/human-action.spec.ts` expects `not-available` for `approve-spec`. It passes because the e2e launch sets no `HARNESS_SPIKE_ROOT`, so the spec handlers are not registered. A run with a root set would need those expectations changed.
   - The lock's file-symlink tests skip where Windows refuses file symlinks, as the `p3-spec-docs` test does.
-  - The work and the close commit came in together as PR #23. The PR run (45040898895) was green on `check` and on `e2e` for Linux and Windows. macOS `e2e` was still running when this row was written, and so was the main run (45040909398). Check both before the next merge.
+  - The work and the close commit came in together as PR #23. The PR run (45040898895) was green on `check` and on `e2e` for Linux and Windows. macOS `e2e` and the main run (45040909398) were still running when this row was written. Both later ended green on every job.
   - Review round 1 passed with no findings. After it, the orchestrator found the CHANGELOG entry inside the Document layer bullet's sub-list. It was fixed in a user-requested change round (U1).
 - From `p3-build-loop`:
   - No controller is created at startup, and no UI or IPC starts a build yet. `index.ts` only passes the `edit-approved-spec` hook, which allows the edit while no controller exists, so the app's behaviour is unchanged until a build start is wired (`p3-ship` or the pilot).
@@ -56,6 +56,13 @@ The suggested subtask 2 (`p3-spec-docs-and-lock`) is split in two, because templ
   - Settled in revision 1 (D37): a failed step, and a continue with nothing left to run, end the build with END_BUILD and the outcome Open issues remain. The node, the ledger and SUMMARY then agree. No IMPLEMENTED is raised without a writer step.
   - Settled in revision 1 (D37): a change round's label is `U<k>` in the prompts and in the reviewer's heading, and `parseReview` returns it as the string `U<k>`. The counter is not changed.
   - Check in the pilot: a continue whose review pause had no findings to fix ends the build, so the user cannot ask the writer again on that review. Decide whether a later phase should offer a retry.
+  - The build paused after the implement step on five gaps that the implementor reported as NEEDS-SPEC-CHANGE. The user chose to revise the spec (revision 1), and the decisions are in SPECS.md's Open questions. Review round 1 of revision 1 then passed with no findings.
+  - After the PASS, two older tests (`policy-acceptance.test.ts`, `spec-folders.test.ts`) timed out at 5 s under full parallel load on 2 of 4 runs. A user-requested change round (U1) gave them a 20 s per-test timeout. The next 3 runs and CI `check` were green.
+  - Pilot notes from the reviewer:
+    - A change round that pauses or fails before its review reuses its `U<k>` label on the next request.
+    - A continued Mode 3 adds a second Mode 3 entry to the ledger.
+    - The report parsers have only been tested on scripted turns.
+  - The work and the close commit came in together as PR #24. The PR run (45308324409) and the main run (45308344079) were green on `check`. The three `e2e` jobs of both runs were still running when this row was written. Check both before the next merge.
 - The sdd plugin's own templates in the separate `repos/claude` repo are not changed by this phase. A later change there could carry the docs item into the plugin's subtask briefs (out of this repo, raised in `p3-state-machine`).
 
 ## Phase summary
