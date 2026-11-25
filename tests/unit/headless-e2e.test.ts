@@ -342,7 +342,7 @@ async function startWalk(): Promise<Walk> {
     },
     async human(action, options = {}) {
       if (options.gesture !== false) press();
-      return channel.handle(TRUSTED, { action, feature: FEATURE });
+      return channel.handle(TRUSTED, { action, project: 'dev', feature: FEATURE });
     },
     async createController() {
       const created = await createBuildController({

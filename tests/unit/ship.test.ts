@@ -15,7 +15,6 @@ import {
   allowedFromChanges,
   approveResult,
   closeMessage,
-  commitMessage,
   commitSummary,
   firstHeading,
   gitStateOf,
@@ -27,6 +26,7 @@ import {
 import { readSpecFolder } from '../../src/main/workflow/spec-folders';
 import { approvalOf, hashText } from '../../src/main/workflow/spec-lock';
 import { SPEC_STATE_VERSION, serializeSpecState } from '../../src/shared/spec-state';
+import { DEFAULT_RULES, formatCommitMessage } from '../../src/shared/project-rules';
 import type { NodeId } from '../../src/shared/workflow';
 
 // Each test drives its own temp repo: a work repo on a feature branch, a bare remote as a local
@@ -220,10 +220,15 @@ describe('commit message helpers', () => {
     expect(commitSummary('f', null, null)).toBe('f');
   });
 
-  it('puts the ticket in front when there is one', () => {
-    expect(commitMessage('T-42', 'Add it')).toBe('T-42: Add it');
-    expect(commitMessage('', 'Add it')).toBe('Add it');
+  it('puts the ticket in front by default, and the summary alone with no ticket', () => {
+    expect(formatCommitMessage(DEFAULT_RULES.commitFormat, 'T-42', 'Add it')).toBe('T-42: Add it');
+    expect(formatCommitMessage(DEFAULT_RULES.commitFormat, '', 'Add it')).toBe('Add it');
     expect(closeMessage('f')).toBe('Close f spec');
+  });
+
+  it('fills a custom format with the ticket, and gives the summary alone with no ticket', () => {
+    expect(formatCommitMessage('[{ticket}] {summary}', 'T-42', 'Add it')).toBe('[T-42] Add it');
+    expect(formatCommitMessage('[{ticket}] {summary}', '', 'Add it')).toBe('Add it');
   });
 
   it('reads the allowed set from the File column, without headers or separators', () => {
@@ -456,6 +461,26 @@ describe('approve-result commit and push (AC2)', () => {
       build({ subtask: 'x'.repeat(100) });
       expect(await approve()).toEqual({ ok: true });
       expect(subject()).toBe('x'.repeat(72));
+    },
+    SLOW,
+  );
+
+  it(
+    'commits with a custom commit format from the project rules',
+    async () => {
+      build({ ticket: 'T-42' });
+      expect(await approve({ commitFormat: '[{ticket}] {summary}' })).toEqual({ ok: true });
+      expect(subject()).toBe('[T-42] Add the ship step');
+    },
+    SLOW,
+  );
+
+  it(
+    'uses the summary alone under a custom format when there is no ticket',
+    async () => {
+      build();
+      expect(await approve({ commitFormat: '[{ticket}] {summary}' })).toEqual({ ok: true });
+      expect(subject()).toBe('Add the ship step');
     },
     SLOW,
   );

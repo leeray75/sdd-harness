@@ -206,7 +206,7 @@ The approval lock says whether a feature's spec is approved (D36). Its pure part
 
 **Watching.** `createSpecLockWatcher` watches `docs/specs/` (for the state file) and the current feature's folder (for its `SPECS.md`), with non-recursive `fs.watch`. An event starts a refresh after 150 ms. A refresh re-reads the state and re-hashes the spec, and `onChange` runs only when the value changes. `current()` gives the last value, which is `unchecked` until the first refresh. A watcher that errors is dropped, and the next refresh arms it again. Nothing is called after `close()`.
 
-**Handlers.** `approve-spec` and `edit-approved-spec` are registered on the human-only channel (D33) when a project root exists, which is `HARNESS_SPIKE_ROOT` for now. Both are reached only through the channel's checks. A refusal is `{ ok: false, code: 'refused', reason }` with a fixed reason, changes no file, and never throws.
+**Handlers.** `approve-spec` and `edit-approved-spec` are registered on the human-only channel (D33) through the project registry (D40). A request names its project, and the registry passes it to that project's handlers, so the lock acts only on the folder of the project named. Both are reached only through the channel's checks. A refusal is `{ ok: false, code: 'refused', reason }` with a fixed reason, changes no file, and never throws. A request for a project the registry does not know is refused with "no project with this id".
 
 - `approve-spec` refuses when SPECS.md is missing, unreadable or too large, when it lacks a Goals or an Acceptance criteria heading, or when it is already approved with the same hash. Otherwise it sets `status: approved` in SPECS.md, writes the state file with `editing: false` and the current time, and refreshes the watcher. If the state write fails, it puts SPECS.md back as it was.
 - `edit-approved-spec` refuses unless the state file is readable, names this feature, and the approval is `approved`. Otherwise it sets `editing: true` and keeps the hash. The spec then reads as `changed`.
@@ -272,7 +272,7 @@ The ship step commits the approved work and closes the feature (D38). The git mo
 5. If the line already says approved, this is a retry. With no upstream, or ahead of it, the branch is pushed. Ahead 0 refuses, and so does a tree with changes. Nothing is committed.
 6. Every changed path is in the allowed set: the File column of `changes.md`, every path under `docs/specs/<feature>/`, and `docs/specs/.sdd-state.json`. Any other path refuses, and nothing is written.
 
-Then the Git state line is rewritten, the changed paths and SUMMARY are staged, and one commit is made with the message `<ticket>: <summary>` (or `<summary>` without a ticket). The ticket is SPECS.md's `ticket:`. The summary is SUBTASK.md's first `# ` heading, else SPECS.md's, else the slug, flattened to one line and capped at 72 characters. Then the branch is pushed. If the stage or the commit fails, SUMMARY is written back and the same paths are staged again, so the index matches the files. If the push fails, the commit is kept and the step refuses. Approving again only pushes.
+Then the Git state line is rewritten, the changed paths and SUMMARY are staged, and one commit is made with the message of the project's commit format (D40), `{ticket}: {summary}` by default, which is `<ticket>: <summary>`, or `<summary>` alone without a ticket. The ticket is SPECS.md's `ticket:`. The summary is SUBTASK.md's first `# ` heading, else SPECS.md's, else the slug, flattened to one line and capped at 72 characters. Then the branch is pushed. If the stage or the commit fails, SUMMARY is written back and the same paths are staged again, so the index matches the files. If the push fails, the commit is kept and the step refuses. Approving again only pushes.
 
 **mark-done.** The controller, node and branch checks are the same as above, and then:
 
@@ -304,9 +304,29 @@ Before approve-result, the git state (HEAD, the commit count and the remote's br
 
 **What the walk shows about revisions.** `edit-approved-spec` is accepted only while the spec is approved and no build has started, because `EDIT_SPEC` is legal only from spec-approved (`src/shared/workflow.ts`). After a pause, the walk asserts that the channel refuses the edit at spec-changed. It then edits SPECS.md directly, and the lock reads the file as changed by its hash (D36). `approve-spec` re-approves it, and `approved()` resumes the build in Mode 3. Until that approval, the controller reads `spec-changed` once the revise is chosen, while the folder still reads `paused`, because the ledger keeps its pause until the build resumes.
 
+## Projects
+
+A project is a repo folder with its own rules (D40). Its folder is never changed by removing it.
+
+**The store.** `createProjectStore` (`src/main/projects/store.ts`, no Electron import) keeps the projects in `projects.json` in the app's data folder, as `{ "version": 1, "projects": [...] }`. The file is saved whole after each write, through `writeFileAtomic`. A project is `{ id, name, environment, root, rules }`, where `id` is a lowercase UUID and `environment` is `{ kind: 'local' }` for now. The operations are `add`, `list`, `get`, `rename`, `setRules` and `remove`. Each write returns `{ ok: true, project }` or `{ ok: false, reason }` with a fixed reason, and a failed save leaves the list as it was. `add` checks that the root is an absolute path to an existing folder (stored after `path.resolve`), that no stored project has the same root (without case on `win32` and `darwin`), that the name is 1 to 80 characters with no line break, and that the rules are valid. `remove` drops the entry and saves. It never opens, stats, moves or deletes anything under the root.
+
+**Loading.** `load()` runs once at start. A missing file is an empty list. A file that cannot be read, is not JSON, has another `version` or holds an invalid project is renamed to `projects.json.corrupt-<timestamp>`, and the store starts empty. One log line gives the reason code only. If the rename fails, the store still starts empty and logs that.
+
+**The rules.** `src/shared/project-rules.ts` (pure) holds `ProjectRules = { roundLimit, modelPolicy, commitFormat }`, the defaults (3, `defaults`, `{ticket}: {summary}`) and `parseRules`. `parseRules` accepts only those three keys (spec approval and review are always on, so `specApproval` and `review` are refused), fills missing fields with defaults, and checks each value. `checkRoundLimit` is the 1–3 check that the build controller's `roundLimit` uses. `formatCommitMessage(format, ticket, summary)` gives the commit message, and the summary alone when the ticket is empty. `approve-result` uses the project's commit format (`src/main/workflow/ship.ts`).
+
+**The registry.** `createProjectRegistry` (`src/main/projects/registry.ts`, no Electron import) joins the store's projects with the dev project. It starts one spec-lock watcher per project, builds each project's spec and ship handlers from its root, rules and commit format, and gives the channel one handler per action through `handlerFor(action)`. That handler looks up `request.project` and calls the project's own handler. An unknown project is refused with `code: 'refused'`, and nothing changes. `addProject` starts the new project's watcher, `removeProject` closes the watcher before the project is dropped, and `close()` closes every watcher at quit. A stored project whose rules change has its handlers rebuilt on the next call. `buildOptionsFor(project)` gives the build controller its root and round limit. No build start calls it yet (D39).
+
+**The dev project.** In an unpackaged run with `HARNESS_SPIKE_ROOT` set, the dev project is `{ id: 'dev', rules: DEFAULT_RULES }` over that folder. It is never saved, and a packaged app ignores the variable. The spike agent's live context reads the dev project's watcher, and with no dev project the agent gets the default context.
+
+**The request.** A human-only request is `{ action, project, feature }`, where `project` is `dev` or a project id (D33 as amended by D40). `change-rules` has no handler, so it stays `not-available`.
+
 ## Where the code is
 
 - `src/shared/workflow.ts`: the ids, the table, the functions, the stages, the event kinds and the human map.
+- `src/shared/project-rules.ts`: the project rules, their defaults, `parseRules`, `checkRoundLimit` and `formatCommitMessage` (D40).
+- `src/main/projects/store.ts`: the project store, its file, its load and set-aside, and its add, rename, rules and remove (D40).
+- `src/main/projects/registry.ts`: the project registry, the watchers, the per-project handlers, `handlerFor` and `buildOptionsFor` (D40).
+- `tests/unit/project-rules.test.ts`, `project-store.test.ts`, `project-registry.test.ts`: the rules, the store on temp folders, and the registry with two projects and the build options.
 - `src/shared/spec-state.ts`: the state file's parser and serializer, the hash input, the approval values, the frontmatter status setter and the headings check.
 - `src/main/workflow/spec-lock.ts`: the state file's reads and writes, the SPECS.md hash, `approvalOf`, `currentFeature` and `scanSpecFoldersWithLock`.
 - `src/main/workflow/spec-watch.ts`: the lock watcher.

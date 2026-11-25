@@ -47,6 +47,7 @@ test('(a) a call with no prior input is refused as no-gesture', async () => {
     const result = await page.evaluate(() =>
       (globalThis as unknown as HarnessGlobal).harness.humanAction({
         action: 'approve-spec',
+        project: 'dev',
         feature: 'demo',
       }),
     );
@@ -63,6 +64,7 @@ test('(b) a request that fails the guard is refused as invalid', async () => {
     const result = await page.evaluate(() =>
       (globalThis as unknown as HarnessGlobal).harness.humanAction({
         action: 'approve-spec',
+        project: 'dev',
         feature: '../demo',
       }),
     );
@@ -72,7 +74,7 @@ test('(b) a request that fails the guard is refused as invalid', async () => {
   }
 });
 
-test('(c) after a real click, the same call passes the gesture check (not-available)', async () => {
+test('(c) after a real click, the same call passes the gesture check (refused: unknown project)', async () => {
   const app = await launchApp();
   try {
     const page = await openPage(app);
@@ -80,11 +82,13 @@ test('(c) after a real click, the same call passes the gesture check (not-availa
     const result = await page.evaluate(() =>
       (globalThis as unknown as HarnessGlobal).harness.humanAction({
         action: 'approve-spec',
+        project: 'dev',
         feature: 'demo',
       }),
     );
-    // No handler is registered yet, so the gesture was seen and the request got that far.
-    expect(result).toMatchObject({ ok: false, code: 'not-available' });
+    // The gesture was seen and the request reached the registry. The e2e launch has no projects,
+    // so `dev` is not known and the request is refused (D40), with nothing changed.
+    expect(result).toEqual({ ok: false, code: 'refused', reason: 'no project with this id' });
   } finally {
     await app.close();
   }
@@ -98,14 +102,16 @@ test('(d) a second call after one click is refused as no-gesture', async () => {
     const first = await page.evaluate(() =>
       (globalThis as unknown as HarnessGlobal).harness.humanAction({
         action: 'approve-spec',
+        project: 'dev',
         feature: 'demo',
       }),
     );
-    expect(first).toMatchObject({ ok: false, code: 'not-available' });
+    expect(first).toMatchObject({ ok: false, code: 'refused' });
 
     const second = await page.evaluate(() =>
       (globalThis as unknown as HarnessGlobal).harness.humanAction({
         action: 'approve-spec',
+        project: 'dev',
         feature: 'demo',
       }),
     );
@@ -123,10 +129,11 @@ test('(e) after a real Enter key press in the page, the call passes the gesture 
     const result = await page.evaluate(() =>
       (globalThis as unknown as HarnessGlobal).harness.humanAction({
         action: 'approve-spec',
+        project: 'dev',
         feature: 'demo',
       }),
     );
-    expect(result).toMatchObject({ ok: false, code: 'not-available' });
+    expect(result).toMatchObject({ ok: false, code: 'refused' });
   } finally {
     await app.close();
   }
@@ -141,6 +148,7 @@ test('(f) a click older than the gesture window is refused as no-gesture', async
     const result = await page.evaluate(() =>
       (globalThis as unknown as HarnessGlobal).harness.humanAction({
         action: 'approve-spec',
+        project: 'dev',
         feature: 'demo',
       }),
     );

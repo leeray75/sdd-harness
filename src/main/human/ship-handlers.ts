@@ -6,7 +6,8 @@
 
 import type { HumanActionRequest, HumanActionResult } from '../../shared/human-actions';
 import type { NodeId } from '../../shared/workflow';
-import { approveResult, markDone, type ShipResult } from '../workflow/ship';
+import { DEFAULT_RULES } from '../../shared/project-rules';
+import { approveResult, markDone, type ShipOptions, type ShipResult } from '../workflow/ship';
 import type { HumanActionHandler } from './channel';
 
 export interface ShipHandlersDeps {
@@ -19,6 +20,8 @@ export interface ShipHandlersDeps {
    * is not at build-done refuses the ship step.
    */
   controllerNode: (feature: string) => NodeId | null;
+  /** The project's commit format for approve-result (D40). Undefined takes the default format. */
+  commitFormat?: string;
 }
 
 export interface ShipHandlers {
@@ -44,16 +47,13 @@ export function createShipHandlers(deps: ShipHandlersDeps): ShipHandlers {
 
   async function run(
     request: HumanActionRequest,
-    step: (
-      root: string,
-      feature: string,
-      options: { controllerNode: () => NodeId | null },
-    ) => Promise<ShipResult>,
+    step: (root: string, feature: string, options: ShipOptions) => Promise<ShipResult>,
   ): Promise<HumanActionResult> {
     let outcome: ShipResult;
     try {
       outcome = await step(deps.root, request.feature, {
         controllerNode: () => deps.controllerNode(request.feature),
+        commitFormat: deps.commitFormat ?? DEFAULT_RULES.commitFormat,
       });
     } catch {
       outcome = { ok: false, reason: ACTION_FAILED };

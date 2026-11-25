@@ -27,6 +27,7 @@ import {
 import type { NodeId } from '../../shared/workflow';
 import { transition } from '../../shared/workflow';
 import type { Approval } from '../../shared/spec-detect';
+import { DEFAULT_RULES, formatCommitMessage } from '../../shared/project-rules';
 import { MAX_SPEC_FILE_BYTES, readSpecFolder } from './spec-folders';
 import {
   approvalOf,
@@ -45,6 +46,8 @@ type Step<T> = { ok: true; value: T } | { ok: false; reason: string };
 export interface ShipOptions {
   /** The node of the feature's build controller, or null when it has none (D37). */
   controllerNode?: () => NodeId | null;
+  /** The project's commit format (D40). Undefined takes the default format. */
+  commitFormat?: string;
 }
 
 /** The text that marks a Git state line as approved and pushed. */
@@ -152,11 +155,6 @@ export function commitSummary(
   specs: string | null,
 ): string {
   return firstHeading(subtask) ?? firstHeading(specs) ?? feature;
-}
-
-/** `<ticket>: <summary>` when the ticket is not empty, else `<summary>`. */
-export function commitMessage(ticket: string, summary: string): string {
-  return ticket === '' ? summary : `${ticket}: ${summary}`;
 }
 
 /** The close commit's message. */
@@ -316,7 +314,12 @@ async function approveInner(
   const specsText = await readFeatureText(root, feature, 'SPECS.md', MAX_SPEC_FILE_BYTES);
   const subtaskText = await readFeatureText(root, feature, 'SUBTASK.md', MAX_SPEC_FILE_BYTES);
   const ticket = parseSpecs(specsText).ticket;
-  const message = commitMessage(ticket, commitSummary(feature, subtaskText, specsText));
+  const format = options.commitFormat ?? DEFAULT_RULES.commitFormat;
+  const message = formatCommitMessage(
+    format,
+    ticket,
+    commitSummary(feature, subtaskText, specsText),
+  );
 
   const approvedLine = `Branch ${branch.value}; approved; committed and pushed in the commit that adds this report.`;
   const rewritten = withGitState(summaryText, approvedLine);

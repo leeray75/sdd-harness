@@ -23,6 +23,8 @@ vi.mock('../../src/main/workflow/ship', async (importOriginal) => {
 
 const TRUSTED: HumanActionSender = { senderId: 1, frameUrl: 'app://page' };
 const FEATURE = 'feat';
+/** The dev project: a valid project id for a request (D40). */
+const PROJECT_ID = 'dev';
 
 let root: string;
 
@@ -52,13 +54,15 @@ function handlersWith(
 describe('ship handlers: refusals', () => {
   it('refuses with code refused and the fixed reason when the feature folder is missing', async () => {
     const handlers = handlersWith();
-    const request = { action: 'approve-result' as const, feature: FEATURE };
+    const request = { action: 'approve-result' as const, project: PROJECT_ID, feature: FEATURE };
     expect(await handlers['approve-result'](request)).toEqual({
       ok: false,
       code: 'refused',
       reason: SHIP_REASONS.folder,
     });
-    expect(await handlers['mark-done']({ action: 'mark-done', feature: FEATURE })).toEqual({
+    expect(
+      await handlers['mark-done']({ action: 'mark-done', project: PROJECT_ID, feature: FEATURE }),
+    ).toEqual({
       ok: false,
       code: 'refused',
       reason: SHIP_REASONS.folder,
@@ -71,7 +75,11 @@ describe('ship handlers: refusals', () => {
         throw new Error('SECRET-PATH /home/x');
       },
     });
-    const result = await handlers['approve-result']({ action: 'approve-result', feature: FEATURE });
+    const result = await handlers['approve-result']({
+      action: 'approve-result',
+      project: PROJECT_ID,
+      feature: FEATURE,
+    });
     expect(result).toEqual({ ok: false, code: 'refused', reason: SHIP_REASONS.failed });
     expect(JSON.stringify(result)).not.toContain('SECRET');
   });
@@ -79,7 +87,9 @@ describe('ship handlers: refusals', () => {
   it('turns an unexpected rejection of a ship step into a refusal', async () => {
     vi.mocked(ship.markDone).mockRejectedValueOnce(new Error('boom'));
     const handlers = handlersWith();
-    expect(await handlers['mark-done']({ action: 'mark-done', feature: FEATURE })).toEqual({
+    expect(
+      await handlers['mark-done']({ action: 'mark-done', project: PROJECT_ID, feature: FEATURE }),
+    ).toEqual({
       ok: false,
       code: 'refused',
       reason: 'the action failed',
@@ -90,7 +100,11 @@ describe('ship handlers: refusals', () => {
     const controllerNode = vi.fn((): NodeId => 'implementing');
     const handlers = handlersWith({ controllerNode });
     expect(
-      await handlers['approve-result']({ action: 'approve-result', feature: FEATURE }),
+      await handlers['approve-result']({
+        action: 'approve-result',
+        project: PROJECT_ID,
+        feature: FEATURE,
+      }),
     ).toEqual({ ok: false, code: 'refused', reason: SHIP_REASONS.buildRunning });
     expect(controllerNode).toHaveBeenCalledWith(FEATURE);
   });
@@ -102,7 +116,11 @@ describe('ship handlers: the lock', () => {
     const onLockChanged = vi.fn(() => undefined);
     const handlers = handlersWith({ onLockChanged });
     expect(
-      await handlers['approve-result']({ action: 'approve-result', feature: FEATURE }),
+      await handlers['approve-result']({
+        action: 'approve-result',
+        project: PROJECT_ID,
+        feature: FEATURE,
+      }),
     ).toEqual({ ok: true });
     expect(onLockChanged).toHaveBeenCalledTimes(1);
   });
@@ -112,14 +130,20 @@ describe('ship handlers: the lock', () => {
     const onLockChanged = vi.fn(() => undefined);
     const handlers = handlersWith({ onLockChanged });
     // A refusal (no feature folder) first, then a success: one call each.
-    expect(await handlers['mark-done']({ action: 'mark-done', feature: FEATURE })).toEqual({
+    expect(
+      await handlers['mark-done']({ action: 'mark-done', project: PROJECT_ID, feature: FEATURE }),
+    ).toEqual({
       ok: false,
       code: 'refused',
       reason: SHIP_REASONS.folder,
     });
     expect(onLockChanged).toHaveBeenCalledTimes(1);
     expect(
-      await handlers['approve-result']({ action: 'approve-result', feature: FEATURE }),
+      await handlers['approve-result']({
+        action: 'approve-result',
+        project: PROJECT_ID,
+        feature: FEATURE,
+      }),
     ).toEqual({ ok: true });
     expect(onLockChanged).toHaveBeenCalledTimes(2);
   });
@@ -129,7 +153,11 @@ describe('ship handlers: the lock', () => {
       throw new Error('watch failed');
     });
     const handlers = handlersWith({ onLockChanged });
-    const result = await handlers['mark-done']({ action: 'mark-done', feature: FEATURE });
+    const result = await handlers['mark-done']({
+      action: 'mark-done',
+      project: PROJECT_ID,
+      feature: FEATURE,
+    });
     expect(result).toEqual({ ok: false, code: 'refused', reason: SHIP_REASONS.folder });
     expect(onLockChanged).toHaveBeenCalledTimes(1);
   });
@@ -165,7 +193,7 @@ describe('ship handlers through the human-only channel (AC1)', () => {
     channel.register('approve-result', handlers['approve-result']);
     channel.register('mark-done', handlers['mark-done']);
 
-    const request = { action: 'approve-result', feature: FEATURE };
+    const request = { action: 'approve-result', project: PROJECT_ID, feature: FEATURE };
     expect(await channel.handle(TRUSTED, request)).toEqual({
       ok: false,
       code: 'no-gesture',
@@ -182,7 +210,9 @@ describe('ship handlers through the human-only channel (AC1)', () => {
     expect(ship.approveResult).toHaveBeenCalledTimes(1);
 
     press();
-    expect(await channel.handle(TRUSTED, { action: 'mark-done', feature: FEATURE })).toEqual({
+    expect(
+      await channel.handle(TRUSTED, { action: 'mark-done', project: PROJECT_ID, feature: FEATURE }),
+    ).toEqual({
       ok: false,
       code: 'refused',
       reason: SHIP_REASONS.buildRunning,
@@ -195,7 +225,11 @@ describe('ship handlers through the human-only channel (AC1)', () => {
     const handlers = handlersWith();
     channel.register('approve-result', handlers['approve-result']);
     press();
-    const result = await channel.handle(TRUSTED, { action: 'approve-result', feature: FEATURE });
+    const result = await channel.handle(TRUSTED, {
+      action: 'approve-result',
+      project: PROJECT_ID,
+      feature: FEATURE,
+    });
     expect(result).toMatchObject({ ok: false, code: 'untrusted-sender' });
     expect(ship.approveResult).not.toHaveBeenCalled();
   });
@@ -207,12 +241,18 @@ describe('ship handlers through the human-only channel (AC1)', () => {
     const handlers = handlersWith();
     channel.register('approve-result', handlers['approve-result']);
     press();
-    expect(await channel.handle(TRUSTED, { action: 'approve-result', feature: FEATURE })).toEqual({
+    expect(
+      await channel.handle(TRUSTED, {
+        action: 'approve-result',
+        project: PROJECT_ID,
+        feature: FEATURE,
+      }),
+    ).toEqual({
       ok: true,
     });
     expect(info).toHaveBeenCalledTimes(1);
     expect(info).toHaveBeenCalledWith(
-      `human action approve-result: accepted (ok) feature=${FEATURE}`,
+      `human action approve-result: accepted (ok) feature=${FEATURE} project=${PROJECT_ID}`,
     );
     expect(error).not.toHaveBeenCalled();
   });
