@@ -12,6 +12,7 @@ import { makeToolRunner } from '../agent/host';
 import type { ToolRunner } from '../agent/router';
 import type { PolicyContext } from '../policy/context';
 import { checkToolCall } from '../policy/gate';
+import type { RuleEvent } from '../policy/rule-event';
 
 /** One request to a job: its task text and the job's history so far. */
 export interface JobRunRequest {
@@ -38,16 +39,33 @@ export interface JobRunnerOptions {
   toolRunner?: ToolRunner;
   /** Overrides the turn caps (TURN_CAPS). For tests only. */
   maxTurns?: number;
+  /**
+   * Receives every rule event: the gate's decision for each call, allowed or denied, and the revert
+   * and network events of run_command (D30, D31). Unset means none are reported. A throw is caught.
+   */
+  onRuleEvent?: (event: RuleEvent) => void;
 }
 
 /** Builds the job runner for one project root and one provider. */
 export function createInProcessJobRunner(options: JobRunnerOptions): JobRunner {
+  // A throwing callback must not fail the run (p3-ship): the event is dropped instead.
+  const emit = (event: RuleEvent): void => {
+    try {
+      options.onRuleEvent?.(event);
+    } catch {
+      // The log is best effort; the call's own outcome does not depend on it.
+    }
+  };
   const toolRunner =
     options.toolRunner ??
-    makeToolRunner(options.root, { commandCheck: options.contextNow().commandCheck });
+    makeToolRunner(options.root, {
+      commandCheck: options.contextNow().commandCheck,
+      onRuleEvent: emit,
+    });
   return async (request) => {
     const callTool: CallTool = async (name, args) => {
       const decision = checkToolCall({ job: request.job, tool: name, args }, options.contextNow());
+      emit(decision.event);
       if (!decision.allow) {
         return { ok: false, reason: decision.reason };
       }

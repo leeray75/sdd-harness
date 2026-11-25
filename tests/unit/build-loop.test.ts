@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -814,6 +815,52 @@ describe('no git and no commit (AC7)', () => {
     const denied = writerRequests(requests)[1]?.messages.at(-1);
     expect(denied && 'content' in denied ? denied.content : '').toMatch(/^tool error: /);
   });
+});
+
+describe('the build loop on a temp git repo (AC3)', () => {
+  /** Runs git in the test repo. Test setup and checks only; the app's git runs in src/main/git. */
+  function git(args: string[]): string {
+    return execFileSync('git', args, {
+      cwd: root,
+      encoding: 'utf8',
+      windowsHide: true,
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+    });
+  }
+
+  it('makes no commit, and leaves the committed files and the index alone', async () => {
+    git(['init', '-q', '-b', 'main']);
+    git(['config', 'user.name', 'Test User']);
+    git(['config', 'user.email', 'test@example.com']);
+    git(['config', 'core.autocrlf', 'false']);
+    git(['config', 'commit.gpgsign', 'false']);
+    const hooks = join(root, 'no-hooks');
+    await mkdir(hooks);
+    git(['config', 'core.hooksPath', hooks]);
+    await writeFile(join(root, 'README.md'), 'readme\n');
+    git(['add', 'README.md']);
+    git(['commit', '-q', '-m', 'init']);
+    const log = git(['log', '--format=%H']);
+    const readmeStatus = git(['status', '--porcelain', '--', 'README.md']);
+
+    await lockFeature(SPEC_V1);
+    const { controller } = await makeController({
+      writer: [
+        {
+          toolCalls: [
+            { name: 'run_command', args: { program: 'git', args: ['commit', '-m', 'x'] } },
+          ],
+        },
+        { text: IMPL_OK },
+      ],
+      reviewer: [{ text: REVIEW_PASS(1) }],
+    });
+    expect(await controller.start()).toEqual({ kind: 'done', outcome: 'Clean' });
+
+    expect(git(['log', '--format=%H'])).toBe(log);
+    expect(git(['diff', '--cached', '--name-only'])).toBe('');
+    expect(git(['status', '--porcelain', '--', 'README.md'])).toBe(readmeStatus);
+  }, 20_000);
 });
 
 describe('purity of the controller module', () => {

@@ -202,7 +202,7 @@ The approval lock says whether a feature's spec is approved (D36). Its pure part
 
 `detectFolder` takes this value (see [Detecting a folder's node](#detecting-a-folders-node)). The agent gate maps it to a spec state, `specStateOf` in `src/main/policy/context.ts`: `approved` gives `approved`, `changed` gives `draft`, `unchecked` gives `locked` and `none` gives `none`. With `locked`, no job may write a spec file or a source file, and the state file is denied to every job.
 
-**The current feature.** The state file's feature while the file is valid. Otherwise the folder with the newest modification time, and a tie goes to the smaller slug. An approved feature stays current until it is closed, and `p3-ship` clears the file then.
+**The current feature.** The state file's feature while the file is valid. Otherwise the folder with the newest modification time, and a tie goes to the smaller slug. An approved feature stays current until it is closed. `mark-done` removes the file when it names the feature (D38).
 
 **Watching.** `createSpecLockWatcher` watches `docs/specs/` (for the state file) and the current feature's folder (for its `SPECS.md`), with non-recursive `fs.watch`. An event starts a refresh after 150 ms. A refresh re-reads the state and re-hashes the spec, and `onChange` runs only when the value changes. `current()` gives the last value, which is `unchecked` until the first refresh. A watcher that errors is dropped, and the next refresh arms it again. Nothing is called after `close()`.
 
@@ -251,9 +251,42 @@ When the spec is approved again (`approved()`, called by main after `approve-spe
 
 **Documents.** The controller writes only `build-ledger.md` and `SUMMARY.md` in the feature's folder, through a temp file and a rename. The ledger's header is what `parseLedger` and `detectFolder` read: after each writer step or review, the detector gives implementing or reviewing with the current round. A paused ledger gives paused, and a finished one gives build-done. Free text is flattened to one line, so no value can start a label line. SUMMARY.md has the sections of the plugin's summary: What was built, Files changed (copied from `changes.md`), Acceptance criteria, Needs a runtime check, Review ledger, Spec revisions, Rejected findings, Open issues, Git state and Next steps.
 
-**No git.** The controller runs no git and makes no commit. Its commands go through the job runner's tool registry, which has no git tool, and `run_command` goes through the D31 allowlist.
+**No git.** The controller runs no git and makes no commit. Its commands go through the job runner's tool registry, which has no git tool, and `run_command` goes through the D31 allowlist. Commit and push come only from `approve-result`, after the user's approval (D38, see [Ship and close](#ship-and-close)).
 
 **Refusals.** Every call is checked against the node first. An illegal call, or one made while a step runs, is refused with a fixed reason and changes nothing. `requestEdit()` is the EDIT_SPEC hook for `edit-approved-spec` (`src/main/human/spec-handlers.ts`): it moves spec-approved to spec-changed, and it refuses once the build has started.
+
+## Ship and close
+
+The ship step commits the approved work and closes the feature (D38). The git module is `src/main/git/git.ts`, the two steps are `src/main/workflow/ship.ts`, and the two handlers are `src/main/human/ship-handlers.ts`. Nothing outside `src/main/git/` runs git, and no agent has a git tool.
+
+**The git module.** One private runner calls the git CLI through `execFile`, with no shell and from the project root. The environment adds `GIT_TERMINAL_PROMPT=0` and `GCM_INTERACTIVE=never`, so a missing credential fails rather than waits. A local command times out after 30 s and a push after 120 s. A call returns its value, or one of four codes: `git-missing`, `timeout`, `not-a-repo` or `failed`. The functions are `currentBranch`, `defaultBranch` (from `origin/HEAD`), `changedPaths` (porcelain v1, both sides of a rename, deletions included), `stage` (`add --all --`, literal pathspecs), `commit` (never with `--no-verify`), `push` (`--set-upstream origin`), `aheadOfUpstream` (local refs only) and `ignoredEntries` (the D31 read-only query, moved from `protect.ts`).
+
+**The Git state line.** SUMMARY.md's line after `## Git state` says whether the work is approved. `approve-result` replaces it with `Branch <branch>; approved; committed and pushed in the commit that adds this report.` A missing SUMMARY.md, or one with no Git state line, refuses both actions.
+
+**approve-result.** The checks run in order, and the first refusal stops the step:
+
+1. The feature's build controller, when there is one, is at build-done.
+2. The folder is at build-done and the lock approves this feature.
+3. The branch is not detached, and is not the default branch (`origin/HEAD`, or `main` and `master` when it is unset).
+4. SUMMARY.md holds a Git state line.
+5. If the line already says approved, this is a retry. With no upstream, or ahead of it, the branch is pushed. Ahead 0 refuses, and so does a tree with changes. Nothing is committed.
+6. Every changed path is in the allowed set: the File column of `changes.md`, every path under `docs/specs/<feature>/`, and `docs/specs/.sdd-state.json`. Any other path refuses, and nothing is written.
+
+Then the Git state line is rewritten, the changed paths and SUMMARY are staged, and one commit is made with the message `<ticket>: <summary>` (or `<summary>` without a ticket). The ticket is SPECS.md's `ticket:`. The summary is SUBTASK.md's first `# ` heading, else SPECS.md's, else the slug, flattened to one line and capped at 72 characters. Then the branch is pushed. If the stage or the commit fails, SUMMARY is written back and the same paths are staged again, so the index matches the files. If the push fails, the commit is kept and the step refuses. Approving again only pushes.
+
+**mark-done.** The controller, node and branch checks are the same as above, and then:
+
+1. The Git state line must say approved. Otherwise it refuses: approve the result first.
+2. The tree must be clean, and the branch must have an upstream with ahead 0. Otherwise it refuses: push the approved work first.
+3. CLOSE goes through `transition('build-done', 'CLOSE')`.
+
+SPECS.md's status becomes `done`, and the state file is removed when it names this feature. Those two paths are staged and committed as `Close <feature> spec`, and the branch is pushed. If the commit fails, both files are written back and staged again. If the push fails, the close commit is kept. A feature that is already closed, with an unpushed close, is retried by pushing alone. A closed feature whose state file names another feature is left alone, and nothing is committed. After a close the folder detects as `closed`.
+
+**Refusals.** Each refusal is a fixed reason. None names a path, a branch, a commit message or git's output. An unexpected error becomes a refusal, and the handler never throws.
+
+**Rule events.** `createInProcessJobRunner` takes an `onRuleEvent` callback (D30). It gets the gate's decision for each tool call, allowed or denied, and the revert and network events of `run_command` (D31). A throwing callback is caught. No job runner is created at startup yet, so `index.ts` does not pass `logRuleEvent(log)`.
+
+**Workflow.** CLOSE is the only event the ship step raises, and only from build-done. `approve-result` raises no event. The table is unchanged (D34).
 
 ## Where the code is
 
@@ -278,7 +311,12 @@ When the spec is approved again (`approved()`, called by main after `approve-spe
 - `tests/unit/spec-detect.test.ts`: a fixture for every branch of the precedence, and the purity scan of both shared document modules.
 - `tests/unit/spec-folders.test.ts`: the temp-folder scans, the vendored plugin folder, and this repo's finished folders.
 - `tests/fixtures/sdd-plugin/`: the templates and the `p3-state-machine` folder, copied from the plugin (see its README).
+- `src/main/git/git.ts`: the git module, the only code that runs git (`runGit`, the fixed functions and `ignoredEntries`).
+- `src/main/workflow/ship.ts`: `approveResult`, `markDone`, the commit message, the Git state line and the allowed set.
+- `src/main/human/ship-handlers.ts`: the `approve-result` and `mark-done` handlers.
+- `tests/unit/git.test.ts`, `ship.test.ts`, `ship-handlers.test.ts`: the git functions and the ship steps on temp repos with local bare remotes, and the handlers.
+- `tests/unit/git-boundary.test.ts`: the scans that keep git out of the agent side, and the no-git-tool check.
 
 ## Extending this page
 
-The build loop (`p3-build-loop`) is described above. Later Phase 3 subtasks add their part here: shipping (`p3-ship`, which clears the state file on close, and the approve-result and commit steps). Each one adds its handlers and any new state or event to this page and to the table, with a decision in `decisions.md` when the table changes. The spec lock (D36) supplies the approval that `detectFolder` takes as an input.
+The build loop (`p3-build-loop`) and the ship step (`p3-ship`) are described above. The headless end-to-end test (`p3-headless-e2e`) adds tests and a fixture, not states or handlers. Each new state, event or handler goes on this page and into the table, with a decision in `decisions.md` when the table changes. The spec lock (D36) supplies the approval that `detectFolder` takes as an input.

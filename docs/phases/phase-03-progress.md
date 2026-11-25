@@ -21,6 +21,7 @@ The suggested subtask 2 (`p3-spec-docs-and-lock`) is split in two, because templ
 - D35: the document layer. The templates, folder layout, parsers and folder detector are pure shared modules, the scanner is in main, the plugin's session-marker and subagent inputs are dropped, and the approval is an input (`p3-spec-docs`).
 - D36: the spec lock. The state file, the hash input, the approval values, the watcher, the two handlers, the `refused` code and the gate's spec state. It amends D34 (`EDIT_SPEC` may come from `edit-approved-spec`) (`p3-spec-lock`).
 - D37: the build loop. The controller in main, the injected job runner with its turn caps, the round limit option, the pause choices with no revision cap, the change rounds, the two documents and the writer's own spec files. It amends D30 (the gate) and D34 (`CONTINUE` and `STOP_BUILD`, and `END_BUILD` from revision 1) (`p3-build-loop`).
+- D38: the ship step. The git module is the only code that runs git, with the D31 `ls-files` query moved into it. `approve-result` commits the approved work and pushes the branch, `mark-done` closes the feature, and each has its checks, its fixed reasons and its rollbacks. The job runner reports every rule event. It amends nothing (`p3-ship`).
 
 ## Decided during planning
 
@@ -52,7 +53,7 @@ The suggested subtask 2 (`p3-spec-docs-and-lock`) is split in two, because templ
 - From `p3-build-loop`:
   - No controller is created at startup, and no UI or IPC starts a build yet. `index.ts` only passes the `edit-approved-spec` hook, which allows the edit while no controller exists, so the app's behaviour is unchanged until a build start is wired (`p3-ship` or the pilot).
   - The jobs run in the main process through `createInProcessJobRunner`. Running them in the agent process over IPC is not done (`p3-headless-e2e`, or the pilot).
-  - The job runner does not forward the gate's rule events to the log yet, though D30 asks for every decision to be logged. Wire it before any build runs in the app.
+  - The job runner does not forward the gate's rule events to the log yet, though D30 asks for every decision to be logged. Wire it before any build runs in the app. Resolved in `p3-ship` (D38): the runner sends every decision, and the revert and network events, to `onRuleEvent`. Still open: `index.ts` passes `logRuleEvent(log)` only once a runner is built in the app, which waits for the first build start.
   - Settled in revision 1 (D37): a failed step, and a continue with nothing left to run, end the build with END_BUILD and the outcome Open issues remain. The node, the ledger and SUMMARY then agree. No IMPLEMENTED is raised without a writer step.
   - Settled in revision 1 (D37): a change round's label is `U<k>` in the prompts and in the reviewer's heading, and `parseReview` returns it as the string `U<k>`. The counter is not changed.
   - Check in the pilot: a continue whose review pause had no findings to fix ends the build, so the user cannot ask the writer again on that review. Decide whether a later phase should offer a retry.
@@ -63,6 +64,12 @@ The suggested subtask 2 (`p3-spec-docs-and-lock`) is split in two, because templ
     - A continued Mode 3 adds a second Mode 3 entry to the ledger.
     - The report parsers have only been tested on scripted turns.
   - The work and the close commit came in together as PR #24. The PR run (45308324409) and the main run (45308344079) were green on `check`. The three `e2e` jobs of both runs were still running when this row was written. Check both before the next merge.
+- From `p3-ship`:
+  - No job runner is built in the app yet, so `index.ts` passes no `logRuleEvent(log)`. The runner's default does nothing. Wire the log where the first runner is built (the build start, or the pilot).
+  - `approve-result` and `mark-done` are registered when a project root is set (`HARNESS_SPIKE_ROOT`), like the spec handlers. Without a root they answer `not-available`.
+  - A closed feature whose close is unpushed is retried by pushing alone. Nothing checks that its last commit is the close commit, because the git module has no log function. Decide in the pilot whether that check is needed.
+  - `approve-result` rejects a SUMMARY with no Git state line and a missing SUMMARY. A user who wants a feature shipped without a build report has no path yet.
+  - The 1,000-entry `list_files` test in `tests/unit/tool-files.test.ts` timed out at 5 s once in the full run of `p3-ship`. It passes alone (about 4 s). Give it an explicit timeout if it fails again under load.
 - The sdd plugin's own templates in the separate `repos/claude` repo are not changed by this phase. A later change there could carry the docs item into the plugin's subtask briefs (out of this repo, raised in `p3-state-machine`).
 
 ## Phase summary
