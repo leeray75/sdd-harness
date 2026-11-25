@@ -15,6 +15,8 @@ import { approvalOf, readSpecState } from '../../src/main/workflow/spec-lock';
 import type { HumanActionResult } from '../../src/shared/human-actions';
 
 const TRUSTED: HumanActionSender = { senderId: 1, frameUrl: 'app://page' };
+/** The dev project: a valid project id for a request (D40). */
+const PROJECT_ID = 'dev';
 const NOW = new Date('2026-11-22T10:00:00.000Z');
 const SPEC = [
   '---',
@@ -117,7 +119,7 @@ function call(
   feature = 'p3-x',
   sender: HumanActionSender = TRUSTED,
 ): Promise<HumanActionResult> {
-  return h.channel.handle(sender, { action, feature });
+  return h.channel.handle(sender, { action, project: PROJECT_ID, feature });
 }
 
 function refusedWith(result: HumanActionResult, reason: string): void {
@@ -133,7 +135,13 @@ describe('the channel checks run before the handlers (AC4)', () => {
 
     const invalid = harness();
     expect(
-      (await invalid.channel.handle(TRUSTED, { action: 'approve-spec', feature: 'a--b' })).ok,
+      (
+        await invalid.channel.handle(TRUSTED, {
+          action: 'approve-spec',
+          project: PROJECT_ID,
+          feature: 'a--b',
+        })
+      ).ok,
     ).toBe(false);
     expect(invalid.approve).not.toHaveBeenCalled();
 
@@ -268,7 +276,7 @@ describe('approve-spec refusals change no file and throw nothing (AC4)', () => {
     const h = harness();
     await call(h, 'approve-spec');
     expect(h.error).toHaveBeenCalledWith(
-      'human action approve-spec: refused (refused) feature=p3-x',
+      'human action approve-spec: refused (refused) feature=p3-x project=dev',
     );
   });
 });

@@ -34,6 +34,7 @@ import {
   type SpecProblem,
 } from '../../shared/build-docs';
 import { isFeatureSlug, parseSpecs, type SpecFileName } from '../../shared/spec-docs';
+import { checkRoundLimit } from '../../shared/project-rules';
 import { transition, type EventId, type NodeId } from '../../shared/workflow';
 
 /** The round limit when the build gives none (G2). */
@@ -50,10 +51,7 @@ export function roundLimit(
   if (value === undefined) {
     return { ok: true, limit: DEFAULT_ROUND_LIMIT };
   }
-  if (value === 1 || value === 2 || value === 3) {
-    return { ok: true, limit: value };
-  }
-  return { ok: false, reason: 'the round limit must be 1, 2 or 3' };
+  return checkRoundLimit(value);
 }
 
 /** The result of a build call: a finished build, a pause, a failure, a wait for approval, or a refusal. */

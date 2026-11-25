@@ -66,7 +66,7 @@ describe('the preload bridge', () => {
 
   it('sends the request to the human-action channel through ipcRenderer.invoke', async () => {
     const harness = electron.exposed.get('harness') as HarnessBridge;
-    const request = { action: 'approve-spec' as const, feature: 'demo' };
+    const request = { action: 'approve-spec' as const, project: 'dev', feature: 'demo' };
     await expect(harness.humanAction(request)).resolves.toEqual({ ok: true });
     expect(electron.invoke).toHaveBeenCalledWith('harness:human-action', request);
   });

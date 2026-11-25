@@ -1,7 +1,10 @@
 import { app, BrowserWindow, ipcMain, type IpcMainInvokeEvent } from 'electron';
+import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { EVENT_CHANNELS, IPC_CHANNELS } from '../shared/bridge';
+import { DEV_PROJECT_ID } from '../shared/human-actions';
+import { DEFAULT_RULES } from '../shared/project-rules';
 import { tokens } from '../shared/tokens';
 import { startAgentHost, type LiveSupplier } from './agent/host';
 import { createHumanActionChannel } from './human/channel';
@@ -9,6 +12,8 @@ import { createGestureTracker } from './human/gesture';
 import { createShipHandlers } from './human/ship-handlers';
 import { createSpecHandlers } from './human/spec-handlers';
 import { log } from './log';
+import { createProjectRegistry } from './projects/registry';
+import { createProjectStore, type Project } from './projects/store';
 import {
   parseSecretsArgs,
   runSecretsCommand,
@@ -40,9 +45,9 @@ let mainWindow: BrowserWindow | null = null;
 // human-only channel asks it whether a real click or key press came just before a request.
 const gestureTracker = createGestureTracker({ now: () => performance.now() });
 
-// The human-only channel (D33). The spec-lock handlers are registered by startSpecLock when a
-// project root exists (D36). With no root, every request that passes the checks is answered
-// `not-available`.
+// The human-only channel (D33). The four handlers are registered by setUpProjects through the
+// project registry (D40): each request names its project, and a project that is not known is
+// refused. Until the registry is up, a request is answered `not-available`.
 const humanActions = createHumanActionChannel({
   isTrustedSender: (sender) =>
     isTrustedSender({
@@ -166,51 +171,96 @@ function registerIpcHandlers(): void {
 }
 
 /**
- * The project root the app works in: the spike root today (D27, HARNESS_SPIKE_ROOT). With no root,
- * no spec lock is started and no spec handler is registered.
+ * The dev project (D40): the spike root (HARNESS_SPIKE_ROOT) in an unpackaged run only. It is never
+ * saved in the store, and a packaged app ignores the variable.
  */
-const projectRoot = process.env['HARNESS_SPIKE_ROOT'] || undefined;
+const devProjectRoot = app.isPackaged ? undefined : process.env['HARNESS_SPIKE_ROOT'] || undefined;
 
-/** The build controller of each feature that has a build (D37). Filled when a build starts. */
+/** The build controller of each feature of each project that has a build (D37, D40). */
 const buildControllers = new Map<string, BuildController>();
 
+/** The key of a build controller: its project id and its feature. Neither can contain a slash. */
+function controllerKey(projectId: string, feature: string): string {
+  return `${projectId}/${feature}`;
+}
+
+/** The spike agent's live context reads the dev project's watcher (D36), set up with the registry. */
+let devWatcher: SpecLockWatcher | null = null;
+
 /**
- * Registers the spec-lock handlers on the human-only channel and starts the lock watcher for the
- * project root (p3-spec-lock, D36). Each handler refreshes the watcher after a change.
+ * Loads the project store and builds the registry on top of it (D40). The store is in app data;
+ * a corrupt file is set aside by the store itself. The four human-only handlers are registered
+ * with the registry, so a request for a project that is not known is refused.
  */
-function startSpecLock(root: string): SpecLockWatcher {
-  const lock = createSpecLockWatcher({
-    root,
-    onChange: (value) => {
-      const feature = value.feature === null ? '' : ` feature=${value.feature}`;
-      log.info(`spec lock: ${value.approval}${feature}`);
-    },
-  });
-  // The build controllers by feature (D37). None is created at startup in this phase, so until a
-  // build starts, an edit of an approved spec is allowed as before.
-  const handlers = createSpecHandlers({
-    root,
+async function setUpProjects(): Promise<void> {
+  const store = createProjectStore({
+    filePath: join(app.getPath('userData'), 'projects.json'),
+    newId: () => randomUUID(),
     now: () => new Date(),
-    onLockChanged: () => lock.refresh(),
-    onEditRequested: (feature) => {
-      const controller = buildControllers.get(feature);
-      return controller ? controller.requestEdit() : { ok: true };
+    platform: process.platform,
+    logger: log,
+  });
+  await store.load();
+
+  const devProject: Project | undefined =
+    devProjectRoot === undefined
+      ? undefined
+      : {
+          id: DEV_PROJECT_ID,
+          name: 'dev',
+          environment: { kind: 'local' },
+          root: devProjectRoot,
+          rules: DEFAULT_RULES,
+        };
+
+  // The dev project's watcher is the first one started, so it is the first watcher for its root.
+  let firstDevStart = devProject !== undefined;
+  const createdRegistry = createProjectRegistry({
+    store,
+    ...(devProject === undefined ? {} : { devProject }),
+    startLock: (root) => {
+      const lock = createSpecLockWatcher({
+        root,
+        onChange: (value) => {
+          const feature = value.feature === null ? '' : ` feature=${value.feature}`;
+          log.info(`spec lock: ${value.approval}${feature}`);
+        },
+      });
+      if (firstDevStart && devProject !== undefined && root === devProject.root) {
+        devWatcher = lock;
+        firstDevStart = false;
+      }
+      return lock;
     },
+    makeSpecHandlers: ({ project, refresh }) =>
+      createSpecHandlers({
+        root: project.root,
+        now: () => new Date(),
+        onLockChanged: refresh,
+        // The build controller of the feature allows or refuses the edit (D37). None exists
+        // until a build starts, so an edit is allowed as before.
+        onEditRequested: (feature) => {
+          const controller = buildControllers.get(controllerKey(project.id, feature));
+          return controller ? controller.requestEdit() : { ok: true };
+        },
+      }),
+    makeShipHandlers: ({ project, refresh, controllerNode }) =>
+      createShipHandlers({
+        root: project.root,
+        onLockChanged: refresh,
+        controllerNode,
+        commitFormat: project.rules.commitFormat,
+      }),
+    controllerNode: (projectId, feature) =>
+      buildControllers.get(controllerKey(projectId, feature))?.node() ?? null,
   });
-  humanActions.register('approve-spec', handlers['approve-spec']);
-  humanActions.register('edit-approved-spec', handlers['edit-approved-spec']);
-  // The ship handlers (D38): approve-result and mark-done, with the feature's build controller
-  // read from buildControllers. No build controller is created at startup in this phase.
-  const ship = createShipHandlers({
-    root,
-    onLockChanged: () => lock.refresh(),
-    controllerNode: (feature) => buildControllers.get(feature)?.node() ?? null,
-  });
-  humanActions.register('approve-result', ship['approve-result']);
-  humanActions.register('mark-done', ship['mark-done']);
-  void lock.refresh();
-  app.once('before-quit', () => lock.close());
-  return lock;
+  humanActions.register('approve-spec', createdRegistry.handlerFor('approve-spec'));
+  humanActions.register('edit-approved-spec', createdRegistry.handlerFor('edit-approved-spec'));
+  humanActions.register('approve-result', createdRegistry.handlerFor('approve-result'));
+  humanActions.register('mark-done', createdRegistry.handlerFor('mark-done'));
+  // change-rules has no handler (D40): it is answered not-available.
+
+  app.once('before-quit', () => createdRegistry.close());
 }
 
 /**
@@ -259,14 +309,15 @@ async function runSecretsMode(command: SecretsCommand): Promise<void> {
 if (secretsCommand) {
   void app.whenReady().then(() => runSecretsMode(secretsCommand));
 } else {
-  void app.whenReady().then(() => {
+  void app.whenReady().then(async () => {
+    await setUpProjects();
     registerIpcHandlers();
     mainWindow = createMainWindow();
-    // Each agent tool call reads the open feature and its spec state from the watcher (D36).
-    // With no project root there is no lock, so the agent gets the default context.
+    // Each agent tool call reads the open feature and its spec state from the dev project's
+    // watcher (D36, D40). With no dev project there is no lock, so the agent gets the default context.
     let live: LiveSupplier | undefined;
-    if (projectRoot) {
-      const lock = startSpecLock(projectRoot);
+    const lock = devWatcher;
+    if (lock !== null) {
       live = () => {
         const value = lock.current();
         return { feature: value.feature, spec: specStateOf(value.approval) };

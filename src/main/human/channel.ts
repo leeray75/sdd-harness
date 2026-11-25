@@ -52,16 +52,16 @@ const INVALID_LABEL = 'invalid';
 export function createHumanActionChannel(deps: HumanActionChannelDeps): HumanActionChannel {
   const handlers = new Map<HumanActionId, HumanActionHandler>();
 
-  /** Writes the one decision line for a call. A valid request adds its feature. */
+  /** Writes the one decision line for a call. A valid request adds its feature and project. */
   function logDecision(
     action: string,
     outcome: 'accepted' | 'refused',
     code: string,
-    feature?: string,
+    scope?: { feature: string; project: string },
   ): void {
     const line =
       `human action ${action}: ${outcome} (${code})` +
-      (feature === undefined ? '' : ` feature=${feature}`);
+      (scope === undefined ? '' : ` feature=${scope.feature} project=${scope.project}`);
     if (outcome === 'accepted') {
       deps.logger.info(line);
     } else {
@@ -73,9 +73,9 @@ export function createHumanActionChannel(deps: HumanActionChannelDeps): HumanAct
     code: 'untrusted-sender' | 'invalid' | 'no-gesture' | 'not-available',
     reason: string,
     action: string,
-    feature?: string,
+    scope?: { feature: string; project: string },
   ): HumanActionResult {
-    logDecision(action, 'refused', code, feature);
+    logDecision(action, 'refused', code, scope);
     return { ok: false, code, reason };
   }
 
@@ -99,17 +99,18 @@ export function createHumanActionChannel(deps: HumanActionChannelDeps): HumanAct
         return refuse('invalid', parsed.reason, INVALID_LABEL);
       }
       const request = parsed.request;
-      const { action, feature } = request;
+      const { action, project, feature } = request;
+      const scope = { feature, project };
 
       // 3. The gesture. Each gesture is used by one request, whatever happens next.
       if (!deps.tracker.consume()) {
-        return refuse('no-gesture', NO_GESTURE_REASON, action, feature);
+        return refuse('no-gesture', NO_GESTURE_REASON, action, scope);
       }
 
       // 4. The registry.
       const handler = handlers.get(action);
       if (handler === undefined) {
-        return refuse('not-available', NOT_AVAILABLE_REASON, action, feature);
+        return refuse('not-available', NOT_AVAILABLE_REASON, action, scope);
       }
 
       // 5. The handler. A throw is logged by its error name only, never by its message.
@@ -119,13 +120,13 @@ export function createHumanActionChannel(deps: HumanActionChannelDeps): HumanAct
       } catch (error) {
         const name = error instanceof Error ? error.name : 'non-error';
         deps.logger.error(`human action ${action}: handler threw (${name})`);
-        return refuse('not-available', FAILED_REASON, action, feature);
+        return refuse('not-available', FAILED_REASON, action, scope);
       }
       logDecision(
         action,
         result.ok ? 'accepted' : 'refused',
         result.ok ? 'ok' : result.code,
-        feature,
+        scope,
       );
       return result;
     },

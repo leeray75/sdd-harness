@@ -21,10 +21,28 @@ export const MAX_FEATURE_LENGTH = 64;
 /** A feature slug: lowercase letters and digits, joined by single dashes. */
 export const FEATURE_SLUG_PATTERN = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
-/** The only payload a human action carries: which action, and for which feature. */
+/**
+ * The id of the dev project: the spike root in an unpackaged run (p4-project-store, D40). It cannot
+ * clash with a project id, because those are UUIDs.
+ */
+export const DEV_PROJECT_ID = 'dev';
+
+/** A project id: a lowercase UUID, as the project store makes them (D40). */
+export const PROJECT_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/**
+ * The payload a human action carries: which action, for which project (D40), and for which feature.
+ * The project is `dev` or a project id from the store.
+ */
 export interface HumanActionRequest {
   action: HumanActionId;
+  project: string;
   feature: string;
+}
+
+/** True when `value` is `dev` or a lowercase project UUID. */
+export function isProjectId(value: unknown): value is string {
+  return typeof value === 'string' && (value === DEV_PROJECT_ID || PROJECT_ID_PATTERN.test(value));
 }
 
 /**
@@ -51,9 +69,9 @@ function fail(reason: string): { ok: false; reason: string } {
 }
 
 /**
- * Checks a value received over IPC. It must be a plain object with exactly the keys `action`
- * and `feature`, an id from HUMAN_ACTION_IDS, and a feature slug of at most 64 characters.
- * Nothing else is accepted.
+ * Checks a value received over IPC. It must be a plain object with exactly the keys `action`,
+ * `project` and `feature`, an id from HUMAN_ACTION_IDS, a project that is `dev` or a project id,
+ * and a feature slug of at most 64 characters. Nothing else is accepted.
  */
 export function parseHumanActionRequest(value: unknown): HumanActionParse {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -64,13 +82,17 @@ export function parseHumanActionRequest(value: unknown): HumanActionParse {
     return fail('the request must be a plain object');
   }
   const keys = Object.keys(value).sort();
-  if (keys.length !== 2 || keys[0] !== 'action' || keys[1] !== 'feature') {
-    return fail('the request must have exactly the fields action and feature');
+  if (keys.length !== 3 || keys[0] !== 'action' || keys[1] !== 'feature' || keys[2] !== 'project') {
+    return fail('the request must have exactly the fields action, project and feature');
   }
   const record = value as Record<string, unknown>;
   const action = record['action'];
   if (!isHumanActionId(action)) {
     return fail(`action must be one of ${HUMAN_ACTION_IDS.join(', ')}`);
+  }
+  const project = record['project'];
+  if (!isProjectId(project)) {
+    return fail('project must be dev or a project id');
   }
   const feature = record['feature'];
   if (
@@ -82,5 +104,5 @@ export function parseHumanActionRequest(value: unknown): HumanActionParse {
       `feature must be a lowercase slug of letters, digits and single dashes, at most ${MAX_FEATURE_LENGTH} characters`,
     );
   }
-  return { ok: true, request: { action, feature } };
+  return { ok: true, request: { action, project, feature } };
 }

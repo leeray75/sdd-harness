@@ -9,7 +9,7 @@ import { createGestureTracker, type GestureTracker } from '../../src/main/human/
 import { HUMAN_ACTION_IDS, type HumanActionResult } from '../../src/shared/human-actions';
 
 const TRUSTED: HumanActionSender = { senderId: 1, frameUrl: 'app://page' };
-const REQUEST = { action: 'approve-spec', feature: 'demo' };
+const REQUEST = { action: 'approve-spec', project: 'dev', feature: 'demo' };
 const SECRET = 'SECRET-VALUE-987';
 
 /** A tracker whose consume answer the test sets. Records how often it was consumed. */
@@ -61,7 +61,7 @@ describe('the refusal codes', () => {
     expect(result).toEqual({
       ok: false,
       code: 'invalid',
-      reason: 'the request must have exactly the fields action and feature',
+      reason: 'the request must have exactly the fields action, project and feature',
     });
   });
 
@@ -95,7 +95,11 @@ describe('the order of the checks', () => {
 
   it('checks the guard before the gesture', async () => {
     const { channel, consume } = makeChannel();
-    const result = await channel.handle(TRUSTED, { action: 'nope', feature: 'demo' });
+    const result = await channel.handle(TRUSTED, {
+      action: 'nope',
+      project: 'dev',
+      feature: 'demo',
+    });
     expect(result).toMatchObject({ code: 'invalid' });
     expect(consume).not.toHaveBeenCalled();
   });
@@ -130,7 +134,11 @@ describe('the order of the checks', () => {
     channel.register('approve-spec', handler);
 
     expect(
-      await channel.handle(TRUSTED, { action: 'approve-spec', feature: 'Bad Slug' }),
+      await channel.handle(TRUSTED, {
+        action: 'approve-spec',
+        project: 'dev',
+        feature: 'Bad Slug',
+      }),
     ).toMatchObject({
       code: 'invalid',
     });
@@ -152,7 +160,11 @@ describe('a registered handler', () => {
     const handler = vi.fn<HumanActionHandler>(() => ({ ok: true }));
     channel.register('approve-spec', handler);
     expect(await channel.handle(TRUSTED, REQUEST)).toEqual({ ok: true });
-    expect(handler).toHaveBeenCalledWith({ action: 'approve-spec', feature: 'demo' });
+    expect(handler).toHaveBeenCalledWith({
+      action: 'approve-spec',
+      project: 'dev',
+      feature: 'demo',
+    });
   });
 
   it('may answer asynchronously and its refusal is returned as it is', async () => {
@@ -183,7 +195,7 @@ describe('a registered handler', () => {
     const logged = lines(info, error);
     expect(logged.map((line) => line.text)).toEqual([
       'human action approve-spec: handler threw (Error)',
-      'human action approve-spec: refused (not-available) feature=demo',
+      'human action approve-spec: refused (not-available) feature=demo project=dev',
     ]);
     expect(logged.map((line) => line.text).join('\n')).not.toContain(SECRET);
   });
@@ -219,7 +231,7 @@ describe('the log: one line per call', () => {
     channel.register('approve-spec', () => ({ ok: true }));
     await channel.handle(TRUSTED, REQUEST);
     expect(lines(info, error)).toEqual([
-      { level: 'info', text: 'human action approve-spec: accepted (ok) feature=demo' },
+      { level: 'info', text: 'human action approve-spec: accepted (ok) feature=demo project=dev' },
     ]);
   });
 
@@ -228,21 +240,27 @@ describe('the log: one line per call', () => {
     consume.mockReturnValueOnce(false);
     await channel.handle(TRUSTED, REQUEST);
     expect(lines(info, error)).toEqual([
-      { level: 'error', text: 'human action approve-spec: refused (no-gesture) feature=demo' },
+      {
+        level: 'error',
+        text: 'human action approve-spec: refused (no-gesture) feature=demo project=dev',
+      },
     ]);
   });
 
   it('logs the exact not-available line', async () => {
     const { channel, info, error } = makeChannel();
-    await channel.handle(TRUSTED, { action: 'mark-done', feature: 'p2-x' });
+    await channel.handle(TRUSTED, { action: 'mark-done', project: 'dev', feature: 'p2-x' });
     expect(lines(info, error)).toEqual([
-      { level: 'error', text: 'human action mark-done: refused (not-available) feature=p2-x' },
+      {
+        level: 'error',
+        text: 'human action mark-done: refused (not-available) feature=p2-x project=dev',
+      },
     ]);
   });
 
   it('logs the exact invalid line with no feature and no raw value', async () => {
     const { channel, info, error } = makeChannel();
-    await channel.handle(TRUSTED, { action: SECRET, feature: 'demo' });
+    await channel.handle(TRUSTED, { action: SECRET, project: 'dev', feature: 'demo' });
     expect(lines(info, error)).toEqual([
       { level: 'error', text: 'human action invalid: refused (invalid)' },
     ]);
@@ -250,7 +268,7 @@ describe('the log: one line per call', () => {
 
   it('logs the exact untrusted-sender line and never reads the request', async () => {
     const { channel, info, error, consume } = makeChannel({ isTrustedSender: () => false });
-    await channel.handle(TRUSTED, { action: 'approve-spec', feature: SECRET });
+    await channel.handle(TRUSTED, { action: 'approve-spec', project: 'dev', feature: SECRET });
     expect(lines(info, error)).toEqual([
       { level: 'error', text: 'human action invalid: refused (untrusted-sender)' },
     ]);
@@ -259,7 +277,11 @@ describe('the log: one line per call', () => {
 
   it('never logs a raw value from a refused request', async () => {
     const { channel, info, error } = makeChannel();
-    await channel.handle(TRUSTED, { action: 'approve-spec', feature: `${SECRET}/../x` });
+    await channel.handle(TRUSTED, {
+      action: 'approve-spec',
+      project: 'dev',
+      feature: `${SECRET}/../x`,
+    });
     await channel.handle(TRUSTED, { [SECRET]: 1 });
     const text = lines(info, error)
       .map((line) => line.text)
@@ -274,7 +296,7 @@ describe('the log: one line per call', () => {
     consume.mockReturnValueOnce(false);
     await channel.handle(TRUSTED, REQUEST);
     await channel.handle(TRUSTED, 'bad');
-    await channel.handle(TRUSTED, { action: 'mark-done', feature: 'demo' });
+    await channel.handle(TRUSTED, { action: 'mark-done', project: 'dev', feature: 'demo' });
     expect(info.mock.calls.length + error.mock.calls.length).toBe(4);
   });
 });

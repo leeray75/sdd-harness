@@ -14,13 +14,14 @@ Five actions can change a feature's state in ways that only a person may decide:
 
 The ids are in `HUMAN_ACTION_IDS` in `src/shared/human-actions.ts`. The table above is the plain-language meaning; the UI copy belongs to Phase 3 and later.
 
-**Status:** `approve-spec` and `edit-approved-spec` have handlers from `p3-spec-lock` (D36). They are registered when a project root exists (`HARNESS_SPIKE_ROOT`). Without a root, every request that passes the checks is answered `not-available`. `edit-approved-spec` also asks the feature's build controller before it records the edit (D37): the edit is refused once a build has started. `approve-result` and `mark-done` have handlers from `p3-ship` (D38), registered in the same place and under the same rule. They are described in [The ship handlers](#the-ship-handlers). `change-rules` has no handler and is not scheduled.
+**Status:** `approve-spec` and `edit-approved-spec` have handlers from `p3-spec-lock` (D36). `approve-result` and `mark-done` have handlers from `p3-ship` (D38). From `p4-project-store` (D40), all four are registered through the project registry (`src/main/projects/registry.ts`): each one answers for the project the request names, from that project's folder and rules. A request for a project the registry does not know is refused as `refused` with the reason "no project with this id", and changes nothing. With no projects (no dev project), every request that passes the checks gets that refusal. `edit-approved-spec` also asks the feature's build controller before it records the edit (D37): the edit is refused once a build has started. The ship handlers are described in [The ship handlers](#the-ship-handlers). `change-rules` has no handler and is not scheduled.
 
 ## The request and the result
 
-The renderer calls `window.harness.humanAction(request)`. The request is a plain object with exactly two fields:
+The renderer calls `window.harness.humanAction(request)`. The request is a plain object with exactly three fields (D40 amends the two-field shape of D33):
 
 - `action`: one of the five ids above;
+- `project`: `dev` (the dev project of an unpackaged run, from `HARNESS_SPIKE_ROOT`) or a project id, which is a lowercase UUID from the project store;
 - `feature`: a feature slug, which is lowercase letters and digits joined by single dashes, at most 64 characters (for example `p2-human-only-channel`).
 
 Nothing else is accepted: no extra field, no path, no free text. The result is either `{ ok: true }` or `{ ok: false, code, reason }`, where `code` is one of the five refusal codes below. A `reason` is fixed text and never repeats a value from the request.
@@ -34,7 +35,7 @@ Main runs these in `handle()` in `src/main/human/channel.ts`, on the channel `ha
 1. **Sender.** The call must come from the app's own window and its top-level page. This is the same `isTrustedSender` check the window calls use (`src/main/security.ts`). A call from anywhere else is refused as `untrusted-sender`, and its request is not read.
 2. **Request.** The guard checks the request. A refused request is `invalid`, with the guard's reason.
 3. **Gesture.** Main must have recorded a gesture in the last 1000 ms, and it must be unused. Otherwise the call is `no-gesture`. A call that reaches this step uses the gesture, whatever the result of the later steps.
-4. **Registry.** If no handler is registered for the action, the call is `not-available`.
+4. **Registry.** If no handler is registered for the action, the call is `not-available`. The four handlers are the registry's (D40): the registry looks up the request's `project`. A project it does not know is refused as `refused`, with the reason "no project with this id", and nothing is read or changed.
 5. **Handler.** The handler runs with the checked request, and its result is returned. If it throws, the caller gets `not-available` with the reason `the action failed`. The error is logged by its name only.
 
 Checks 1 and 2 do not touch the gesture, so an outside or malformed call cannot use up a real click.
@@ -55,41 +56,37 @@ A gesture stays usable for `GESTURE_WINDOW_MS` (1000 ms, in `src/main/human/gest
 
 ## Refusal codes
 
-| Code               | Meaning                                                                                                                                                     |
-| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `untrusted-sender` | The call did not come from the app's own window and page.                                                                                                   |
-| `invalid`          | The request failed the guard. The reason says which rule it broke, without the value.                                                                       |
-| `no-gesture`       | No unused gesture from the last second.                                                                                                                     |
-| `not-available`    | The request passed every check, but no handler is registered, or the handler failed.                                                                        |
-| `refused`          | A registered handler declined the request. The reason is that handler's fixed text, for example that SPECS.md lacks a heading. The request changed no file. |
+| Code               | Meaning                                                                                                                                                                                                                                              |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `untrusted-sender` | The call did not come from the app's own window and page.                                                                                                                                                                                            |
+| `invalid`          | The request failed the guard. The reason says which rule it broke, without the value.                                                                                                                                                                |
+| `no-gesture`       | No unused gesture from the last second.                                                                                                                                                                                                              |
+| `not-available`    | The request passed every check, but no handler is registered, or the handler failed.                                                                                                                                                                 |
+| `refused`          | A registered handler declined the request, or the request names a project the registry does not know. The reason is that handler's fixed text, for example that SPECS.md lacks a heading, or "no project with this id". The request changed no file. |
 
 ## Logging
 
 Every call writes exactly one decision line through the app's log (`src/main/log.ts`). A refused call writes to stderr, and an accepted one to stdout.
 
 ```
-human action approve-spec: refused (no-gesture) feature=p2-human-only-channel
-human action approve-spec: refused (not-available) feature=demo
-human action approve-spec: refused (refused) feature=demo
+human action approve-spec: refused (no-gesture) feature=p2-human-only-channel project=dev
+human action approve-spec: refused (refused) feature=demo project=dev
+human action approve-spec: accepted (ok) feature=demo project=dev
 human action invalid: refused (invalid)
 human action invalid: refused (untrusted-sender)
-human action approve-spec: accepted (ok) feature=demo
 ```
 
-The line holds the action, the outcome, the code and, for a request that passed the guard, the feature. Nothing else from the request is logged, and no refused request's raw value is ever logged. If a handler throws, one extra line names the error (`handler threw (TypeError)`) and the error's message is not logged.
+The line holds the action, the outcome, the code and, for a request that passed the guard, the feature and the project (`project=<dev or project id>`). Nothing else from the request is logged, and no refused request's raw value is ever logged. If a handler throws, one extra line names the error (`handler threw (TypeError)`) and the error's message is not logged.
 
 ## How a handler is registered
 
-The channel is created in `src/main/index.ts`. `startSpecLock` registers the two spec handlers on it (D36) and the two ship handlers (D38), and `register` throws if the action already has one.
+The channel is created in `src/main/index.ts`. `setUpProjects` registers the four handlers on it, each through the project registry's `handlerFor(action)` (D40): the two spec handlers (D36) and the two ship handlers (D38). `register` throws if the action already has one. The registry builds each project's own handlers from its root and rules, so the spec and ship handlers of a project never reach another project's folder.
 
 ```ts
-humanActions.register('approve-spec', async (request) => {
-  // Check the workflow state, hash the spec and lock it, then return the result.
-  return { ok: true };
-});
+humanActions.register('approve-spec', registry.handlerFor('approve-spec'));
 ```
 
-A handler gets the checked `{ action, feature }` request only. It must not read anything else from the renderer. A handler that refuses returns `{ ok: false, code, reason }` with one of the codes above. The ship handlers call the ship steps, which run git only through `src/main/git/git.ts` (D38). No agent tool reaches them.
+A handler gets the checked `{ action, project, feature }` request only. It must not read anything else from the renderer. A handler that refuses returns `{ ok: false, code, reason }` with one of the codes above. The ship handlers call the ship steps, which run git only through `src/main/git/git.ts` (D38). No agent tool reaches them.
 
 ## The ship handlers
 
