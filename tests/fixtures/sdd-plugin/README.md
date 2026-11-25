@@ -10,6 +10,11 @@ them. Do not reformat or edit them. Prettier skips this folder (`.prettierignore
     `plugins/sdd-plugin/skills/sdd/templates/`.
   - `specs/p3-state-machine/` is a plugin-written feature folder, copied from this repo's
     `docs/specs/p3-state-machine/` (written by the sdd plugin, closed and done).
+  - `specs/p3-ship/` is a plugin-written feature folder at commit `c580d56` (the p3-ship work commit
+    on `feature/p3-ship`). Its seven files (PLAN.md, SPECS.md, tasks.md, SUBTASK.md, build-ledger.md,
+    changes.md, SUMMARY.md) are copied from `git show c580d56:docs/specs/p3-ship/<file>`, byte for byte.
+    The p3-headless-e2e tests check each copy against a SHA-256 recorded in the test, so no git history
+    is needed (CI's checkout is shallow).
 
 The tests compare the template constants with `templates/` after CRLF is normalized to LF
 (`tests/unit/spec-docs-templates.test.ts`), and read `specs/p3-state-machine/` as a closed folder

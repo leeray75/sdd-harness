@@ -134,6 +134,10 @@ All notable changes to SDD Harness are recorded here. The format follows [Keep a
 - **Writer's spec files** (amends D30): once the spec is approved, the writer may write its own feature's `tasks.md` and `changes.md`. The planner may not write `changes.md`, and no job writes the ledger, SUMMARY or the state file.
 - **EDIT_SPEC** (D37): `edit-approved-spec` asks the feature's build controller before it records the edit, and the controller refuses once a build has started. No controller is created at startup yet.
 - **Scripted provider** (`tests/support/scripted-provider.ts`): replays each job's turns, so the whole loop runs in unit tests with no network.
+- **App job runner factory** (`src/main/workflow/app-runner.ts`, D39): `createAppJobRunner` builds the in-process job runner with the root's command context, read live for each call, and every rule event logged through `logRuleEvent(log)` (D30). The build start must use it; `index.ts` does not call it yet.
+- **Headless walk** (`tests/unit/headless-e2e.test.ts`, D39): one feature goes from planning to closed on a temp git repo with a local bare remote and no network. It runs the real channel, spec and ship handlers, the build controller with the app's runner, the gate and the tools. It covers a denied SPECS.md write, an ISSUES fix, a spec-problem pause and revision, one change round, and the one commit on approve-result and the close commit on mark-done. Nothing is committed before approve-result.
+- **Plugin folders in every state** (`tests/unit/plugin-folder-states.test.ts`): the seven `p3-ship` files at commit `c580d56`, vendored byte for byte under `tests/fixtures/sdd-plugin/specs/p3-ship/`, are checked against recorded SHA-256 values. Each state from planning to closed opens at its node and stage through the scanner.
+- **Where build jobs run** (D39): build jobs run in the main process for v1. The agent utility process keeps the spike loop, and no new IPC message is added.
 
 ### Changed
 

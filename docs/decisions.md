@@ -469,3 +469,16 @@ Format: **Decision** · **Outcome** · **Why** · **Date**.
   - firing `onLockChanged` only after a change: a refresh is cheap, and it leaves one case less to reason about.
 - **Not in this decision:** the headless end-to-end test (`p3-headless-e2e`), a git-host API or a pull request, and the commit format from project settings. The workflow table (D34) is unchanged.
 - **Date:** 2026-11-24
+
+## D39 · Where build jobs run: the main process for v1, and the app's runner factory
+
+- **Outcome:** build jobs run in the main process through `createInProcessJobRunner` (`src/main/workflow/job-runner.ts`), for v1. The agent utility process keeps the spike loop, and no new IPC message or protocol is added. The app builds its runners only through `createAppJobRunner` (`src/main/workflow/app-runner.ts`), which gives each runner the root's command context, read live for each call (D31, D36), and sends every rule event to `logRuleEvent(log)` (D30). Nothing in `index.ts` builds a runner yet; the build start must use the factory.
+- **Why:**
+  - The gate checks every tool call in main whichever process runs the job (D1, D4), so moving jobs changes no enforcement.
+  - In main, the headless walk runs the real runner under Vitest, with no new IPC or protocol.
+  - The factory is the one place that wires the rule-event log, so every runner the app builds logs every decision.
+- **Alternatives not taken:**
+  - Moving the jobs to the agent utility process now: it would need new IPC messages and a protocol for the job history, and it adds no enforcement;
+  - a runner built in `index.ts` with its own logger wiring: nothing would stop a later runner from skipping the log.
+- **Not in this decision:** moving jobs to the agent process later, if a need shows (isolation or CPU), as a new decision.
+- **Date:** 2026-11-25

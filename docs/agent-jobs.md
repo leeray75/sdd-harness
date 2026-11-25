@@ -68,6 +68,10 @@ The app reads each job's reply with the parsers in `src/shared/build-reports.ts`
 
 Each parser caps a kept text at 2,000 characters and a finding or row list at 50 entries. A reply is read as LF, and text before the heading is ignored.
 
+## Where the jobs run
+
+Build jobs run in the app's main process, through `createInProcessJobRunner` in `src/main/workflow/job-runner.ts` (D39, `p3-headless-e2e`). The app builds them only through `createAppJobRunner` in `src/main/workflow/app-runner.ts`, which logs every rule event. The agent utility process keeps the spike loop (`HARNESS_AGENT_SPIKE=1`), and no IPC message carries a job. Main checks every call before it runs, wherever the job runs, so the placement does not change what a job may do (D1, D4). Moving jobs to the agent process later is a new decision.
+
 ## What main enforces
 
 - Every tool call is checked in main against the job's policy before it runs (D30). The prompt cannot widen what the job may do.
