@@ -12,7 +12,7 @@ The suggested subtask 2 (`p3-spec-docs-and-lock`) is split in two, because templ
 | 2   | p3-spec-docs     | Ported templates (PLAN, SPECS, tasks, SUBTASK), the `docs/specs/<feature>/` layout, and reading existing folders (and the ledger) to the right stage                                            | done    | [SUMMARY](../specs/p3-spec-docs/SUMMARY.md)     | `e5eda75` (PR #22; work `d05f094`, close `c94b250`)                     |
 | 3   | p3-spec-lock     | Small state file in the repo, approved-spec hash, spec-changed detection by file watching, approve-spec and edit-approved-spec handlers                                                         | done    | [SUMMARY](../specs/p3-spec-lock/SUMMARY.md)     | `60b9f41` (PR #23; work `1f1ea98`, close `1ae8d3b`)                     |
 | 4   | p3-build-loop    | Writer then reviewer rounds, round limit (3, project can lower), spec-problem pause, ask for changes counted separately, ledger, changes and SUMMARY; a minimal scripted provider for its tests | done    | [SUMMARY](../specs/p3-build-loop/SUMMARY.md)    | `12918ce` (PR #24; work `8b7c024`, close `0b13ee5`)                     |
-| 5   | p3-ship          | Result approval, commit and push by the app with the commit format, close (mark-done handler)                                                                                                   | pending |                                                 |                                                                         |
+| 5   | p3-ship          | Result approval, commit and push by the app with the commit format, close (mark-done handler)                                                                                                   | done    | [SUMMARY](../specs/p3-ship/SUMMARY.md)          | `cd4c796` (PR #25; work `c580d56`, close `59158f2`)                     |
 | 6   | p3-headless-e2e  | Scripted fake provider and an end-to-end test of a full feature on a fixture repo, plus a real plugin `docs/specs` folder opening with the right stage                                          | pending |                                                 |                                                                         |
 
 ## Decisions added
@@ -63,13 +63,22 @@ The suggested subtask 2 (`p3-spec-docs-and-lock`) is split in two, because templ
     - A change round that pauses or fails before its review reuses its `U<k>` label on the next request.
     - A continued Mode 3 adds a second Mode 3 entry to the ledger.
     - The report parsers have only been tested on scripted turns.
-  - The work and the close commit came in together as PR #24. The PR run (45308324409) and the main run (45308344079) were green on `check`. The three `e2e` jobs of both runs were still running when this row was written. Check both before the next merge.
+  - The work and the close commit came in together as PR #24. The PR run (45308324409) and the main run (45308344079) were green on `check`. The three `e2e` jobs of both runs were still running when this row was written. Both later ended green on every job.
 - From `p3-ship`:
   - No job runner is built in the app yet, so `index.ts` passes no `logRuleEvent(log)`. The runner's default does nothing. Wire the log where the first runner is built (the build start, or the pilot).
   - `approve-result` and `mark-done` are registered when a project root is set (`HARNESS_SPIKE_ROOT`), like the spec handlers. Without a root they answer `not-available`.
   - A closed feature whose close is unpushed is retried by pushing alone. Nothing checks that its last commit is the close commit, because the git module has no log function. Decide in the pilot whether that check is needed.
   - `approve-result` rejects a SUMMARY with no Git state line and a missing SUMMARY. A user who wants a feature shipped without a build report has no path yet.
   - The 1,000-entry `list_files` test in `tests/unit/tool-files.test.ts` timed out at 5 s once in the full run of `p3-ship`. It passes alone (about 4 s). Give it an explicit timeout if it fails again under load.
+  - The build paused at T6 on a spec problem. AC3's scan failed on the existing read-only `git ls-files` in `protect.ts` (D31). The user chose to revise the spec (revision 1):
+    - the query moved into `git.ts` as `ignoredEntries`;
+    - AC5 was reworded to the close-retry path;
+    - three of the implementor's decisions were recorded in the Design.
+
+    Review round 1 of revision 1 then passed with no findings.
+
+  - Reviewer notes for the pilot: in a project that gitignores `docs/specs/.sdd-state.json`, staging the removed state file at close may fail, and the close would roll back.
+  - The work and the close commit came in together as PR #25. It was merged while the PR run (45525735416) and the main run (45525749555) were still running, `check` included. Check both runs before the next merge.
 - The sdd plugin's own templates in the separate `repos/claude` repo are not changed by this phase. A later change there could carry the docs item into the plugin's subtask briefs (out of this repo, raised in `p3-state-machine`).
 
 ## Phase summary
