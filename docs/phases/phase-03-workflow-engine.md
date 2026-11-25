@@ -55,11 +55,13 @@ Subtask 2 was split in two (see the progress file): `p3-spec-docs` (templates, l
 
 Subtask 4 is `p3-ship` (D38): the git module, the approve-result and mark-done steps with their checks and rollbacks, the two handlers, and the job runner's rule events. It is described in [`workflow-engine.md`](../workflow-engine.md#ship-and-close).
 
+Subtask 5 is `p3-headless-e2e` (D39): the app's job runner factory, the headless walk from planning to closed on a temp repo with a bare remote, and the `p3-ship` plugin files opened in every state. It is described in [`workflow-engine.md`](../workflow-engine.md#headless-run).
+
 ## Definition of done
 
-- [ ] All F2 acceptance criteria pass as automated tests
-- [ ] A full feature runs headlessly from plan to close on a fixture repo
-- [ ] A real `docs/specs` folder from the sdd plugin opens with the right stage
+- [x] All F2 acceptance criteria pass as automated tests. Evidence: the three F2 acceptance items in [`PRD.md`](../PRD.md) each name their test: the round limit in `build-loop.test.ts`, the commit rule in `headless-e2e.test.ts` and `ship.test.ts`, and the folder stages in `plugin-folder-states.test.ts` and `spec-folders.test.ts`.
+- [x] A full feature runs headlessly from plan to close on a fixture repo. Evidence: `tests/unit/headless-e2e.test.ts` builds a temp git repo with a bare remote for each run (no network) and walks one feature from planning to `closed`, with the node checked after each step and the git state checked before and after each approval.
+- [x] A real `docs/specs` folder from the sdd plugin opens with the right stage. Evidence: `tests/unit/plugin-folder-states.test.ts` checks the seven `p3-ship` plugin files (at `c580d56`, by SHA-256) and opens each state from planning to closed through the scanner; `tests/unit/spec-folders.test.ts` opens the `p3-state-machine` folder as closed.
 
 ## Instructions for Claude (follow these in order)
 

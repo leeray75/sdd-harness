@@ -97,9 +97,9 @@ Acceptance:
 
 Acceptance:
 
-- [x] After the last allowed round the build stops and asks the user.
-- [x] Nothing is committed before the user approves the result. Approve-result commits and pushes only after the approval (D38, `p3-ship`).
-- [x] Existing `docs/specs/<feature>/` folders open with the right stage. Folders are detected from their files (D35, `p3-spec-docs`), and the approval comes from the spec lock (D36, `p3-spec-lock`).
+- [x] After the last allowed round the build stops and asks the user. Checked by `tests/unit/build-loop.test.ts` (a limit of 1 stops after one ISSUES review; a round-3 limit ends with open issues).
+- [x] Nothing is committed before the user approves the result. Approve-result commits and pushes only after the approval (D38, `p3-ship`). Checked by the headless walk: no commit or push before approve-result, one after it, and one more after mark-done (`tests/unit/headless-e2e.test.ts`, `tests/unit/ship.test.ts`).
+- [x] Existing `docs/specs/<feature>/` folders open with the right stage. Folders are detected from their files (D35, `p3-spec-docs`), and the approval comes from the spec lock (D36, `p3-spec-lock`). Checked by `tests/unit/plugin-folder-states.test.ts` (the `p3-ship` plugin files in every state) and `tests/unit/spec-folders.test.ts` (the `p3-state-machine` folder).
 
 ### F3 · Projects and environments
 

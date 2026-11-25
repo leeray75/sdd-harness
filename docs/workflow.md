@@ -32,7 +32,7 @@ The writer and the reviewer are separate agents with different tools; the app ch
 
 ![Nothing is committed until you approve the result](workflow/4-review-and-ship.png)
 
-The app, never an agent, commits and pushes, and only after you approve. If the push fails, the commit is kept, and approving again only retries the push (D38). If a spec problem pauses the build, you choose to continue, revise the spec or stop. A build that hits a failed step, or that has nothing left to run after you continue, ends with its open issues listed. Asking for changes runs one more build and review, counted separately from the round limit; marking it done closes the feature and frees the project for the next one.
+The app, never an agent, commits and pushes, and only after you approve. If the push fails, the commit is kept, and approving again only retries the push (D38). If a spec problem pauses the build, you choose to continue, revise the spec or stop. A build that hits a failed step, or that has nothing left to run after you continue, ends with its open issues listed. Asking for changes runs one more build and review, counted separately from the round limit; marking it done closes the feature and frees the project for the next one. The build's jobs run in the app's main process, and every decision they make is logged (D39).
 
 ## Who can do what
 

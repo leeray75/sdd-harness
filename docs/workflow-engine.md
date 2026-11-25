@@ -288,6 +288,22 @@ SPECS.md's status becomes `done`, and the state file is removed when it names th
 
 **Workflow.** CLOSE is the only event the ship step raises, and only from build-done. `approve-result` raises no event. The table is unchanged (D34).
 
+## Headless run
+
+The headless walk (`p3-headless-e2e`, D39) runs one feature through every part of the engine on a temp git repo with a local bare remote and no network. It is `tests/unit/headless-e2e.test.ts`, and it uses the real pieces:
+
+- the human-only channel (D33), with a test gesture tracker, and the real spec handlers and ship handlers registered on it;
+- the build controller (D37), with the app's job runner from `createAppJobRunner` (`src/main/workflow/app-runner.ts`), the scripted provider in `tests/support/scripted-provider.ts`, and the real gate and tools in the temp root;
+- the lock, read from the files for each call through the live supplier (D36).
+
+The walk checks the node after each step (`scanSpecFoldersWithLock` for the folder, `controller.node()` while a controller exists). The steps are: the planning files (planning, plan-approved, spec-drafted); approve-spec (spec-approved), and a refused call with no gesture; the build, with a denied write to the approved SPECS.md, an ISSUES round and its fix, and a spec-problem pause (paused); resume with revise, where edit-approved-spec is refused at spec-changed, SPECS.md is edited directly, approve-spec re-approves it and `approved()` resumes in Mode 3 (build-done); one change round (build-done); approve-result (one commit, pushed); and mark-done (the close commit, pushed, closed).
+
+Before approve-result, the git state (HEAD, the commit count and the remote's branch refs) must not change. After approve-result there is one new commit on the remote with the commit-format message and only allowed paths. After mark-done there is one more. The gate's decisions reach the recording logger as `rule allowed` and `rule blocked` lines, and no line holds file content.
+
+**Where the job runner runs (D39).** Build jobs run in the main process, through `createInProcessJobRunner`, for v1. The agent utility process keeps the spike loop. The app builds its runners only through `createAppJobRunner`, so every rule event is logged. No IPC message is added.
+
+**What the walk shows about revisions.** `edit-approved-spec` is accepted only while the spec is approved and no build has started, because `EDIT_SPEC` is legal only from spec-approved (`src/shared/workflow.ts`). After a pause, the walk asserts that the channel refuses the edit at spec-changed. It then edits SPECS.md directly, and the lock reads the file as changed by its hash (D36). `approve-spec` re-approves it, and `approved()` resumes the build in Mode 3. Until that approval, the controller reads `spec-changed` once the revise is chosen, while the folder still reads `paused`, because the ledger keeps its pause until the build resumes.
+
 ## Where the code is
 
 - `src/shared/workflow.ts`: the ids, the table, the functions, the stages, the event kinds and the human map.
@@ -316,6 +332,10 @@ SPECS.md's status becomes `done`, and the state file is removed when it names th
 - `src/main/human/ship-handlers.ts`: the `approve-result` and `mark-done` handlers.
 - `tests/unit/git.test.ts`, `ship.test.ts`, `ship-handlers.test.ts`: the git functions and the ship steps on temp repos with local bare remotes, and the handlers.
 - `tests/unit/git-boundary.test.ts`: the scans that keep git out of the agent side, and the no-git-tool check.
+- `src/main/workflow/app-runner.ts`: `createAppJobRunner`, the app's runner factory (D39), with the live context and the rule-event log.
+- `tests/unit/app-runner.test.ts`: every gate decision reaches the logger as its formatted line, and a change in the live supplier is seen by the next call.
+- `tests/unit/headless-e2e.test.ts`: the headless walk, from planning to closed (see Headless run).
+- `tests/unit/plugin-folder-states.test.ts`: the `p3-ship` plugin files (checked against recorded SHA-256 values) opened in each state the detector knows.
 
 ## Extending this page
 
