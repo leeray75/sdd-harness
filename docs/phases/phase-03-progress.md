@@ -1,19 +1,19 @@
 # Phase 3 progress: Workflow engine (F2)
 
-Status: in progress · Started: 2026-11-22
+Status: done · Started: 2026-11-22 · Finished: 2026-11-25
 
 Remote: `origin` = https://github.com/leeray75/sdd-harness.git; feature branches come into `main` through pull requests, merged only when CI is green on every job. From `p3-state-machine` on, the user merges each pull request on GitHub themselves and says when it is done; Claude then fills in this file. No tracker is configured, so child tickets stay as `SUBTASK.md` drafts in `docs/specs/`.
 
 The suggested subtask 2 (`p3-spec-docs-and-lock`) is split in two, because templates, folder reading, the state file, the hash lock and file watching are too much for one build. The user went ahead with `/sdd:start` on the recommended list. Every subtask's spec has a docs task and acceptance criterion (CHANGELOG, stale docs including `CLAUDE.md` and `README.md`, useful new docs), done in the build.
 
-| #   | Feature          | Goal                                                                                                                                                                                            | Status  | Spec                                            | Commit                                                                  |
-| --- | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ----------------------------------------------- | ----------------------------------------------------------------------- |
-| 1   | p3-state-machine | Hand-written typed table of the plugin's states and events, stage mapping and labels, legal next events, event kinds and the human-action map                                                   | done    | [SUMMARY](../specs/p3-state-machine/SUMMARY.md) | `d261b51` (PR #20; work `b24f5c3`), close `63bb4b2` (PR #21; `9afaec9`) |
-| 2   | p3-spec-docs     | Ported templates (PLAN, SPECS, tasks, SUBTASK), the `docs/specs/<feature>/` layout, and reading existing folders (and the ledger) to the right stage                                            | done    | [SUMMARY](../specs/p3-spec-docs/SUMMARY.md)     | `e5eda75` (PR #22; work `d05f094`, close `c94b250`)                     |
-| 3   | p3-spec-lock     | Small state file in the repo, approved-spec hash, spec-changed detection by file watching, approve-spec and edit-approved-spec handlers                                                         | done    | [SUMMARY](../specs/p3-spec-lock/SUMMARY.md)     | `60b9f41` (PR #23; work `1f1ea98`, close `1ae8d3b`)                     |
-| 4   | p3-build-loop    | Writer then reviewer rounds, round limit (3, project can lower), spec-problem pause, ask for changes counted separately, ledger, changes and SUMMARY; a minimal scripted provider for its tests | done    | [SUMMARY](../specs/p3-build-loop/SUMMARY.md)    | `12918ce` (PR #24; work `8b7c024`, close `0b13ee5`)                     |
-| 5   | p3-ship          | Result approval, commit and push by the app with the commit format, close (mark-done handler)                                                                                                   | done    | [SUMMARY](../specs/p3-ship/SUMMARY.md)          | `cd4c796` (PR #25; work `c580d56`, close `59158f2`)                     |
-| 6   | p3-headless-e2e  | Scripted fake provider and an end-to-end test of a full feature on a fixture repo, plus a real plugin `docs/specs` folder opening with the right stage                                          | pending |                                                 |                                                                         |
+| #   | Feature          | Goal                                                                                                                                                                                            | Status | Spec                                            | Commit                                                                  |
+| --- | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ | ----------------------------------------------- | ----------------------------------------------------------------------- |
+| 1   | p3-state-machine | Hand-written typed table of the plugin's states and events, stage mapping and labels, legal next events, event kinds and the human-action map                                                   | done   | [SUMMARY](../specs/p3-state-machine/SUMMARY.md) | `d261b51` (PR #20; work `b24f5c3`), close `63bb4b2` (PR #21; `9afaec9`) |
+| 2   | p3-spec-docs     | Ported templates (PLAN, SPECS, tasks, SUBTASK), the `docs/specs/<feature>/` layout, and reading existing folders (and the ledger) to the right stage                                            | done   | [SUMMARY](../specs/p3-spec-docs/SUMMARY.md)     | `e5eda75` (PR #22; work `d05f094`, close `c94b250`)                     |
+| 3   | p3-spec-lock     | Small state file in the repo, approved-spec hash, spec-changed detection by file watching, approve-spec and edit-approved-spec handlers                                                         | done   | [SUMMARY](../specs/p3-spec-lock/SUMMARY.md)     | `60b9f41` (PR #23; work `1f1ea98`, close `1ae8d3b`)                     |
+| 4   | p3-build-loop    | Writer then reviewer rounds, round limit (3, project can lower), spec-problem pause, ask for changes counted separately, ledger, changes and SUMMARY; a minimal scripted provider for its tests | done   | [SUMMARY](../specs/p3-build-loop/SUMMARY.md)    | `12918ce` (PR #24; work `8b7c024`, close `0b13ee5`)                     |
+| 5   | p3-ship          | Result approval, commit and push by the app with the commit format, close (mark-done handler)                                                                                                   | done   | [SUMMARY](../specs/p3-ship/SUMMARY.md)          | `cd4c796` (PR #25; work `c580d56`, close `59158f2`)                     |
+| 6   | p3-headless-e2e  | Scripted fake provider and an end-to-end test of a full feature on a fixture repo, plus a real plugin `docs/specs` folder opening with the right stage                                          | done   | [SUMMARY](../specs/p3-headless-e2e/SUMMARY.md)  | `1948c1b` (PR #26; work `c990663`, close `0cf2e48`)                     |
 
 ## Decisions added
 
@@ -79,10 +79,12 @@ The suggested subtask 2 (`p3-spec-docs-and-lock`) is split in two, because templ
     Review round 1 of revision 1 then passed with no findings.
 
   - Reviewer notes for the pilot: in a project that gitignores `docs/specs/.sdd-state.json`, staging the removed state file at close may fail, and the close would roll back.
-  - The work and the close commit came in together as PR #25. It was merged while the PR run (45525735416) and the main run (45525749555) were still running, `check` included. Check both runs before the next merge.
+  - The work and the close commit came in together as PR #25. It was merged while the PR run (45525735416) and the main run (45525749555) were still running, `check` included. Both later ended green on every job.
 - From `p3-headless-e2e`:
   - The walk shows that `edit-approved-spec` is refused at spec-changed, because `EDIT_SPEC` is legal only from spec-approved. The spec (revision 1) accepts this: the walk asserts the refusal, edits SPECS.md directly and re-approves. A later phase may want the channel to allow a revision edit; that would be a workflow-table change under D34.
-  - While a build is paused for revision, the folder still detects as `paused` until the build resumes, because the ledger keeps its pause. The controller reads `spec-changed` at the same time.
+  - After `resume('revise')` the controller reads `spec-changed`, while the folder still detects as `paused` until SPECS.md is edited: the ledger keeps its pause, and the lock is still `approved`. Once the edit makes the lock `changed`, the folder detects as `spec-changed` too. The walk checks this (corrected after the merge; the build's note said "until the build resumes").
+  - The implementor's three full `pnpm test` runs each had 1–3 timeouts in `tests/unit/tool-files.test.ts` (the 1,000-entry `list_files` tests at 5 s). The orchestrator's final run, and CI `check` on the PR, were green. Give those tests an explicit timeout if they fail again.
+  - The work and the close commit came in together as PR #26 (`1948c1b`). The PR run (45636597750) was green on every job, including the walk's first runs on macOS and Linux. The main run (45636959426) was green on every job too. PR #25's two runs (45525735416, 45525749555) both ended green on every job.
   - The fixture check uses SHA-256 values recorded in the test, since CI's checkout is shallow and has no `c580d56`. A new plugin folder needs its own recorded values.
   - The `p3-ship` SUMMARY fixture was written by the orchestrator, because the implementor's file tool refused a report-named file.
   - `app-runner.ts` is not called by `index.ts` yet (no build start in the app), so the Rule-event log is wired in the factory only.
@@ -90,4 +92,29 @@ The suggested subtask 2 (`p3-spec-docs-and-lock`) is split in two, because templ
 
 ## Phase summary
 
-(written when the phase is done)
+Phase 3 delivered F2, the workflow engine, in six subtasks (PRs #20–#26). A whole feature now runs headless, with no UI: plan, spec lock, build and review rounds, pause, result approval, commit and push by the app, and close.
+
+- `p3-state-machine`: the plugin's states and events as a hand-written typed table, with the six-stage mapping, the event kinds and the human-action map (D34).
+- `p3-spec-docs`: the four plugin templates, the `docs/specs/<feature>/` layout, the parsers, and a folder detector that gives each folder its node and stage from its files (D35).
+- `p3-spec-lock`: the state file `docs/specs/.sdd-state.json`, the approved spec's hash, change detection by file watching, and the `approve-spec` and `edit-approved-spec` handlers (D36).
+- `p3-build-loop`: the build controller, with writer and reviewer rounds, the round limit, the spec-problem pause, change rounds, the ledger and SUMMARY, run through an injected job runner and a scripted provider (D37).
+- `p3-ship`: the git module (the only code that runs git), `approve-result` that commits and pushes, `mark-done` that closes, and rule events from the job runner (D38).
+- `p3-headless-e2e`: one walk of a whole feature on a temp repo with a bare remote, plugin folders in every state, and the app runner factory that logs every rule event; jobs stay in main for v1 (D39).
+
+Decisions D34–D39 were added. D30 and D34 were amended by D36 and D37. Four builds paused on a spec problem and were revised once each: `p3-state-machine`, `p3-build-loop`, `p3-ship` and `p3-headless-e2e` (whose one revision settled two problems). Every spec carried its docs task.
+
+Definition of done, checked on `main` at `1948c1b`:
+
+- [x] All F2 acceptance criteria pass as automated tests:
+  - **the round limit:** `tests/unit/build-loop.test.ts`;
+  - **nothing committed before the result is approved:** `tests/unit/headless-e2e.test.ts` and `tests/unit/ship.test.ts`;
+  - **existing folders open with the right stage:** `tests/unit/plugin-folder-states.test.ts` and `tests/unit/spec-folders.test.ts`.
+- [x] A full feature runs headlessly from plan to close on a fixture repo: `tests/unit/headless-e2e.test.ts`, green in CI on Linux, macOS and Windows (PR #26 run 45636597750).
+- [x] A real `docs/specs` folder from the sdd plugin opens with the right stage: the `p3-ship` plugin files in all ten states (`plugin-folder-states.test.ts`), and the closed `p3-state-machine` folder (`spec-folders.test.ts`).
+
+Open follow-ups for later phases are listed above. The main ones:
+
+- No build start in the app yet: `index.ts` builds no runner or controller, so a UI phase wires the factory and the controller.
+- The spec handlers and the ship handlers are registered only with a project root (`HARNESS_SPIKE_ROOT`), until Phase 4's projects.
+- Pilot checks: the gate's refresh before each call, a revision edit through the channel, a close retry that checks its commit, and a ship path without a build report.
+- The flaky `tool-files.test.ts` timeout under load.

@@ -2,7 +2,7 @@
 
 An Electron desktop app for spec-driven development: plan a feature with an AI, approve its spec, let separate agents build and review it, approve the result, ship. Any hosted or self-hosted model per job; the workflow rules are enforced by the app.
 
-Status: **Phase 3 (workflow engine) in progress**; Phases 0–2 are done. See [`docs/roadmap.md`](docs/roadmap.md) and [`docs/phases/phase-03-progress.md`](docs/phases/phase-03-progress.md).
+Status: Phases 0–3 are done; **Phase 4 (projects and environments)** is next. See [`docs/roadmap.md`](docs/roadmap.md) and [`docs/phases/phase-03-progress.md`](docs/phases/phase-03-progress.md) for the last phase.
 
 ## Development setup
 
