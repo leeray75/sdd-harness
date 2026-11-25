@@ -4,6 +4,7 @@ import type { Message, Provider, StreamEvent } from '../../src/agent/provider/ty
 import { createInProcessJobRunner, type JobRunner } from '../../src/main/workflow/job-runner';
 import { DEFAULT_POLICY_CONTEXT, type PolicyContext } from '../../src/main/policy/context';
 import type { ToolRunner } from '../../src/main/agent/router';
+import type { RuleEvent } from '../../src/main/policy/rule-event';
 import { TURN_CAPS } from '../../src/shared/build-docs';
 import { createScriptedProvider, type ScriptedTurn } from '../support/scripted-provider';
 
@@ -232,5 +233,126 @@ describe('createInProcessJobRunner: failures', () => {
     const result = await runnerWith(provider)({ job: 'writer', task: 'Implement.', history: [] });
     expect(result.ok).toBe(false);
     expect(provider.requests).toHaveLength(0);
+  });
+});
+
+describe('createInProcessJobRunner: rule events (AC6)', () => {
+  /** A runner with an onRuleEvent sink, and the events it received. */
+  function runnerWithSink(
+    provider: Provider,
+    contextNow: () => PolicyContext,
+    onRuleEvent?: (e: RuleEvent) => void,
+  ) {
+    return createInProcessJobRunner({
+      root: ROOT,
+      provider,
+      model: MODEL,
+      contextNow,
+      toolRunner: okTool(),
+      ...(onRuleEvent === undefined ? {} : { onRuleEvent }),
+    });
+  }
+
+  it('sends one allow event per allowed call, with the target', async () => {
+    const provider = createScriptedProvider({
+      writer: [READ('notes.txt'), READ('other.txt'), { text: 'Done.' }],
+      reviewer: [],
+    });
+    const events: RuleEvent[] = [];
+    const result = await runnerWithSink(
+      provider,
+      () => approved,
+      (e) => events.push(e),
+    )({
+      job: 'writer',
+      task: 'Implement.',
+      history: [],
+    });
+    expect(result).toMatchObject({ ok: true, stopped: 'answered' });
+    expect(events).toEqual([
+      {
+        kind: 'rule',
+        decision: 'allow',
+        job: 'writer',
+        tool: 'read_file',
+        target: 'notes.txt',
+        reason: 'allowed',
+      },
+      {
+        kind: 'rule',
+        decision: 'allow',
+        job: 'writer',
+        tool: 'read_file',
+        target: 'other.txt',
+        reason: 'allowed',
+      },
+    ]);
+  });
+
+  it('sends a deny event for a denied call, and the tool runner is not called', async () => {
+    const provider = createScriptedProvider({
+      writer: [
+        { toolCalls: [{ name: 'write_file', args: { path: 'src/a.ts', content: 'x' } }] },
+        { text: 'Stopped.' },
+      ],
+      reviewer: [],
+    });
+    const events: RuleEvent[] = [];
+    const toolRunner = okTool();
+    const runner = createInProcessJobRunner({
+      root: ROOT,
+      provider,
+      model: MODEL,
+      contextNow: () => beforeApproval,
+      toolRunner,
+      onRuleEvent: (e) => events.push(e),
+    });
+    await runner({ job: 'writer', task: 'Implement.', history: [] });
+    expect(toolRunner).not.toHaveBeenCalled();
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      kind: 'rule',
+      decision: 'deny',
+      job: 'writer',
+      tool: 'write_file',
+      target: 'src/a.ts',
+    });
+  });
+
+  it('a throwing callback does not fail the run, and the calls still run', async () => {
+    const provider = createScriptedProvider({
+      writer: [READ('notes.txt'), { text: 'Done.' }],
+      reviewer: [],
+    });
+    const toolRunner = okTool();
+    const runner = createInProcessJobRunner({
+      root: ROOT,
+      provider,
+      model: MODEL,
+      contextNow: () => approved,
+      toolRunner,
+      onRuleEvent: () => {
+        throw new Error('sink failed');
+      },
+    });
+    const result = await runner({ job: 'writer', task: 'Implement.', history: [] });
+    expect(result).toMatchObject({ ok: true, text: 'Done.', stopped: 'answered' });
+    expect(toolRunner).toHaveBeenCalledTimes(1);
+  });
+
+  it('sends nothing when no callback is given', async () => {
+    const provider = createScriptedProvider({
+      writer: [READ('notes.txt'), { text: 'Done.' }],
+      reviewer: [],
+    });
+    const result = await runnerWithSink(
+      provider,
+      () => approved,
+    )({
+      job: 'writer',
+      task: 'Implement.',
+      history: [],
+    });
+    expect(result).toMatchObject({ ok: true, stopped: 'answered' });
   });
 });

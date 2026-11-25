@@ -449,3 +449,23 @@ Format: **Decision** · **Outcome** · **Why** · **Date**.
   - a cap on revisions: the person decides when the spec is right;
   - another review after a change round that finds issues: one change request gives one review, and the issues go to the user.
 - **Date:** 2026-11-23
+
+## D38 · Ship: git module, approve-result and mark-done, commit and push by the app, close
+
+- **Outcome:** `src/main/git/git.ts` is the only code that runs git. It calls the user's git CLI through `execFile`, with no shell, from the project root, with `GIT_TERMINAL_PROMPT=0` and `GCM_INTERACTIVE=never`. Local commands time out after 30 s and a push after 120 s. Each call returns its value or one of four codes: `git-missing`, `timeout`, `not-a-repo` or `failed`. Git's output is parsed there and never returned or logged. The read-only `ls-files` query that D31's protection ran from `protect.ts` moved there as `ignoredEntries`, with the same arguments and results.
+  - `approve-result` (`src/main/workflow/ship.ts`, on the D33 channel) is legal only at build-done with the lock approved, with no controller build running, on a feature branch (not detached, and not the default branch). SUMMARY must hold a Git state line. It rewrites that line, stages the changed paths inside the allowed set (the File column of `changes.md`, `docs/specs/<feature>/`, and the state file), commits with `<ticket>: <summary>` or `<summary>`, and pushes with its upstream set. A failed push keeps the commit, and a second approval only pushes.
+  - `mark-done` raises CLOSE through `transition()`, sets SPECS.md's status to `done`, removes the state file when it names the feature, and commits `Close <feature> spec` with those two paths only. It is legal only once the approved work is pushed. A closed feature whose close is unpushed is retried by pushing only.
+  - A failed stage or commit puts the files back and stages the same paths again, so the index matches the restored files. The handlers call `onLockChanged` after every ship call, refused or not.
+  - The job runner takes `onRuleEvent` and reports every gate decision, allowed or denied, and the revert and network events of `run_command` (D30, D31). A throwing callback is caught.
+- **Why:**
+  - One module runs git, so the boundary can be scanned: no agent tool or job base tool is a git tool, and only `src/main/git/` imports `child_process` to run git (D4).
+  - Nothing is committed before the user approves the result (D4, PRD F2).
+  - The allowed set comes from the feature's own record, `changes.md`. Unrelated changes in the tree stop the commit, rather than being swept into it.
+  - A push that fails after the commit keeps the work, and a second approval retries the push without a second commit.
+- **Alternatives not taken:**
+  - `git add -A`, or committing the whole tree: it would commit unrelated work;
+  - a shell running several git commands: each call has a fixed argument list and no shell;
+  - leaving the `ls-files` query in `protect.ts` with an exemption in the boundary scan: the query moved, so the scan holds with no exception;
+  - firing `onLockChanged` only after a change: a refresh is cheap, and it leaves one case less to reason about.
+- **Not in this decision:** the headless end-to-end test (`p3-headless-e2e`), a git-host API or a pull request, and the commit format from project settings. The workflow table (D34) is unchanged.
+- **Date:** 2026-11-24

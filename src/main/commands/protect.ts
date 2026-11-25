@@ -4,9 +4,9 @@
 // deleted, and files and folders it created. Runs only in main. Reasons are fixed strings that
 // never echo a path or a file's contents.
 
-import { execFile } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { ignoredEntries } from '../git/git';
 import type { RevertAction } from '../policy/rule-event';
 
 /** Total bytes of protected files a snapshot may hold: 256 MiB. Over it, the command is refused. */
@@ -130,30 +130,14 @@ export function isIgnored(rel: string, isDir: boolean, ignored: ReadonlySet<stri
 }
 
 /**
- * The git-ignored entries of the root, from a read-only git query: an argument array, no shell,
- * and the given environment. Null when git is missing or the root is not a repository.
+ * The git-ignored entries of the root, from the read-only query in the git module (D31, moved to
+ * src/main/git/git.ts). Null when git is missing or the root is not a repository.
  */
 export function gitIgnoredEntries(
   root: string,
   env: NodeJS.ProcessEnv,
 ): Promise<Set<string> | null> {
-  return new Promise((resolve) => {
-    execFile(
-      'git',
-      ['-C', root, 'ls-files', '-z', '--others', '--ignored', '--exclude-standard', '--directory'],
-      { env, shell: false, windowsHide: true, maxBuffer: 256 * 1024 * 1024, timeout: 60_000 },
-      (error, stdout) => {
-        if (error) {
-          resolve(null);
-          return;
-        }
-        const entries = String(stdout)
-          .split('\0')
-          .filter((entry) => entry.length > 0);
-        resolve(new Set(entries));
-      },
-    );
-  });
+  return ignoredEntries(root, env);
 }
 
 async function statEntry(root: string, rel: string): Promise<Listed | null> {

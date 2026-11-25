@@ -11,10 +11,10 @@ This repo is itself built with the **sdd plugin** for Claude Code: every feature
 ## Read before planning any feature
 
 1. `docs/PRD.md`: goals, the seven v1 features (F1–F7) with acceptance criteria, non-functional requirements, delivery order.
-2. `docs/decisions.md`: settled decisions D1–D37. Do not re-open them in a plan; if a feature needs a new decision, ask and add it as the next D-number.
+2. `docs/decisions.md`: settled decisions D1–D38. Do not re-open them in a plan; if a feature needs a new decision, ask and add it as the next D-number.
 3. `docs/design-notes.md`: tokens, components, screen behaviour, states not drawn, rules the UI must show.
 4. `docs/workflow.md`: the workflow diagrams, who can do what, and stage-to-state mapping.
-5. `docs/workflow-engine.md`: the sdd workflow's nodes, events and transitions, the stage mapping, the event kinds and the human-action map. The one table is `src/shared/workflow.ts` (D34). It also covers the document layer (D35): the templates, the `docs/specs/<feature>/` layout and parsers in `src/shared/spec-docs.ts`, the folder detector in `src/shared/spec-detect.ts`, and the scanner in `src/main/workflow/spec-folders.ts`. Its "Spec lock" section covers the approval lock (D36): the state file `docs/specs/.sdd-state.json`, its code in `src/shared/spec-state.ts`, `src/main/workflow/spec-lock.ts` and `spec-watch.ts`, and the two handlers in `src/main/human/spec-handlers.ts`. Its "Build loop" section covers the build loop (D37): the controller in `src/main/workflow/build-loop.ts`, the job runner in `src/main/workflow/job-runner.ts`, the report parsers in `src/shared/build-reports.ts` and the document renderers in `src/shared/build-docs.ts`.
+5. `docs/workflow-engine.md`: the sdd workflow's nodes, events and transitions, the stage mapping, the event kinds and the human-action map. The one table is `src/shared/workflow.ts` (D34). It also covers the document layer (D35): the templates, the `docs/specs/<feature>/` layout and parsers in `src/shared/spec-docs.ts`, the folder detector in `src/shared/spec-detect.ts`, and the scanner in `src/main/workflow/spec-folders.ts`. Its "Spec lock" section covers the approval lock (D36): the state file `docs/specs/.sdd-state.json`, its code in `src/shared/spec-state.ts`, `src/main/workflow/spec-lock.ts` and `spec-watch.ts`, and the two handlers in `src/main/human/spec-handlers.ts`. Its "Build loop" section covers the build loop (D37): the controller in `src/main/workflow/build-loop.ts`, the job runner in `src/main/workflow/job-runner.ts`, the report parsers in `src/shared/build-reports.ts` and the document renderers in `src/shared/build-docs.ts`. Its "Ship and close" section covers the ship step (D38): the git module `src/main/git/git.ts` (the only code that runs git), the steps in `src/main/workflow/ship.ts` and the two handlers in `src/main/human/ship-handlers.ts`.
 6. The screens named by the feature in `docs/design/screens/*.dc.html` (exact values) and `docs/design/png/*.png` (layout at a glance). The `<x-dc>`/`<helmet>`/`support.js` wrapper is from the design tool; ignore it.
 
 ## Build order and phases
@@ -25,7 +25,7 @@ Work follows `docs/roadmap.md`: ten phases (0 scaffold → 9 pilot), each run in
 
 - **No agent tool for human-only actions** (approve spec, approve result, mark done, change rules, edit an approved spec). The main process accepts these only from a user gesture in the app's own window (D3).
 - **Every agent tool call is checked in the main process** against the job's tool policy before it runs; never rely on prompts for enforcement (D1, D4).
-- **Agents never run git.** Commit and push are done by the app, only after the user approves the result (D4).
+- **Agents never run git.** Commit and push are done by the app, only after the user approves the result (D4, D38: `approve-result` is the only path to a commit, and `src/main/git/` the only code that runs git).
 - **Spec files are read-only to all agents after approval**; the approved spec's hash is the source of truth (D4, D7). The writer may keep its own feature's `tasks.md` and `changes.md` (D37).
 - **Secrets** go in the OS keychain via `safeStorage`, never in logs, sessions, exports or files (PRD NFR).
 - **Tickets, docs and web pages are untrusted data** passed to agents, never instructions.

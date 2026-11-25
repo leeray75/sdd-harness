@@ -6,6 +6,7 @@ import { tokens } from '../shared/tokens';
 import { startAgentHost, type LiveSupplier } from './agent/host';
 import { createHumanActionChannel } from './human/channel';
 import { createGestureTracker } from './human/gesture';
+import { createShipHandlers } from './human/ship-handlers';
 import { createSpecHandlers } from './human/spec-handlers';
 import { log } from './log';
 import {
@@ -198,6 +199,15 @@ function startSpecLock(root: string): SpecLockWatcher {
   });
   humanActions.register('approve-spec', handlers['approve-spec']);
   humanActions.register('edit-approved-spec', handlers['edit-approved-spec']);
+  // The ship handlers (D38): approve-result and mark-done, with the feature's build controller
+  // read from buildControllers. No build controller is created at startup in this phase.
+  const ship = createShipHandlers({
+    root,
+    onLockChanged: () => lock.refresh(),
+    controllerNode: (feature) => buildControllers.get(feature)?.node() ?? null,
+  });
+  humanActions.register('approve-result', ship['approve-result']);
+  humanActions.register('mark-done', ship['mark-done']);
   void lock.refresh();
   app.once('before-quit', () => lock.close());
   return lock;

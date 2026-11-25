@@ -14,7 +14,7 @@ Five actions can change a feature's state in ways that only a person may decide:
 
 The ids are in `HUMAN_ACTION_IDS` in `src/shared/human-actions.ts`. The table above is the plain-language meaning; the UI copy belongs to Phase 3 and later.
 
-**Status:** `approve-spec` and `edit-approved-spec` have handlers from `p3-spec-lock` (D36). They are registered when a project root exists (`HARNESS_SPIKE_ROOT`). Without a root, every request that passes the checks is answered `not-available`. `edit-approved-spec` also asks the feature's build controller before it records the edit (D37): the edit is refused once a build has started. The other three actions have no handler yet: `approve-result` and `mark-done` come with `p3-ship`, and `change-rules` is not scheduled.
+**Status:** `approve-spec` and `edit-approved-spec` have handlers from `p3-spec-lock` (D36). They are registered when a project root exists (`HARNESS_SPIKE_ROOT`). Without a root, every request that passes the checks is answered `not-available`. `edit-approved-spec` also asks the feature's build controller before it records the edit (D37): the edit is refused once a build has started. `approve-result` and `mark-done` have handlers from `p3-ship` (D38), registered in the same place and under the same rule. They are described in [The ship handlers](#the-ship-handlers). `change-rules` has no handler and is not scheduled.
 
 ## The request and the result
 
@@ -80,7 +80,7 @@ The line holds the action, the outcome, the code and, for a request that passed 
 
 ## How a handler is registered
 
-The channel is created in `src/main/index.ts`. `startSpecLock` registers the two spec handlers on it (D36), and `register` throws if the action already has one.
+The channel is created in `src/main/index.ts`. `startSpecLock` registers the two spec handlers on it (D36) and the two ship handlers (D38), and `register` throws if the action already has one.
 
 ```ts
 humanActions.register('approve-spec', async (request) => {
@@ -89,7 +89,18 @@ humanActions.register('approve-spec', async (request) => {
 });
 ```
 
-A handler gets the checked `{ action, feature }` request only. It must not read anything else from the renderer, and it must not run a command, commit or push by itself: those belong to the workflow in Phase 3 and go through the same policy checks as the agents. A handler that refuses returns `{ ok: false, code, reason }` with one of the codes above.
+A handler gets the checked `{ action, feature }` request only. It must not read anything else from the renderer. A handler that refuses returns `{ ok: false, code, reason }` with one of the codes above. The ship handlers call the ship steps, which run git only through `src/main/git/git.ts` (D38). No agent tool reaches them.
+
+## The ship handlers
+
+Both run only on the channel, after its sender, guard and gesture checks, and they never throw. Each refusal is `code: 'refused'` with a fixed reason. After every call the lock is refreshed, whether the call succeeded or not.
+
+- **`approve-result`** commits the feature's approved work and pushes its branch. It is legal only at build-done, with the spec approved, on a feature branch, with the build controller not running and SUMMARY holding a Git state line. Only the changed paths of the feature's allowed set are committed. A push that fails keeps the commit, and approving again only pushes.
+- **`mark-done`** closes the feature. It is legal once the approved work is pushed. It sets SPECS.md's status to `done`, removes the state file when it names the feature, and commits `Close <feature> spec` with those two paths. A push that fails keeps the close commit, and marking done again only pushes.
+
+The reasons are fixed texts such as "the build is not done", "the spec is not approved", "HEAD is detached", "the work is on the default branch", "the tree has changes that are not part of this feature", "approve the result first" and "push the approved work first". The full list is `SHIP_REASONS` in `src/main/workflow/ship.ts`. A reason never names a path, a branch, a commit message or git's output.
+
+## Limits
 
 ## Limits
 

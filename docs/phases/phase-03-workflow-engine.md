@@ -53,6 +53,8 @@ A starting point. Claude adjusts it in step 2 and you confirm.
 
 Subtask 2 was split in two (see the progress file): `p3-spec-docs` (templates, layout, parsers, folder detection and the scanner, D35) and `p3-spec-lock` (the state file, hash lock and file watching). Subtask 3 is `p3-build-loop` (D37): the build controller, the job runner, the report parsers, the document renderers and the EDIT_SPEC hook, described in [`workflow-engine.md`](../workflow-engine.md#build-loop).
 
+Subtask 4 is `p3-ship` (D38): the git module, the approve-result and mark-done steps with their checks and rollbacks, the two handlers, and the job runner's rule events. It is described in [`workflow-engine.md`](../workflow-engine.md#ship-and-close).
+
 ## Definition of done
 
 - [ ] All F2 acceptance criteria pass as automated tests

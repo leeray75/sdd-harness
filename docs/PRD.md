@@ -98,7 +98,7 @@ Acceptance:
 Acceptance:
 
 - [x] After the last allowed round the build stops and asks the user.
-- [ ] Nothing is committed before the user approves the result.
+- [x] Nothing is committed before the user approves the result. Approve-result commits and pushes only after the approval (D38, `p3-ship`).
 - [x] Existing `docs/specs/<feature>/` folders open with the right stage. Folders are detected from their files (D35, `p3-spec-docs`), and the approval comes from the spec lock (D36, `p3-spec-lock`).
 
 ### F3 · Projects and environments
