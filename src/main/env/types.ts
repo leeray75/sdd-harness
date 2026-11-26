@@ -15,7 +15,24 @@ export type Environment = {
   readonly process: ProcessPart;
   readonly watch: WatchPart;
   readonly git: GitPart;
+  /** Whether the project can be reached now, and how to bring it back (D43, p4-env-ssh). */
+  readonly connection: ConnectionPart;
 };
+
+/** Whether an environment can be reached now: `unreachable` is a stopped or missing distribution, or a lost server. */
+export type ConnectionState = 'connected' | 'unreachable';
+
+/**
+ * The connection part (D43). It reports the state and its changes, and `reconnect` tries to bring the
+ * environment back. It never reconnects by itself. A failure is a fixed reason; nothing here throws.
+ */
+export interface ConnectionPart {
+  state(): ConnectionState;
+  /** Calls the listener when the state changes. Returns the function that stops it. */
+  onChange(listener: (state: ConnectionState) => void): () => void;
+  /** Tries to bring the environment back. Resolves `{ ok: true }` or a fixed reason; never rejects. */
+  reconnect(): Promise<{ ok: true } | { ok: false; reason: string }>;
+}
 
 /** The tools, commands and agent host see this narrower view: no git part and no watch part. */
 export interface ToolEnvironment {

@@ -52,6 +52,10 @@ export interface FakeScript {
   git?: (args: readonly string[], cwd: string) => FakeGit;
   /** When true, every run gives { started: false }. */
   cannotStart?: boolean;
+  /** When true, the reconnect command (`--exec true`) reports a distribution that wsl.exe does not have. */
+  distroMissing?: boolean;
+  /** The share root the transport reports now. A test sets a missing folder to simulate a missing share. */
+  share?: string;
 }
 
 /** One recorded run: the argument array as given, the environment, the timeout and the capture flag. */
@@ -89,7 +93,10 @@ function execIndex(argv: readonly string[]): number {
 export function fakeWslTransport(shareRoot: string, script: FakeScript = {}): FakeTransport {
   const calls: FakeCall[] = [];
   const transport: FakeTransport = {
-    shareRoot,
+    get shareRoot() {
+      return transport.script.share ?? shareRoot;
+    },
+    rediscover: () => transport.shareRoot,
     calls,
     script,
     run: async (argv, options) => {
@@ -150,6 +157,29 @@ export function fakeWslTransport(shareRoot: string, script: FakeScript = {}): Fa
         };
       }
       if (command === 'kill') {
+        return { started: true, code: 0, signal: null, timedOut: false, aborted: false };
+      }
+      if (command === 'true') {
+        // The reconnect command: it starts a stopped distribution, or reports a missing one (exit 127).
+        if (transport.script.distroMissing === true) {
+          return {
+            started: true,
+            code: 127,
+            signal: null,
+            timedOut: false,
+            aborted: false,
+            ...(options.capture === undefined
+              ? {}
+              : {
+                  stdout: Buffer.alloc(0),
+                  stderr: Buffer.from(
+                    'There is no distribution with the supplied name.\nError code: Wsl/Service/WSL_E_DISTRO_NOT_FOUND\n',
+                    'utf16le',
+                  ),
+                  truncated: false,
+                }),
+          };
+        }
         return { started: true, code: 0, signal: null, timedOut: false, aborted: false };
       }
       if (command === 'ln') {

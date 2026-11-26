@@ -20,7 +20,9 @@ import {
 } from '../../src/main/projects/store';
 import type { Environment } from '../../src/main/env/types';
 import { createWslEnvironment } from '../../src/main/env/wsl';
+import { createSshEnvironment } from '../../src/main/env/ssh';
 import { fakeWslTransport } from '../support/fake-wsl-transport';
+import { fakeSshTransport } from '../support/fake-ssh-transport';
 import type { Logger } from '../../src/main/log';
 import { DEFAULT_RULES, RULE_REASONS } from '../../src/shared/project-rules';
 
@@ -639,6 +641,129 @@ describe('WSL projects: add, refusals, duplicates and load (AC8)', () => {
     const copy = store.get(added.project.id);
     if (copy?.environment.kind === 'wsl') copy.environment.distribution = 'Changed';
     expect(store.get(added.project.id)?.environment).toEqual(WSL);
+  });
+});
+
+describe('SSH projects through the store (AC11, D43)', () => {
+  const SERVER_A = '44444444-4444-4444-8444-444444444444';
+  const SERVER_B = '55555555-5555-4555-8555-555555555555';
+
+  /** A connected SSH environment over a temp folder that holds the given remote folders. */
+  async function sshEnvironment(serverId: string, folders: string[]) {
+    const remoteRoot = makeFolder(`remote-${serverId}`);
+    for (const folder of folders) mkdirSync(join(remoteRoot, folder), { recursive: true });
+    const transport = fakeSshTransport(remoteRoot);
+    await transport.connect();
+    const server = {
+      id: serverId,
+      name: 'Server',
+      host: 'server.example',
+      port: 22,
+      user: 'deploy',
+      auth: { method: 'agent' as const },
+      hostKey: null,
+    };
+    const env: Environment = createSshEnvironment({ server, transport });
+    return { transport, env };
+  }
+
+  it('adds an SSH project whose root is checked through the environment, and reloads it', async () => {
+    const { env } = await sshEnvironment(SERVER_A, ['/srv/app']);
+    const store = makeStore();
+    await store.load();
+    const added = await store.add(
+      { name: 'Remote', environment: { kind: 'ssh', server: SERVER_A }, root: '/srv/app' },
+      env,
+    );
+    expect(added).toMatchObject({
+      ok: true,
+      project: { environment: { kind: 'ssh', server: SERVER_A }, root: '/srv/app' },
+    });
+    const reloaded = makeStore();
+    await reloaded.load();
+    expect(reloaded.get(added.ok ? added.project.id : '')?.environment).toEqual({
+      kind: 'ssh',
+      server: SERVER_A,
+    });
+  });
+
+  it('refuses each bad SSH root with the root reason, and an SSH add without an environment', async () => {
+    const { env } = await sshEnvironment(SERVER_A, ['/srv/app']);
+    writeFileSync(join(base, 'remote-' + SERVER_A, 'srv', 'file.txt'), 'x');
+    const store = makeStore();
+    await store.load();
+    const refused = { ok: false, reason: STORE_REASONS.root };
+    const environment = { kind: 'ssh' as const, server: SERVER_A };
+    expect(await store.add({ name: 'A', environment, root: 'relative/app' }, env)).toEqual(refused);
+    expect(await store.add({ name: 'B', environment, root: '/srv/app/../app' }, env)).toEqual(
+      refused,
+    );
+    expect(await store.add({ name: 'C', environment, root: '/srv/missing' }, env)).toEqual(refused);
+    expect(await store.add({ name: 'D', environment, root: '/srv/file.txt' }, env)).toEqual(
+      refused,
+    );
+    expect(await store.add({ name: 'E', environment, root: '/srv/app' })).toEqual(refused);
+    expect(store.list()).toEqual([]);
+  });
+
+  it('refuses an SSH root on a server that cannot be reached, and stores nothing', async () => {
+    const { transport, env } = await sshEnvironment(SERVER_A, ['/srv/app']);
+    transport.drop();
+    const store = makeStore();
+    await store.load();
+    expect(
+      await store.add(
+        { name: 'Down', environment: { kind: 'ssh', server: SERVER_A }, root: '/srv/app' },
+        env,
+      ),
+    ).toEqual({ ok: false, reason: STORE_REASONS.root });
+    expect(store.list()).toEqual([]);
+  });
+
+  it('refuses a duplicate on the same server and root, and allows the same root on another server', async () => {
+    const first = await sshEnvironment(SERVER_A, ['/srv/app']);
+    const second = await sshEnvironment(SERVER_B, ['/srv/app']);
+    const store = makeStore();
+    await store.load();
+    const onA = { kind: 'ssh' as const, server: SERVER_A };
+    expect(
+      (await store.add({ name: 'One', environment: onA, root: '/srv/app' }, first.env)).ok,
+    ).toBe(true);
+    expect(await store.add({ name: 'Two', environment: onA, root: '/srv/app' }, first.env)).toEqual(
+      {
+        ok: false,
+        reason: STORE_REASONS.duplicate,
+      },
+    );
+    const onB = { kind: 'ssh' as const, server: SERVER_B };
+    expect(
+      (await store.add({ name: 'Three', environment: onB, root: '/srv/app' }, second.env)).ok,
+    ).toBe(true);
+    expect(store.list().map((project) => project.environment)).toEqual([onA, onB]);
+  });
+
+  it('a stored SSH entry with an invalid server id is set aside on load, with a code-only log line', async () => {
+    mkdirSync(join(base, 'data'), { recursive: true });
+    writeFileSync(
+      filePath,
+      JSON.stringify({
+        version: 1,
+        projects: [
+          {
+            id: randomUUID(),
+            name: 'Bad',
+            environment: { kind: 'ssh', server: 'not-a-server' },
+            root: '/srv/app',
+            rules: DEFAULT_RULES,
+          },
+        ],
+      }),
+    );
+    const store = makeStore();
+    await store.load();
+    expect(store.list()).toEqual([]);
+    expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('(reason: invalid-project)'));
+    expect(logger.error.mock.calls.flat().join(' ')).not.toContain('not-a-server');
   });
 });
 

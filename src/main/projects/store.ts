@@ -26,10 +26,12 @@ import { isDistributionName } from '../env/wsl-detect';
 import { writeFileAtomic } from '../tools/atomic-write';
 
 /**
- * Where a project's folder is (D40, D42): the local folder, or a folder inside a WSL distribution. The
- * WSL root is a Linux path, and the distribution is the one name the environment factory accepts.
+ * Where a project's folder is (D40, D42, D43): the local folder, a folder inside a WSL distribution, or a
+ * folder on a saved SSH server. The WSL distribution is the one name the environment factory accepts; the
+ * SSH server is the lowercase UUID of a saved server (src/main/projects/servers.ts).
  */
-export type ProjectEnvironment = { kind: 'local' } | { kind: 'wsl'; distribution: string };
+export type ProjectEnvironment =
+  { kind: 'local' } | { kind: 'wsl'; distribution: string } | { kind: 'ssh'; server: string };
 
 /** One project: a repo folder with its own rules (D40). */
 export interface Project {
@@ -86,7 +88,7 @@ export const STORE_REASONS = {
   root: 'the root must be an absolute path to an existing folder',
   duplicate: 'a project already uses this folder',
   name: 'the name must be 1 to 80 characters with no line break',
-  environment: 'the environment must be local or a WSL distribution',
+  environment: 'the environment must be local, a WSL distribution or a saved SSH server',
   save: 'the projects could not be saved, so nothing changed',
   failed: 'the action failed',
 } as const;
@@ -134,8 +136,9 @@ function cleanName(value: unknown): string | null {
 }
 
 /**
- * The environment a descriptor names, with exactly its keys: `{ kind: 'local' }`, or `{ kind: 'wsl',
- * distribution }` with a valid distribution name. Anything else is null.
+ * The environment a descriptor names, with exactly its keys: `{ kind: 'local' }`, `{ kind: 'wsl',
+ * distribution }` with a valid distribution name, or `{ kind: 'ssh', server }` with a saved server's id.
+ * Anything else is null. Loading never touches the network (D43).
  */
 function parseEnvironment(value: unknown): ProjectEnvironment | null {
   if (!isRecord(value)) return null;
@@ -148,14 +151,19 @@ function parseEnvironment(value: unknown): ProjectEnvironment | null {
     const distribution = value['distribution'];
     return isDistributionName(distribution) ? { kind: 'wsl', distribution } : null;
   }
+  if (value['kind'] === 'ssh') {
+    if (keys.length !== 2 || keys[0] !== 'kind' || keys[1] !== 'server') return null;
+    const server = value['server'];
+    return typeof server === 'string' && UUID_PATTERN.test(server) ? { kind: 'ssh', server } : null;
+  }
   return null;
 }
 
 /** A copy of an environment descriptor, so a caller cannot change the stored one. */
 function copyEnvironment(environment: ProjectEnvironment): ProjectEnvironment {
-  return environment.kind === 'local'
-    ? { kind: 'local' }
-    : { kind: 'wsl', distribution: environment.distribution };
+  if (environment.kind === 'local') return { kind: 'local' };
+  if (environment.kind === 'wsl') return { kind: 'wsl', distribution: environment.distribution };
+  return { kind: 'ssh', server: environment.server };
 }
 
 /** A copy that the caller can keep without changing the store. */
@@ -170,8 +178,8 @@ function copyOf(project: Project): Project {
 }
 
 /**
- * True when two projects are the same folder (D42): the same kind, the same distribution (exact) and
- * the same root. Local roots compare as the platform does; WSL roots compare exactly.
+ * True when two projects are the same folder (D42, D43): the same kind, the same distribution or server
+ * (exact) and the same root. Local roots compare as the platform does; WSL and SSH roots compare exactly.
  */
 function sameProject(
   a: ProjectEnvironment,
@@ -184,11 +192,17 @@ function sameProject(
   if (a.kind === 'wsl' && b.kind === 'wsl') {
     return a.distribution === b.distribution && rootA === rootB;
   }
+  if (a.kind === 'ssh' && b.kind === 'ssh') {
+    return a.server === b.server && rootA === rootB;
+  }
   return sameRoot(rootA, rootB, platform);
 }
 
-/** A WSL root: a string, absolute in POSIX, and already normalized (equal to path.posix.resolve of itself). */
-function isWslRoot(root: unknown): root is string {
+/**
+ * A remote root (WSL or SSH): a string, absolute in POSIX, and already normalized (equal to path.posix.resolve
+ * of itself).
+ */
+function isPosixRoot(root: unknown): root is string {
   return typeof root === 'string' && posix.isAbsolute(root) && posix.resolve(root) === root;
 }
 
@@ -212,9 +226,9 @@ function storedProject(value: unknown): Project | null {
   if (environment === null) return null;
   const root = value['root'];
   const rootOk =
-    environment.kind === 'wsl'
-      ? isWslRoot(root)
-      : typeof root === 'string' && isAbsolute(root) && resolve(root) === root;
+    environment.kind === 'local'
+      ? typeof root === 'string' && isAbsolute(root) && resolve(root) === root
+      : isPosixRoot(root);
   if (typeof root !== 'string' || !rootOk) return null;
   const parsed = parseRules(value['rules']);
   if (!parsed.ok) return null;
@@ -363,9 +377,9 @@ export function createProjectStore(options: ProjectStoreOptions): ProjectStore {
               : parseRules(input.rules);
           if (!rules.ok) return fail(rules.reason);
           let root: string;
-          if (environment.kind === 'wsl') {
-            // A WSL root is checked through the environment the registry made, never local fs (D42).
-            if (env === undefined || !isWslRoot(input.root)) return fail(STORE_REASONS.root);
+          if (environment.kind !== 'local') {
+            // A WSL or SSH root is checked through the environment the registry made, never local fs (D42, D43).
+            if (env === undefined || !isPosixRoot(input.root)) return fail(STORE_REASONS.root);
             root = input.root;
             if (!(await isFolderThrough(env, root))) return fail(STORE_REASONS.root);
           } else {

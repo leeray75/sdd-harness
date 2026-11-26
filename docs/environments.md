@@ -1,6 +1,6 @@
 # Environments
 
-An environment is where a project's files, programs, file watching and git live. Every part of the app that works inside a project reaches it through an environment object (D41). The local backend (D41) and the WSL backend (D42) are in this version. The SSH and dev container backends (phase 4, `p4-env-ssh`, `p4-env-container`) plug in behind the same interface.
+An environment is where a project's files, programs, file watching and git live. Every part of the app that works inside a project reaches it through an environment object (D41). The local backend (D41), the WSL backend (D42) and the SSH backend (D43) are in this version. The dev container backend (phase 4, `p4-env-container`) plugs in behind the same interface.
 
 The code is in `src/main/env/`:
 
@@ -9,13 +9,16 @@ The code is in `src/main/env/`:
 - `wsl.ts`: the WSL backend, its transport, the Linux-to-share mapping and the app transport (`appWslTransport`). The only code, with `wsl-detect.ts`, that names `wsl.exe`.
 - `wsl-detect.ts`: `detectWsl` and `isDistributionName`.
 - `probes.ts`: the network probes of the local backend (`unshare`, `sandbox-exec`).
+- `launcher.ts`: the fixed process launcher and its group-marker reader, shared by the WSL and SSH backends (D42, D43).
+- `poll-watch.ts`: the polling watcher, shared by the WSL and SSH backends.
+- `ssh.ts`: the SSH backend (`createSshEnvironment`). `ssh-transport.ts`: the transport seam, host key checks, credentials and the app transport over `ssh2`, the only code that imports `ssh2`. `ssh-command.ts`: the quoter and the exec strings (D43).
 - `index.ts`: `environmentFor`, `localEnvironment` and `toolEnvironment`.
 
 Only `src/main/env/`, `src/main/git/` and the two app-data stores (`src/main/projects/store.ts`, `src/main/secrets/store.ts`) import `node:fs`, `node:fs/promises` or `node:child_process` under `src/main/`. `tests/unit/env-boundary.test.ts` checks this on every run.
 
 ## The interface
 
-`Environment` has five parts. Every method is async except the path helpers and the platform value.
+`Environment` has six parts: the five below and `connection` (D43), which reports `state()` (`connected` or `unreachable`), `onChange` and `reconnect()`. Local is always connected, WSL and SSH follow their session, and `reconnect()` never runs on its own. Every method is async except the path helpers and the platform value.
 
 | Part      | What it covers                                                                                                                                                                                                                                                                                                                                                                                           |
 | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -44,9 +47,11 @@ A backend must keep these rules, which the local backend and the test suite rely
 
 ## How a backend is chosen and held
 
-- `environmentFor(descriptor)` returns the backend for a project's descriptor (`{ kind: 'local' }` today). Any other kind is refused with a fixed reason, and the registry refuses that project.
-- The project registry (`src/main/projects/registry.ts`) makes each project's environment once, from its descriptor, and holds it next to the project's root. The lock watcher, the spec and ship handlers and the build runner take it from there. `environmentOf(projectId)` returns it, or `null` for an unknown project.
-- A project whose environment cannot be made gets no watcher and no handlers. Its requests are refused the same way as an unknown project (`no project with this id`), and adding it is refused before anything is stored.
+- `environmentFor(descriptor, deps)` returns the backend for a project's descriptor: `local`, `wsl` (on Windows) and `ssh` (for a saved server's UUID, with the server store and the secret store in `deps.ssh`). Any other kind is refused with a fixed reason.
+- The project registry (`src/main/projects/registry.ts`) makes each project's environment once, from its descriptor, and holds it next to the project's root. The lock watcher, the spec and ship handlers and the build runner take it from there. `environmentOf(projectId)` returns it, or `null` for an unknown or unreachable project.
+- A project whose environment cannot be made is listed as unreachable, and removable. Its requests are refused as an unknown project (`no project with this id`), and `reconnect(id)` tries to make it again (D43, revision 1).
+- A project whose environment was made but cannot be reached (its connect failed, or its connection dropped) is listed, removable and read-only. Its requests are refused with `PROJECT_UNREACHABLE`, it has no watcher, and `reconnect(id)` brings it back and starts the watcher (D43).
+- `stateOf(id)` gives `connected` or `unreachable`, and `onStateChange` tells the listeners of each change (the project and its state, never a value from its settings).
 - The app starts the agent host with the dev project's environment (`src/main/index.ts`).
 
 ## The WSL backend (D42)
@@ -69,9 +74,23 @@ A WSL project lives inside one distribution, at one Linux root. Its backend is `
 
 `writeFileAtomic(files, path, bytes)` in `src/main/tools/atomic-write.ts` is the one atomic writer (D41). It writes a temporary file in the same folder, renames it over the target, and retries a failed rename `RENAME_ATTEMPTS` times, waiting `RENAME_RETRY_MS` times the attempt between them. A failed attempt removes the temporary file. The tools and the project store keep its fixed reasons. The spec lock's `writeAtomic` (`src/main/workflow/spec-lock.ts`) calls it with `codeReason`, so its reason is the Node code of the last error, a failed first write included. Its signature and result are unchanged. The writes of the build loop, the spec handlers and the ship step go through it, so the retry covers both the share and the local parallel runs.
 
+## The SSH backend (D43)
+
+A project on an SSH server lives in one remote folder, reached through one saved server. `createSshEnvironment({ server, transport })` in `src/main/env/ssh.ts` is the backend. The tests use a fake transport over a temp folder (`tests/support/fake-ssh-transport.ts`), so no connection is made in `pnpm test`. The live walk (`tests/live/ssh-walk.live.test.ts`) runs on a real server.
+
+- **Connection.** `SshTransport` (`ssh-transport.ts`) is the seam. `appSshTransport(server, deps)` is the app's transport over `ssh2`: one client per saved server, with keepalives (15 s, 3 misses) and a 20 s handshake limit. It never reconnects by itself. Its state goes to `unreachable` when the session closes, ends or fails, and the listeners are told once.
+- **Host keys and credentials.** A pinned `SHA256:` fingerprint is checked on each connect. An unpinned server fails with `host-key-unknown` and the offered fingerprint, and a different key fails with `host-key-changed` and leaves the pin alone. Passwords and key passphrases come from the secret store, and a key from its file, all read at connect time. Nothing is stored outside the secret store and the saved servers file.
+- **Files.** SFTP calls over the session. Each Node code is mapped from the SFTP status: `NO_SUCH_FILE` is `ENOENT`, `PERMISSION_DENIED` is `EACCES`, and the session errors are `ENOTCONN`. A generic `FAILURE` is resolved by looking at the path (`EEXIST`, `ENOTDIR`, `EISDIR`, `ENOTEMPTY`, or `EIO`). `readFile` with a cap refuses a larger file with `EFBIG` without reading past `maxBytes + 1`. `rename` over an existing file uses `posix-rename@openssh.com` when the server offers it, and otherwise removes the target first. Every path must be absolute POSIX; any other path is `ENOENT`.
+- **Programs.** Each program is one exec request built by `ssh-command.ts`: `cd -- <cwd> && exec env -- <NAME=value…> sh -c <LAUNCHER> sh <file> <args…>`, with every value quoted as one POSIX word (`shellQuote`). Only the variables the caller set or changed cross, and `PATH` never does. The first output line is the group marker, which is never passed on. A timeout or an abort runs `kill -KILL -- '-<pgid>'` on a second request, then closes the channel, then resolves. The platform is the one `uname -s` gave at connect. The limit: when a stop comes before the marker has arrived (the group id is unknown), only the channel is closed, as the contract says, so a program that has started but not yet printed its marker may keep running on the server.
+- **Network.** `network: 'none'` on Linux probes `unshare --user --map-root-user --net true` once per connection: the level is `os` when it works, and `proxy-only` otherwise. On macOS the level is `proxy-only`. The dead proxy variables and offline flags cross as variables, and `networkLevel()` agrees with a spawn.
+- **Watching.** The shared polling watcher (`poll-watch.ts`), about every second, as on WSL.
+- **Git.** `createGit` with the SSH launcher: the same argument lists, environment, timeouts, parsing and codes as the local instance. Exit 127 is `git-missing`, and a timeout stops the remote git through the group kill.
+- **Connection part.** `state()` follows the transport. `reconnect()` is one connect, and a failure gives a fixed reason from `SSH_RECONNECT_REASONS` (none names the server, its user or a key).
+- **Failures.** A lost or unreachable server is a result for each call (`ENOTCONN`, `{ started: false }`, `failed`, or `onError` for the watcher). Nothing falls back to the local folder.
+
 ## Checklist for the WSL, SSH and container backends
 
-Status: the WSL backend meets every item below (`p4-env-wsl`, D42). The SSH and container backends are later subtasks.
+Status: the WSL and SSH backends meet every item below (`p4-env-wsl`, D42; `p4-env-ssh`, D43). The container backend is a later subtask.
 
 Each backend is its own subtask, and each one runs the phase 3 headless walk (`tests/unit/headless-e2e.test.ts`) on its backend before it is done.
 

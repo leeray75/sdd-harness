@@ -7,7 +7,7 @@ import { localEnvironment } from '../../src/main/env';
 import type { Environment } from '../../src/main/env/types';
 
 /** The parts of the interface, by name. */
-export type EnvPart = 'path' | 'files' | 'process' | 'watch' | 'git';
+export type EnvPart = 'path' | 'files' | 'process' | 'watch' | 'git' | 'connection';
 
 /** One recorded call: the part, the method and the arguments it was given. */
 export interface EnvCall {
@@ -56,6 +56,7 @@ export function recordingEnvironment(base: Environment = localEnvironment()): Re
     process: recordPart('process', base.process, calls),
     watch: recordPart('watch', base.watch, calls),
     git: recordPart('git', base.git, calls),
+    connection: recordPart('connection', base.connection, calls),
   };
   return {
     env,

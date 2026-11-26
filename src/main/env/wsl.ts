@@ -13,7 +13,11 @@ import { constants, existsSync, promises as fsp, realpath as nodeRealpath } from
 import { isAbsolute as nativeIsAbsolute, join, posix, relative, sep as nativeSep } from 'node:path';
 import { chooseNetwork, wrapCommand, writerNetworkEnv } from '../commands/network';
 import { createGit, type GitLauncher } from '../git/git';
+import { createMarkerReader, GROUP_MARKER, LAUNCHER } from './launcher';
+import { pollWatchPart } from './poll-watch';
 import type {
+  ConnectionPart,
+  ConnectionState,
   DirEntryInfo,
   Environment,
   FileHandleLike,
@@ -23,24 +27,16 @@ import type {
   ProcessPart,
   SpawnOptions,
   SpawnOutcome,
-  WatchHandle,
-  WatchPart,
 } from './types';
 
 /** The program that starts WSL here. Only this module and wsl-detect.ts name it (AC10). */
 const WSL_EXE = 'wsl.exe';
 
 /** The line the launcher prints first: the marker, then the id of the process group it created. */
-export const WSL_GROUP_MARKER = 'SDD-GROUP-';
+export const WSL_GROUP_MARKER = GROUP_MARKER;
 
-/**
- * The fixed launcher (D42). The outer shell runs `setsid --wait`, which makes the program a new
- * session and process group, with its id as the group id. The inner shell prints the marker and its
- * own id (the group id, since the id is unchanged by exec), then replaces itself with the program
- * from the positional arguments, so no argument is ever parsed by a shell.
- */
-export const WSL_LAUNCHER =
-  'setsid --wait sh -c \'printf "%s%s\\n" "$0" "$$"; exec "$@"\' ' + WSL_GROUP_MARKER + ' "$@"';
+/** The fixed launcher (D42), now shared with the SSH backend (launcher.ts). */
+export const WSL_LAUNCHER = LAUNCHER;
 
 /** The timeouts of the fixed commands, in milliseconds. */
 const FIXED_TIMEOUT_MS = 30_000;
@@ -48,8 +44,6 @@ const PROBE_TIMEOUT_MS = 10_000;
 const KILL_TIMEOUT_MS = 10_000;
 /** How long the watcher waits between two listings, in milliseconds. */
 export const WSL_POLL_MS = 1_000;
-/** Most bytes kept of the marker line before a line break arrives; past it the line is dropped. */
-const MARKER_MAX_BYTES = 4096;
 /** Grace after a stop: a process tree that keeps the output pipes open cannot hold the result. */
 const STOP_GRACE_MS = 2_000;
 
@@ -90,8 +84,13 @@ export type WslRunResult =
 
 /** The seam between the backend and wsl.exe. */
 export interface WslTransport {
-  /** The folder that stands for the distribution's `/`. Found once, when the transport is made. */
+  /**
+   * The folder that stands for the distribution's `/`. Found when the transport is made, and again by
+   * `rediscover` (the reconnect of D43).
+   */
   readonly shareRoot: string;
+  /** Looks the share root up again and returns it. Called only by the backend's reconnect. */
+  rediscover(): string;
   /** Starts wsl.exe with the given argument array (no shell). Never rejects. */
   run(argv: readonly string[], options: WslRunOptions): Promise<WslRunResult>;
 }
@@ -213,16 +212,16 @@ function realpathNative(path: string): Promise<string> {
 
 /** The files part over the share. Every method is async, so a failure is always a rejection. */
 function filesPartFor(ctx: Ctx): FilesPart {
-  const shareRoot = ctx.transport.shareRoot;
   const share = (linux: string): string => {
-    const mapped = shareFor(shareRoot, linux);
+    const mapped = shareFor(ctx.transport.shareRoot, linux);
     if (mapped === null) throw codeError('ENOENT');
     return mapped;
   };
   return {
     stat: async (path) => (await fsp.stat(share(path))) as FileStat,
     lstat: async (path) => (await fsp.lstat(share(path))) as FileStat,
-    realpath: async (path) => linuxResult(shareRoot, await realpathNative(share(path))),
+    realpath: async (path) =>
+      linuxResult(ctx.transport.shareRoot, await realpathNative(share(path))),
     access: async (path, mode) =>
       fsp.access(share(path), mode === 'execute' ? constants.X_OK : constants.F_OK),
     readFile: async (path, options) => {
@@ -263,7 +262,8 @@ function filesPartFor(ctx: Ctx): FilesPart {
       if (ok) return;
       throw codeError((await exists(mapped)) ? 'EIO' : 'ENOENT');
     },
-    readlink: async (path) => linuxResult(shareRoot, String(await fsp.readlink(share(path)))),
+    readlink: async (path) =>
+      linuxResult(ctx.transport.shareRoot, String(await fsp.readlink(share(path)))),
     symlink: async (target, path) => {
       const mapped = share(path);
       const ok = await runFixed(ctx, [
@@ -343,7 +343,6 @@ interface ProgramRun {
 async function runProgram(ctx: Ctx, run: ProgramRun): Promise<SpawnOutcome> {
   const { options } = run;
   const netPart = run.network === undefined ? {} : { network: run.network };
-  let group: number | null = null;
   let stopped: 'timeout' | 'aborted' | null = null;
   let halting: Promise<void> = Promise.resolve();
   const inner = new AbortController();
@@ -353,6 +352,7 @@ async function runProgram(ctx: Ctx, run: ProgramRun): Promise<SpawnOutcome> {
     if (stopped !== null) return halting;
     stopped = reason;
     halting = (async () => {
+      const group = marker.group;
       if (group !== null) {
         await ctx.transport.run(
           ['-d', ctx.distribution, '--exec', 'kill', '-KILL', '--', `-${group}`],
@@ -364,30 +364,13 @@ async function runProgram(ctx: Ctx, run: ProgramRun): Promise<SpawnOutcome> {
     return halting;
   };
 
-  // The marker line is taken out here; the rest of the output goes to the caller while the run lasts.
-  let head: Buffer = Buffer.alloc(0);
-  let marked = false;
+  // The marker line is taken out by the shared reader (launcher.ts); the rest of the output goes to the
+  // caller while the run lasts.
+  const marker = createMarkerReader();
   const onChunk = (chunk: Buffer): void => {
     if (stopped !== null) return;
-    if (marked) {
-      options.onOutput?.(chunk);
-      return;
-    }
-    head = Buffer.concat([head, chunk]);
-    const newline = head.indexOf(0x0a);
-    if (newline < 0) {
-      if (head.length > MARKER_MAX_BYTES) {
-        marked = true;
-        head = Buffer.alloc(0);
-      }
-      return;
-    }
-    const match = /^SDD-GROUP-(\d+)$/.exec(head.subarray(0, newline).toString('utf8'));
-    marked = true;
-    if (match !== null) group = Number(match[1]);
-    const rest = head.subarray(newline + 1);
-    head = Buffer.alloc(0);
-    if (rest.length > 0) options.onOutput?.(rest);
+    const out = marker.feed(chunk);
+    if (out !== null) options.onOutput?.(out);
   };
 
   const onAbort = (): void => void halt('aborted');
@@ -441,77 +424,6 @@ async function runProgram(ctx: Ctx, run: ProgramRun): Promise<SpawnOutcome> {
   };
 }
 
-/** The watch part: a poll of one folder, about every `pollMs`. */
-function watchPartFor(files: FilesPart, pollMs: number): WatchPart {
-  return {
-    watchDir: (path, onEvent, onError): WatchHandle => {
-      /** name -> a key: size and mtime for a file, the name alone for a folder. */
-      let last: Map<string, string> | null = null;
-      let closed = false;
-      let failing = false;
-      let busy = false;
-      let timer: NodeJS.Timeout | undefined;
-
-      const listing = async (): Promise<Map<string, string>> => {
-        const found = new Map<string, string>();
-        for (const entry of await files.readdir(path)) {
-          if (entry.isDirectory()) {
-            found.set(entry.name, 'dir');
-            continue;
-          }
-          try {
-            const info = await files.stat(posix.join(path, entry.name));
-            found.set(entry.name, `${info.size}:${info.mtimeMs}`);
-          } catch (error) {
-            // Removed between the listing and the stat: it is simply gone.
-            if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-          }
-        }
-        return found;
-      };
-
-      const report = (previous: Map<string, string>, next: Map<string, string>): void => {
-        for (const [name, key] of next) {
-          const before = previous.get(name);
-          if (before === undefined) onEvent('rename', name);
-          else if (before !== key) onEvent('change', name);
-        }
-        for (const name of previous.keys()) {
-          if (!next.has(name)) onEvent('rename', name);
-        }
-      };
-
-      const tick = async (): Promise<void> => {
-        if (closed || busy) return;
-        busy = true;
-        try {
-          const next = await listing();
-          if (closed) return;
-          failing = false;
-          if (last !== null) report(last, next);
-          last = next;
-        } catch (error) {
-          if (!closed && !failing) {
-            failing = true;
-            onError(error instanceof Error ? error : new Error('listing failed'));
-          }
-        } finally {
-          busy = false;
-          if (!closed) timer = setTimeout(() => void tick(), pollMs);
-        }
-      };
-
-      void tick();
-      return {
-        close: () => {
-          closed = true;
-          if (timer !== undefined) clearTimeout(timer);
-        },
-      };
-    },
-  };
-}
-
 /** The git part: the same functions as the local instance, over a launcher that runs git in the distribution. */
 function gitPartFor(ctx: Ctx): Environment['git'] {
   const launcher: GitLauncher = async (args, options) => {
@@ -539,15 +451,104 @@ function gitPartFor(ctx: Ctx): Environment['git'] {
  * The WSL backend for one distribution and its Linux root. Its parts share one transport, and none of
  * them falls back to the local backend.
  */
+/** The reason of a failed reconnect. Fixed text: it never echoes the distribution's name. */
+export const WSL_RECONNECT_REASONS = {
+  notStarted: 'the distribution could not be started; reconnect to try again',
+  notFound: 'the distribution was not found in WSL',
+  noShare: "the distribution's files are not reachable; reconnect to try again",
+} as const;
+
+/** The most output a reconnect keeps, to read wsl.exe's own message. */
+const RECONNECT_CAPTURE_BYTES = 4096;
+
+/** wsl.exe's message for a distribution it does not have (exit code 127), in either text encoding. */
+const DISTRO_NOT_FOUND = /WSL_E_DISTRO_NOT_FOUND|no distribution with the supplied name/;
+
+/**
+ * The connection part of a WSL backend (D43), and the transport the backend uses. Each run through the
+ * transport sets the state: a run that cannot start is unreachable, and a run that starts makes it
+ * reachable again. The state is unreachable also while the share root does not exist. Only `reconnect`
+ * runs the fixed `--exec true` command that starts a stopped distribution; normal calls never do.
+ */
+function connectionFor(
+  distribution: string,
+  inner: WslTransport,
+): { part: ConnectionPart; transport: WslTransport } {
+  let reachable = true;
+  let last: ConnectionState = 'connected';
+  const listeners = new Set<(state: ConnectionState) => void>();
+
+  const current = (): ConnectionState =>
+    reachable && existsSync(inner.shareRoot) ? 'connected' : 'unreachable';
+
+  /** Tells the listeners when the state has moved since the last time. */
+  const publish = (): void => {
+    const next = current();
+    if (next === last) return;
+    last = next;
+    for (const listener of [...listeners]) listener(next);
+  };
+
+  const transport: WslTransport = {
+    get shareRoot() {
+      return inner.shareRoot;
+    },
+    rediscover: () => inner.rediscover(),
+    run: async (argv, options) => {
+      const result = await inner.run(argv, options);
+      reachable = result.started;
+      publish();
+      return result;
+    },
+  };
+
+  const part: ConnectionPart = {
+    state: current,
+    onChange: (listener) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    reconnect: async () => {
+      const run = await transport.run(['-d', distribution, '--exec', 'true'], {
+        env: wslProcessEnv({}),
+        timeoutMs: FIXED_TIMEOUT_MS,
+        capture: { maxBytes: RECONNECT_CAPTURE_BYTES },
+      });
+      if (!run.started || run.timedOut || run.code !== 0) {
+        const text = run.started ? (run.stderr ?? Buffer.alloc(0)).toString('utf8') : '';
+        // wsl.exe's text may be UTF-16; the NUL bytes are dropped before the match.
+        const missing =
+          run.started && run.code === 127 && DISTRO_NOT_FOUND.test(text.replace(/\0/g, ''));
+        reachable = false;
+        publish();
+        return {
+          ok: false,
+          reason: missing ? WSL_RECONNECT_REASONS.notFound : WSL_RECONNECT_REASONS.notStarted,
+        };
+      }
+      // The distribution runs: find its share again, and it is reachable only if that folder exists.
+      inner.rediscover();
+      reachable = existsSync(inner.shareRoot);
+      publish();
+      return reachable ? { ok: true } : { ok: false, reason: WSL_RECONNECT_REASONS.noShare };
+    },
+  };
+  return { part, transport };
+}
+
 export function createWslEnvironment(options: WslEnvironmentOptions): Environment {
-  const ctx: Ctx = { distribution: options.distribution, transport: options.transport };
+  const { part: connection, transport } = connectionFor(options.distribution, options.transport);
+  const ctx: Ctx = { distribution: options.distribution, transport };
   const files = filesPartFor(ctx);
   return {
     path: pathPart,
     files,
     process: processPartFor(ctx),
-    watch: watchPartFor(files, options.pollMs ?? WSL_POLL_MS),
+    watch: pollWatchPart(files, options.pollMs ?? WSL_POLL_MS),
     git: gitPartFor(ctx),
+    connection,
   };
 }
 
@@ -566,8 +567,15 @@ function findShareRoot(distribution: string): string {
 
 /** The app's transport: starts wsl.exe with an argument array and no shell. */
 export function appWslTransport(distribution: string): WslTransport {
+  let shareRoot = findShareRoot(distribution);
   return {
-    shareRoot: findShareRoot(distribution),
+    get shareRoot() {
+      return shareRoot;
+    },
+    rediscover: () => {
+      shareRoot = findShareRoot(distribution);
+      return shareRoot;
+    },
     run: (argv, options) => runWslExe(argv, options),
   };
 }

@@ -6,6 +6,11 @@ All notable changes to SDD Harness are recorded here. The format follows [Keep a
 
 ### Added
 
+- **SSH projects** (`p4-env-ssh`, D43): a project can live on a saved SSH server. The SSH backend implements the whole environment interface (files over SFTP, programs and git over exec requests, polling watch, the connection part), with the same contract as the local and WSL backends.
+  - Saved servers are kept in `ssh-servers.json` in app data with no secret in it. Passwords and key passphrases are in the secret store, read at connect time only. Host keys are pinned per server, and a changed key always refuses.
+  - The project store and the registry accept `{ kind: 'ssh', server }`. A project whose environment was made but cannot be reached is listed, removable and read-only (`PROJECT_UNREACHABLE`), and `reconnect(id)` brings it back. A project whose environment cannot be made is listed as unreachable too.
+  - A stopped or missing WSL distribution is unreachable in the same way, and reconnect starts it.
+  - The headless walk runs on an SSH project in an opt-in live test (`pnpm test:live`, `HARNESS_SSH_*` variables).
 - **Frameless window** (`p0-window-chrome`, PR #3): `frame: false` on Windows and Linux, `titleBarStyle: 'hiddenInset'` with the native traffic lights on macOS. Default size 1280×800, minimum 1024×680.
 - **Custom 40px title bar** (`src/renderer/TitleBar.tsx`):
   - it shows the app mark and an empty Location slot, and drags the window;

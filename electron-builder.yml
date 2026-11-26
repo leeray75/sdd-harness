@@ -7,6 +7,9 @@ files:
   - out/**/*
   - package.json
 asar: true
+# No native module of the app's own needs a rebuild. ssh2's optional native cpu-features is not built (D43, pnpm
+# allowBuilds), and electron-builder's rebuild step would try to build it, so the rebuild is off.
+npmRebuild: false
 # Unsigned builds: no certificate is configured, so electron-builder skips signing.
 # `pnpm package` builds an unpacked app for the current OS only.
 win:

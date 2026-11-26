@@ -63,7 +63,7 @@ export const localGit: GitReader = (cwd, args) =>
 
 /** How a walk is set up: the folders, the git reader and how the project is registered. */
 export interface WalkSetup {
-  /** The repo as node:fs sees it: the local folder, or the share path of a WSL folder. */
+  /** The repo as the git reader and the walk's files see it: the local folder, or the share path of a WSL folder. */
   root: string;
   /** The bare remote as the git reader sees it, as a node:fs path. */
   remote: string;
@@ -75,6 +75,10 @@ export interface WalkSetup {
   project: { kind: 'dev' } | { kind: 'added'; environment: ProjectEnvironment };
   /** The store file, in a folder the test owns. */
   storeFile: string;
+  /** The walk's own file access (AC15). Default: the local folder `root`. */
+  files?: WalkFiles;
+  /** The environment maker the registry uses (the SSH walk passes one with its server store). Default: environmentFor. */
+  environmentFor?: typeof environmentFor;
 }
 
 const FEATURE = 'p3-walk';
@@ -273,6 +277,8 @@ export interface Walk {
   human(action: HumanActionId, options?: { gesture?: boolean }): Promise<HumanActionResult>;
   /** Creates the feature's build controller, as index.ts would (the spec must be approved). */
   createController(): Promise<BuildController>;
+  /** The walk's own file access, by path relative to the project root. */
+  files: WalkFiles;
   /** The controller the handlers read, or null before one is created. */
   controller: BuildController | null;
 }
@@ -291,10 +297,29 @@ function gestureTracker(): { tracker: GestureTracker; press: () => void } {
   return { tracker, press: () => (gesture = true) };
 }
 
-function writeText(root: string, relative: string, text: string): void {
-  const path = join(root, relative);
-  mkdirSync(join(path, '..'), { recursive: true });
-  writeFileSync(path, text);
+/**
+ * The walk's own reads and writes of the planning files and the lock, by path relative to the project root (AC15).
+ * The unit walk uses the local folder (localWalkFiles); the live SSH walk supplies one that works on the server.
+ */
+export interface WalkFiles {
+  write(relative: string, text: string): void;
+  read(relative: string): string;
+  exists(relative: string): boolean;
+  append(relative: string, text: string): void;
+}
+
+/** The walk's files in a local folder: the same node:fs calls the walk has always made. */
+export function localWalkFiles(root: string): WalkFiles {
+  return {
+    write: (relative, text) => {
+      const path = join(root, relative);
+      mkdirSync(join(path, '..'), { recursive: true });
+      writeFileSync(path, text);
+    },
+    read: (relative) => readFileSync(join(root, relative), 'utf8'),
+    exists: (relative) => existsSync(join(root, relative)),
+    append: (relative, text) => appendFileSync(join(root, relative), text),
+  };
 }
 
 /** Starts the walk: the project, the channel with both handler sets, and the app's job runner. */
@@ -344,7 +369,7 @@ export async function startWalk(setup: WalkSetup): Promise<Walk> {
           },
         }
       : {}),
-    environmentFor,
+    environmentFor: setup.environmentFor ?? environmentFor,
     startLock: (env, lockRoot) => {
       lockWatcher = createSpecLockWatcher({ env, root: lockRoot, onChange: () => undefined });
       return lockWatcher;
@@ -399,6 +424,7 @@ export async function startWalk(setup: WalkSetup): Promise<Walk> {
     provider,
     log: { info, error: errors },
     controller: null,
+    files: setup.files ?? localWalkFiles(root),
     refreshLive,
     snapshot: () => ({
       head: sh(root, ['rev-parse', 'HEAD']).trim(),
@@ -486,27 +512,28 @@ function subtaskText(): string {
 /** The walk itself: every step, with the node checked after each one. The expectations are the walk's. */
 export async function runHeadlessWalk(walk: Walk): Promise<void> {
   const { root } = walk;
+  const files = walk.files;
   const base = walk.snapshot();
 
   // Step 1: the planning files, with the node checked after each one.
-  writeText(root, PLAN_REL, planText('draft'));
+  files.write(PLAN_REL, planText('draft'));
   expect(await walk.nodeNow()).toBe('planning');
-  writeText(root, PLAN_REL, planText('approved'));
+  files.write(PLAN_REL, planText('approved'));
   expect(await walk.nodeNow()).toBe('plan-approved');
-  writeText(root, SPECS_REL, specsText());
-  writeText(root, TASKS_REL, tasksText());
-  writeText(root, SUBTASK_REL, subtaskText());
+  files.write(SPECS_REL, specsText());
+  files.write(TASKS_REL, tasksText());
+  files.write(SUBTASK_REL, subtaskText());
   expect(await walk.nodeNow()).toBe('spec-drafted');
   expect(walk.snapshot()).toEqual(base);
 
   // approve-spec without a gesture is refused, and changes nothing.
-  const specDraft = readFileSync(join(root, SPECS_REL), 'utf8');
+  const specDraft = files.read(SPECS_REL);
   expect(await walk.human('approve-spec', { gesture: false })).toMatchObject({
     ok: false,
     code: 'no-gesture',
   });
-  expect(readFileSync(join(root, SPECS_REL), 'utf8')).toBe(specDraft);
-  expect(existsSync(join(root, LOCK_REL))).toBe(false);
+  expect(files.read(SPECS_REL)).toBe(specDraft);
+  expect(files.exists(LOCK_REL)).toBe(false);
   expect(await walk.nodeNow()).toBe('spec-drafted');
 
   // Step 2: approve-spec, then the edit and the re-approval (no controller exists yet, so the
@@ -524,14 +551,14 @@ export async function runHeadlessWalk(walk: Walk): Promise<void> {
 
   // Step 3: start. Mode 1 writes the product file, the spec write is denied, and changes.md is
   // written. Review 1 has an ISSUES finding, fixed in Mode 2. Review 2 has a spec problem.
-  const specBeforeBuild = readFileSync(join(root, SPECS_REL), 'utf8');
+  const specBeforeBuild = files.read(SPECS_REL);
   const paused = await controller.start();
   expect(paused).toMatchObject({ kind: 'paused' });
   expect(controller.node()).toBe('paused');
   expect(await walk.nodeNow()).toBe('paused');
-  expect(readFileSync(join(root, SPECS_REL), 'utf8')).toBe(specBeforeBuild);
-  expect(readFileSync(join(root, PRODUCT_REL), 'utf8')).toBe('export const value = 2;\n');
-  expect(readFileSync(join(root, CHANGES_REL), 'utf8')).toBe(CHANGES_V1);
+  expect(files.read(SPECS_REL)).toBe(specBeforeBuild);
+  expect(files.read(PRODUCT_REL)).toBe('export const value = 2;\n');
+  expect(files.read(CHANGES_REL)).toBe(CHANGES_V1);
   expect(
     walk.log.error.some((line) =>
       line.startsWith(
@@ -555,14 +582,14 @@ export async function runHeadlessWalk(walk: Walk): Promise<void> {
   // changed. approve-spec re-approves it, and approved() resumes in Mode 3.
   expect(await controller.resume('revise')).toEqual({ kind: 'awaiting-approval' });
   expect(controller.node()).toBe('spec-changed');
-  const lockBeforeEdit = readFileSync(join(root, LOCK_REL), 'utf8');
+  const lockBeforeEdit = files.read(LOCK_REL);
   expect(await walk.human('edit-approved-spec')).toEqual({
     ok: false,
     code: 'refused',
     reason: EDIT_REFUSED,
   });
-  expect(readFileSync(join(root, LOCK_REL), 'utf8')).toBe(lockBeforeEdit);
-  appendFileSync(join(root, SPECS_REL), '- **AC2:** added after the spec problem.\n');
+  expect(files.read(LOCK_REL)).toBe(lockBeforeEdit);
+  files.append(SPECS_REL, '- **AC2:** added after the spec problem.\n');
   await walk.refreshLive();
   expect(await walk.nodeNow()).toBe('spec-changed');
   expect(await walk.human('approve-spec')).toEqual({ ok: true });
@@ -579,7 +606,7 @@ export async function runHeadlessWalk(walk: Walk): Promise<void> {
   });
   expect(controller.node()).toBe('build-done');
   expect(await walk.nodeNow()).toBe('build-done');
-  expect(readFileSync(join(root, PRODUCT_REL), 'utf8')).toBe('export const value = 3;\n');
+  expect(files.read(PRODUCT_REL)).toBe('export const value = 3;\n');
   expect(walk.snapshot()).toEqual(base);
 
   // Step 6: approve-result through the channel. Exactly one commit, pushed, with the
@@ -595,9 +622,7 @@ export async function runHeadlessWalk(walk: Walk): Promise<void> {
   expect(approvedPaths).toContain(`${FOLDER_REL}/SUMMARY.md`);
   expect(approvedPaths.every(isAllowedPath)).toBe(true);
   expect(await walk.nodeNow()).toBe('build-done');
-  expect(readFileSync(join(root, `${FOLDER_REL}/SUMMARY.md`), 'utf8')).toContain(
-    'approved; committed and pushed',
-  );
+  expect(files.read(`${FOLDER_REL}/SUMMARY.md`)).toContain('approved; committed and pushed');
 
   // Step 7: mark-done through the channel. The close is one more commit, pushed, and the
   // feature detects as closed.
@@ -609,7 +634,7 @@ export async function runHeadlessWalk(walk: Walk): Promise<void> {
   expect(committedNameStatus(root, closed.head)).toEqual(
     expect.arrayContaining([`M\t${SPECS_REL}`, `D\t${LOCK_REL}`]),
   );
-  expect(existsSync(join(root, LOCK_REL))).toBe(false);
+  expect(files.exists(LOCK_REL)).toBe(false);
   expect(await walk.nodeNow()).toBe('closed');
 }
 
