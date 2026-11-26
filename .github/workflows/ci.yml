@@ -74,11 +74,8 @@ jobs:
       # sysctl step below on purpose: with unprivileged user namespaces allowed, `unshare` starts to
       # work on the Linux runner and the writer's commands get the OS wrapper, which the `check` job
       # never sees. Keeping the order keeps the Linux unit tests on the same path that job runs.
-      # The Windows run is informational (it does not fail the job) until the cases the three OSes
-      # disagree on are confirmed green there; until then its failures are listed in the log.
       - name: Unit tests
         run: pnpm test
-        continue-on-error: ${{ runner.os == 'Windows' }}
 
       - name: Allow unprivileged user namespaces for Electron (Linux)
         if: runner.os == 'Linux'
