@@ -128,3 +128,31 @@ describe('only the SSH transport imports ssh2 (AC14, D43)', () => {
     }
   });
 });
+
+describe('only the container transport and detection name the docker program (AC12, D44)', () => {
+  it('no file under src outside the container transport and detection names docker as a program string', () => {
+    const files = tsFiles('src');
+    expect(files.length).toBeGreaterThan(40);
+    // The program as a call's argument: `'docker',` or `'docker')`. A descriptor key such as `['docker']` is not the program.
+    const dockerProgram = /['"`]docker(\.exe)?['"`]\s*[,)]/;
+    for (const file of files) {
+      if (file === 'src/main/env/container-transport.ts') continue;
+      if (file === 'src/main/env/container-detect.ts') continue;
+      expect(textOf(file), file).not.toMatch(dockerProgram);
+    }
+    expect(textOf('src/main/env/container-transport.ts')).toMatch(/DOCKER_PROGRAM = 'docker'/);
+  });
+
+  it('the container backend module imports no node:fs, node:fs/promises or node:child_process', () => {
+    expect(textOf('src/main/env/container.ts')).not.toMatch(SYSTEM_IMPORT);
+    expect(textOf('src/main/env/container-detect.ts')).not.toMatch(SYSTEM_IMPORT);
+  });
+
+  it('the container backend reaches the network module only through the environment folder', () => {
+    expect(textOf('src/main/env/container.ts')).toMatch(/commands\/network/);
+    for (const file of tsFiles('src/main')) {
+      if (file.startsWith('src/main/env/')) continue;
+      expect(textOf(file), file).not.toMatch(/commands\/network['"]/);
+    }
+  });
+});

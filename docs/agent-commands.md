@@ -67,6 +67,8 @@ The writer's commands get the network limit. The reviewer's do not.
 
 **Over SSH (D43).** On a Linux server the limit is `os` when `unshare --user --map-root-user --net true` works for the signed-in user, probed once per connection; otherwise it is `proxy-only`. On a macOS server it is always `proxy-only`: the proxy variables and offline flags are set, but outbound network is not blocked by the OS. A command's network is therefore best effort on macOS over SSH, as on a local macOS project without `sandbox-exec`.
 
+**In a dev container (D44).** A command in a dev container project runs inside the container, as the container's remote user. The same `unshare` probe runs there, once per connection: when unprivileged user namespaces work in the container, the command gets the `os` level with its own network namespace and only loopback. Many dev containers do not allow them (Docker's default seccomp profile blocks them), and then the level is `proxy-only`, and the log says so. The dead proxies and the offline flags are passed into the container as variables with `docker exec -e`.
+
 **On WSL (D42).** A command in a WSL project runs inside its distribution. The same `unshare` probe runs there, once per backend: when unprivileged user namespaces work in the distribution, the command gets the `os` level with its own network namespace and only loopback, as on Linux. When they do not (for example on WSL 1, or with the feature disabled), the level is `proxy-only`, and the log says so. The dead proxies and the offline flags are passed to the distribution through `WSLENV`.
 
 Every writer command logs one `rule network:` line with its level. An `os` level is logged as info, and `proxy-only` as a warning.

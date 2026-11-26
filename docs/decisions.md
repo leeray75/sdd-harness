@@ -536,6 +536,7 @@ Format: **Decision** · **Outcome** · **Why** · **Date**.
 - **Note (p4-env-wsl, D42):** the WSL backend exists now, with the same interface and the same contract: `src/main/env/wsl.ts`, detection in `src/main/env/wsl-detect.ts`, and `environmentFor` builds it on Windows for `{ kind: 'wsl', distribution }` (D42).
 - **Note (p4-env-wsl, revision 1):** the spec lock's `writeAtomic` (`src/main/workflow/spec-lock.ts`) now uses this same atomic writer and its rename retry, so there is one retry budget. Its result and reasons are unchanged: the Node code of the last error. The shared writer gained an opt-in `codeReason` option for that; its default is the fixed text the tools and the store use.
 - **Note (p4-env-ssh, D43):** the SSH backend exists now, with the same interface and contract (`src/main/env/ssh.ts`, `ssh-transport.ts`). `Environment` gained a fifth part, `connection` (state, changes and reconnect), which the local and WSL backends implement too. `environmentFor` builds the SSH backend for `{ kind: 'ssh', server }` (D43).
+- **Note (p4-env-container, D44):** the dev container backend exists now, with the same interface and contract (`src/main/env/container.ts`, `container-transport.ts`, `container-detect.ts`). `environmentFor` builds it for `{ kind: 'container', folder, docker }` (D44). The interface did not change.
 - **Not in this decision:** the SSH and container backends (`p4-env-ssh`, `p4-env-container`), the unreachable and read-only project state (`p4-env-ssh`), and the project checks (`p4-project-checks`).
 - **Date:** 2026-11-25
 
@@ -584,4 +585,29 @@ Format: **Decision** · **Outcome** · **Why** · **Date**.
   - a user's `~/.ssh/known_hosts` and `~/.ssh/config`: the app keeps its own pins, so an unexpected change to the user's files cannot change what the app trusts;
   - automatic reconnect: a dropped server stays unreachable until the user reconnects, so a changed key or a lost network cannot start work silently.
 - **Not in this decision:** dev containers (`p4-env-container`), the projects screen, the Reconnect button and the read-only look (`p4-projects-screen`), the add wizard with the fingerprint and `trustHostKey` (`p4-add-project-wizard`), IPC for servers, projects and states, jump hosts, port forwarding, Windows SSH servers, and automatic reconnect.
+- **Date:** 2026-11-26
+
+## D44 · Dev containers: attached with the docker CLI, found by the devcontainer label
+
+- **Outcome:** a project can live in a dev container (`p4-env-container`). `createContainerEnvironment({ descriptor, transport })` in `src/main/env/container.ts` implements the whole `Environment` interface for one dev container and a POSIX root inside it. `environmentFor({ kind: 'container', folder, docker })` builds it. Making the backend starts nothing, and the backend is unreachable until a connect succeeds.
+  - **How it attaches:** the app runs the `docker` CLI with argument arrays and no shell. Every call is a `docker exec`, through the same setsid launcher as the SSH and WSL backends (`src/main/env/launcher.ts`). The user starts the container with VS Code or the devcontainer CLI, and the app never builds one.
+  - **How it is found:** on each connect, the container is the one whose `devcontainer.local_folder` label equals the project's `folder`. A running container is preferred over a stopped one, then the newest. A stopped container is started with `docker start`. A rebuilt container keeps the project, because the label is the same.
+  - **The user:** programs run as the container's `remoteUser` from the `devcontainer.metadata` label (the last `remoteUser`, else the last `containerUser`). A user that fails the POSIX user-name pattern (D43) is ignored, and the image's default user is used.
+  - **Docker host:** `{ kind: 'host' }` runs the `docker` on this machine's PATH. `{ kind: 'wsl', distribution }` (Windows only) runs `wsl.exe -d <distro> --exec docker`. The names of the variables that cross into the container go through WSLENV on that host, and no value appears in any argument array.
+  - **Descriptor:** `{ kind: 'container', folder, docker }`, with exactly those keys. `folder` is 1 to 1024 characters with no control character, no quote and no leading `-`. The root is an absolute, normalized POSIX path, checked through the environment when the project is added. Two container projects are the same folder when they have the same Docker host, folder and root.
+  - **Failures:** a container that is missing, stopped and cannot start, or whose engine is down, makes the project unreachable and read-only through the connection part and the registry (D43). Reconnect finds the container again and starts a stopped one. Each failed connect gives one fixed reason, and no reason names the folder, the container, the image or the user. Docker's own gone messages move the backend to unreachable, but only on docker's own lines: a line that starts with `Error response from daemon: ` and contains `No such container` or `is not running`, `Error: No such container`, or `Cannot connect to the Docker daemon`. For a launched program, only the stderr before the launcher's marker is checked, so a program's own output never changes the state.
+  - **Network:** `network: 'none'` probes `unshare --user --map-root-user --net true` inside the container once per connection. It gives `os` when it works and `proxy-only` otherwise (`docs/agent-commands.md`).
+  - **Group kill:** a timed-out or aborted program is killed with `kill -s KILL -- -<pgid>`, the POSIX form, because dash (the `/bin/sh` of Debian and Ubuntu images) refuses `kill -KILL -- -<pgid>`.
+- **Why:**
+  - The docker CLI is the one tool every dev container user already has, and it addresses a container by its label, so a rebuilt container keeps its project without a new descriptor.
+  - Argument arrays with no shell, and values only in the process environment, keep a folder name or a variable value out of any shell line and out of any log line.
+  - The same exec form, launcher and group kill as SSH mean one contract for every remote backend, and the same fake-based tests and walk.
+- **Alternatives not taken:**
+  - the devcontainer CLI (`@devcontainers/cli`): slower, and it still needs docker to kill a process;
+  - `docker exec` plus `devcontainer up`: the app would build and start containers it does not own;
+  - a container name or id as the key: it changes on each rebuild, so the project would turn unreachable;
+  - the host folder behind the bind mount for files: it fails for volume workspaces;
+  - Docker on the host PATH only: it leaves out the WSL users whose Docker runs in their distribution;
+  - the image's default user always: programs would run as root where the dev container runs them as its remote user.
+- **Not in this decision:** building or creating containers, `docker compose`, plain containers without the label, remote Docker hosts beyond the docker CLI's own environment, Windows containers, the projects screen, the Reconnect button and the read-only look (`p4-projects-screen`), the add wizard and its call to `detectDocker` (`p4-add-project-wizard`), IPC for containers, detection and Reconnect, and automatic reconnect.
 - **Date:** 2026-11-26

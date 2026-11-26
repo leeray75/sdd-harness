@@ -7,7 +7,9 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
+import { environmentFor } from '../../src/main/env';
+import { fakeDocker, type FakeContainer } from '../support/fake-container-transport';
 import {
   closeWalk,
   localGit,
@@ -83,6 +85,41 @@ describe('the headless walk, planning to build-done (G1, G2, AC1 to AC4)', () =>
         storeFile: storeBesideRepo(root),
       });
       await runHeadlessWalk(walk);
+    },
+    WALK_TIMEOUT_MS,
+  );
+
+  it(
+    'runs the same walk through the registry on a dev container project over the fake docker (D44, AC11)',
+    async () => {
+      const { root, remote } = makeRepo();
+      // The fake docker's container stands for `/` over the scratch folder, so the project is `/work`.
+      const container: FakeContainer = {
+        id: 'walk1',
+        folder: '/home/dev/walk',
+        metadata: JSON.stringify([{ remoteUser: 'dev' }]),
+        running: true,
+        created: '2026-11-20 10:00:00 +0000 UTC',
+        mount: join(root, '..'),
+      };
+      const docker = fakeDocker([container]);
+      const walk = await startWalk({
+        root,
+        remote,
+        projectRoot: '/work',
+        git: localGit,
+        project: {
+          kind: 'added',
+          environment: { kind: 'container', folder: '/home/dev/walk', docker: { kind: 'host' } },
+        },
+        storeFile: storeBesideRepo(root),
+        environmentFor: (descriptor) =>
+          environmentFor(descriptor, { containerTransportFor: () => docker }),
+      });
+      await runHeadlessWalk(walk);
+      // The walk reached the container: its files, programs and git all went through docker exec.
+      expect(docker.calls.filter((call) => call.argv[0] === 'exec').length).toBeGreaterThan(10);
+      await docker.killAll();
     },
     WALK_TIMEOUT_MS,
   );

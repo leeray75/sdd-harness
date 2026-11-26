@@ -1,6 +1,6 @@
 # Environments
 
-An environment is where a project's files, programs, file watching and git live. Every part of the app that works inside a project reaches it through an environment object (D41). The local backend (D41), the WSL backend (D42) and the SSH backend (D43) are in this version. The dev container backend (phase 4, `p4-env-container`) plugs in behind the same interface.
+An environment is where a project's files, programs, file watching and git live. Every part of the app that works inside a project reaches it through an environment object (D41). The local backend (D41), the WSL backend (D42), the SSH backend (D43) and the dev container backend (D44, `p4-env-container`) are in this version, all behind the same interface.
 
 The code is in `src/main/env/`:
 
@@ -12,6 +12,9 @@ The code is in `src/main/env/`:
 - `launcher.ts`: the fixed process launcher and its group-marker reader, shared by the WSL and SSH backends (D42, D43).
 - `poll-watch.ts`: the polling watcher, shared by the WSL and SSH backends.
 - `ssh.ts`: the SSH backend (`createSshEnvironment`). `ssh-transport.ts`: the transport seam, host key checks, credentials and the app transport over `ssh2`, the only code that imports `ssh2`. `ssh-command.ts`: the quoter and the exec strings (D43).
+- `container.ts`: the dev container backend (`createContainerEnvironment`): the path, files, process, watch, git and connection parts, the fixed files scripts, and the connect checks (D44).
+- `container-transport.ts`: the docker seam (`ContainerTransport`, `appContainerTransport`, `dockerInvocation`), the label lookup (`findContainer`), the user and folder rules and the exec argument builder (D44). The only code that starts the docker program, apart from detection.
+- `container-detect.ts`: `detectDocker`, which reports the docker CLI, its engine and the dev containers. Nothing calls it at import time or at start (D44).
 - `index.ts`: `environmentFor`, `localEnvironment` and `toolEnvironment`.
 
 Only `src/main/env/`, `src/main/git/` and the two app-data stores (`src/main/projects/store.ts`, `src/main/secrets/store.ts`) import `node:fs`, `node:fs/promises` or `node:child_process` under `src/main/`. `tests/unit/env-boundary.test.ts` checks this on every run.
@@ -47,7 +50,7 @@ A backend must keep these rules, which the local backend and the test suite rely
 
 ## How a backend is chosen and held
 
-- `environmentFor(descriptor, deps)` returns the backend for a project's descriptor: `local`, `wsl` (on Windows) and `ssh` (for a saved server's UUID, with the server store and the secret store in `deps.ssh`). Any other kind is refused with a fixed reason.
+- `environmentFor(descriptor, deps)` returns the backend for a project's descriptor: `local`, `wsl` (on Windows), `ssh` (for a saved server's UUID, with the server store and the secret store in `deps.ssh`) and `container` (for a folder and a Docker host, D44). Any other kind is refused with a fixed reason.
 - The project registry (`src/main/projects/registry.ts`) makes each project's environment once, from its descriptor, and holds it next to the project's root. The lock watcher, the spec and ship handlers and the build runner take it from there. `environmentOf(projectId)` returns it, or `null` for an unknown or unreachable project.
 - A project whose environment cannot be made is listed as unreachable, and removable. Its requests are refused as an unknown project (`no project with this id`), and `reconnect(id)` tries to make it again (D43, revision 1).
 - A project whose environment was made but cannot be reached (its connect failed, or its connection dropped) is listed, removable and read-only. Its requests are refused with `PROJECT_UNREACHABLE`, it has no watcher, and `reconnect(id)` brings it back and starts the watcher (D43).
@@ -88,14 +91,28 @@ A project on an SSH server lives in one remote folder, reached through one saved
 - **Connection part.** `state()` follows the transport. `reconnect()` is one connect, and a failure gives a fixed reason from `SSH_RECONNECT_REASONS` (none names the server, its user or a key).
 - **Failures.** A lost or unreachable server is a result for each call (`ENOTCONN`, `{ started: false }`, `failed`, or `onError` for the watcher). Nothing falls back to the local folder.
 
+## The dev container backend (D44)
+
+A project that lives in a dev container (`p4-env-container`) is reached through `createContainerEnvironment({ descriptor, transport })` in `src/main/env/container.ts`. Its descriptor is `{ folder, docker }`: `folder` is the value of the container's `devcontainer.local_folder` label, and `docker` is `{ kind: 'host' }` (the docker on this machine's PATH) or `{ kind: 'wsl', distribution }` (on Windows, through the WSL distribution). In a project's store entry the descriptor is `{ kind: 'container', folder, docker }`. The tests use a fake docker (`tests/support/fake-container-transport.ts`), so no docker program starts in `pnpm test`. The live walk (`tests/live/container-walk.live.test.ts`) runs on a real container.
+
+- **Attach.** The app runs the docker CLI with an argument array and no shell. Every call is `docker exec`, through the shared setsid launcher. The app never builds or creates a container; the user starts it with VS Code or the devcontainer CLI.
+- **Lookup.** On each connect, `findContainer` lists the containers with that folder label (`docker ps -a` with the label filter), prefers a running one, then the newest, and reads the user from the `devcontainer.metadata` label. The user is the last `remoteUser`, else the last `containerUser`; a user that fails the POSIX user-name pattern is ignored, and the image's default user runs programs. A stopped container is started with `docker start`.
+- **Connect checks.** One exec, as the chosen user, reads `uname -s` and whether `setsid` exists. A system that is not Linux, or a container without `setsid`, is refused at connect. Each failed connect gives one fixed reason from `CONTAINER_RECONNECT_REASONS`: docker missing, engine down, no container, the container would not start, not Linux, or no `setsid`. No reason names the folder, the container, the image or the user.
+- **Unreachable.** Making the backend starts nothing. A container that is missing or stopped, or an engine that is down, makes the backend unreachable, and its calls are refused as the contract says (`ENOTCONN`, `{ started: false }`, `failed`, or `onError`). A docker gone message moves it to unreachable, once, and the listeners are told. The messages are docker's own lines only: a line starting with `Error response from daemon: ` containing `No such container` or `is not running`, a line starting with `Error: No such container`, or a line starting with `Cannot connect to the Docker daemon`. For a launched program, only the stderr before the launcher's marker is checked, so a program's own output never changes the state. Nothing reconnects by itself; `reconnect()` finds the container again and starts a stopped one.
+- **Files.** Each files method is one exec of a fixed script (`FILES_SCRIPTS`), with its paths and arguments as positional words. The scripts use only commands that exist in GNU coreutils and BusyBox, and each prints a code word for the failures it tests itself (`ENOENT`, `ENOTDIR`, `EISDIR`, `EEXIST`, `ENOTEMPTY`, `EACCES`, and `EINVAL` for a readlink of a non-link). Any other failure is `EIO`. A relative or non-normalized path is `ENOENT` and starts no process. A real POSIX shell runs each script in `tests/unit/container-scripts.test.ts` (Linux only), and it gives the same answers as the fake.
+- **Programs.** `spawn` runs the program with the exec form and the group launcher, passes only the variables the caller set or changed (never `PATH`) as `-e NAME`, and hides the marker. A timeout or an abort runs `kill -s KILL -- -<pgid>` on a second exec, then stops the docker process, then resolves. `kill -KILL -- -<pgid>` is not used, because dash (the `/bin/sh` of Debian and Ubuntu images) refuses it. A stop before the marker stops only the docker process, as on SSH.
+- **Network.** `network: 'none'` probes `unshare --user --map-root-user --net true` inside the container once per connection: the level is `os` when it works and `proxy-only` otherwise. `networkLevel()` agrees.
+- **Git and watching.** Git runs through the same group launcher and `createGit`, so its argument lists, codes and timeouts match the local instance; exit 127 is `git-missing`. Watching is the shared polling watcher (`poll-watch.ts`).
+- **Variables.** A variable's value is passed only in the docker process's environment, and its name in the argument array. On the WSL docker host the names also go through `WSLENV`, with no path flags.
+
 ## Checklist for the WSL, SSH and container backends
 
-Status: the WSL and SSH backends meet every item below (`p4-env-wsl`, D42; `p4-env-ssh`, D43). The container backend is a later subtask.
+Status: the WSL, SSH and dev container backends meet every item below (`p4-env-wsl`, D42; `p4-env-ssh`, D43; `p4-env-container`, D44). Each one runs the headless walk on its backend: over the fake transport in `pnpm test` (`tests/unit/headless-e2e.test.ts`), and on a real server or container in the opt-in live walks.
 
 Each backend is its own subtask, and each one runs the phase 3 headless walk (`tests/unit/headless-e2e.test.ts`) on its backend before it is done.
 
-- Detection, if any, is in the backend's own module, and it is not run at import time.
-- `path` is the backend's flavour (`path.posix` for WSL and SSH; the container's path for a dev container). Its `sep` is `/`.
+- Detection, if any, is in the backend's own module, and it is not run at import time. The container's detection is `src/main/env/container-detect.ts`.
+- `path` is the backend's flavour (`path.posix` for WSL, SSH and the dev container). Its `sep` is `/`.
 - `files` answers every method, with the Node codes listed above, and `readFile`'s byte cap is enforced on the remote side.
 - `process.spawn` runs through the backend's transport with an argument array, with no shell; the timeout kills the tree on the remote side; `network` reports a level, and `networkLevel()` agrees with it.
 - `process.platform` is the platform of the backend's own system (Linux for WSL and most containers).

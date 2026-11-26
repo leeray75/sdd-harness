@@ -5,6 +5,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { toolEnvironment } from '../../src/main/env';
 import { createWslEnvironment } from '../../src/main/env/wsl';
 import { createSshEnvironment } from '../../src/main/env/ssh';
+import { createContainerEnvironment } from '../../src/main/env/container';
+import { fakeDocker, type FakeContainer } from '../support/fake-container-transport';
 import { fakeSshTransport, type FakeSsh } from '../support/fake-ssh-transport';
 import { approveResult, SHIP_REASONS } from '../../src/main/workflow/ship';
 import { fakeWslTransport, type FakeTransport } from '../support/fake-wsl-transport';
@@ -337,6 +339,124 @@ describe('over the SSH backend, each step reaches its result through the interfa
   it('approve-result reaches its refusal through the gate, with the lock and spec read on the server', async () => {
     const { rec } = await sshRecorder();
     const result = await approveResult(rec.env, SSH_ROOT, FEATURE, {});
+    expect(result).toEqual({ ok: false, reason: SHIP_REASONS.notBuildDone });
+    expect(rec.methodsOf('files').length).toBeGreaterThan(0);
+  });
+});
+
+// The dev container backend over the fake docker (D44, p4-env-container, AC11): the same steps, reaching their
+// results through the interface. The project lives in a temp folder that stands for the container's `/`.
+const CONTAINER_ROOT = '/home/u/project';
+let containerMount = '';
+
+/** A recording environment over a connected container backend whose container holds the project. */
+async function containerRecorder(): Promise<{
+  rec: RecordingEnv;
+  docker: ReturnType<typeof fakeDocker>;
+}> {
+  const item: FakeContainer = {
+    id: 'recorder1',
+    folder: '/home/u/work',
+    metadata: JSON.stringify([{ remoteUser: 'u' }]),
+    running: true,
+    created: '2026-11-20 10:00:00 +0000 UTC',
+    mount: containerMount,
+  };
+  const docker = fakeDocker([item], {
+    program: () => ({ code: 0, chunks: ['ran'] }),
+    executable: true,
+  });
+  const env = createContainerEnvironment({
+    descriptor: { folder: '/home/u/work', docker: { kind: 'host' } },
+    transport: docker,
+  });
+  expect(await env.connection.reconnect()).toEqual({ ok: true });
+  return { rec: recordingEnvironment(env), docker };
+}
+
+describe('over the dev container backend, each step reaches its result through the interface (AC11, D44)', () => {
+  beforeAll(() => {
+    containerMount = join(base, 'container');
+    mkdirSync(join(containerMount, 'home', 'u', 'project', 'docs', 'specs', FEATURE), {
+      recursive: true,
+    });
+    mkdirSync(join(containerMount, 'usr', 'bin'), { recursive: true });
+    writeFileSync(join(containerMount, 'usr', 'bin', 'tool'), '#!/bin/sh\n');
+    writeFileSync(join(containerMount, 'home', 'u', 'project', 'a.txt'), 'needle in a file');
+    writeFileSync(
+      join(containerMount, 'home', 'u', 'project', 'docs', 'specs', FEATURE, 'SPECS.md'),
+      '# Spec\n\nGoals\n',
+    );
+  });
+
+  it('a file tool reads through files in the container', async () => {
+    const { rec } = await containerRecorder();
+    const result = await readFileInRoot(toolEnvironment(rec.env), CONTAINER_ROOT, 'a.txt');
+    expect(result).toEqual({ ok: true, output: 'needle in a file' });
+    expect(rec.methodsOf('files')).toEqual(
+      expect.arrayContaining(['realpath', 'stat', 'readFile']),
+    );
+  });
+
+  it('a write tool writes through files, atomically, in the container', async () => {
+    const { rec } = await containerRecorder();
+    const result = await writeFileInRoot(toolEnvironment(rec.env), CONTAINER_ROOT, {
+      path: 'new.txt',
+      content: 'from container',
+    });
+    expect(result.ok).toBe(true);
+    expect(rec.methodsOf('files')).toEqual(expect.arrayContaining(['writeFile', 'rename']));
+    expect(readFileSync(join(containerMount, 'home', 'u', 'project', 'new.txt'), 'utf8')).toBe(
+      'from container',
+    );
+  });
+
+  it('run_command starts the program through process.spawn, as an exec in the container', async () => {
+    const { rec, docker } = await containerRecorder();
+    const result = await runCommandInRoot(
+      toolEnvironment(rec.env),
+      CONTAINER_ROOT,
+      { program: '/usr/bin/tool', args: ['x'] },
+      { job: 'reviewer', check: () => ({ allow: true }) },
+      { parentEnv: { PATH: '/usr/bin' }, platform: 'linux' },
+    );
+    expect(result.ok && result.output).toContain('ran');
+    expect(rec.methodsOf('process')).toEqual(['spawn']);
+    expect(docker.calls.some((call) => call.argv[0] === 'exec')).toBe(true);
+  });
+
+  it('the spec lock hashes, writes, reads and watches in the container', async () => {
+    const { rec } = await containerRecorder();
+    const hash = await hashSpec(rec.env, CONTAINER_ROOT, FEATURE);
+    expect(hash).toMatch(/^[0-9a-f]{64}$/);
+    expect(rec.methodsOf('files')).toEqual(expect.arrayContaining(['lstat', 'open']));
+
+    const saved = await writeSpecState(rec.env, CONTAINER_ROOT, {
+      version: SPEC_STATE_VERSION,
+      feature: FEATURE,
+      sha256: hash ?? '',
+      approvedAt: '2026-11-25T10:00:00.000Z',
+      editing: false,
+    });
+    expect(saved).toEqual({ ok: true });
+    expect((await readSpecState(rec.env, CONTAINER_ROOT)).kind).toBe('ok');
+
+    const watcher = createSpecLockWatcher({
+      env: rec.env,
+      root: CONTAINER_ROOT,
+      onChange: () => undefined,
+    });
+    try {
+      await watcher.refresh();
+      expect(rec.methodsOf('watch')).toContain('watchDir');
+    } finally {
+      watcher.close();
+    }
+  });
+
+  it('approve-result reaches its refusal through the gate, with the lock and spec read in the container', async () => {
+    const { rec } = await containerRecorder();
+    const result = await approveResult(rec.env, CONTAINER_ROOT, FEATURE, {});
     expect(result).toEqual({ ok: false, reason: SHIP_REASONS.notBuildDone });
     expect(rec.methodsOf('files').length).toBeGreaterThan(0);
   });
