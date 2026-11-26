@@ -11,9 +11,27 @@ import { fakeDocker, type FakeContainer } from '../support/fake-container-transp
 // temp folder, and through the fake docker that answers the same script text on a mapped folder. Both must give
 // the same answer, `ok` or the script's code word, so the fake is shown to match the shell. The test needs a
 // POSIX sh: it always runs on Linux (the CI check job), and is skipped where no `/bin/sh` exists (Windows).
+// The stat scenarios use GNU `stat -c`, which macOS's BSD `stat` rejects, so they are skipped where the host's
+// `stat` does not take `-c` (macOS). The product runs the scripts inside a Linux container, where `stat -c` works.
 
 /** The POSIX shell the scripts run in, or null when this system has none. */
 const SH = process.platform !== 'win32' && existsSync('/bin/sh') ? '/bin/sh' : null;
+
+/**
+ * Whether the host's `stat` takes `-c %s` (GNU and BusyBox do, macOS does not). Probed once through the shell on a
+ * temp file, which is removed after the probe. False when there is no shell, where the block is skipped anyway.
+ */
+const STAT_C: boolean = (() => {
+  if (SH === null) return false;
+  const probe = mkdtempSync(join(tmpdir(), 'container-scripts-stat-'));
+  try {
+    const file = join(probe, 'file.txt');
+    writeFileSync(file, '');
+    return spawnSync(SH, ['-c', 'stat -c %s "$1"', 'sh', file], { encoding: 'utf8' }).status === 0;
+  } finally {
+    rmSync(probe, { recursive: true, force: true });
+  }
+})();
 
 /** The arguments of one scenario: each path is written as a container path, and `at` maps it to the folder. */
 type Args = (at: (path: string) => string) => string[];
@@ -355,7 +373,11 @@ describe.skipIf(SH === null)(
   'the fixed files scripts match the fake and a real POSIX shell (AC4)',
   () => {
     for (const scenario of SCENARIOS) {
-      it(`gives the same answer for ${scenario.name}: ${scenario.expect}`, async () => {
+      // The stat scenarios need `stat -c` on the host; every other scenario runs everywhere the block does.
+      const isStat =
+        scenario.body === FILES_SCRIPTS.stat || scenario.body === FILES_SCRIPTS.statFollow;
+      const itScenario = isStat ? it.skipIf(!STAT_C) : it;
+      itScenario(`gives the same answer for ${scenario.name}: ${scenario.expect}`, async () => {
         scratch = mkdtempSync(join(tmpdir(), 'container-scripts-'));
 
         // The real shell, on a folder where the paths are the local ones.
