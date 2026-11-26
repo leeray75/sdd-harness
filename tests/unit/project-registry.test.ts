@@ -13,9 +13,17 @@ import {
   type ProjectRegistry,
   type ProjectRegistryDeps,
 } from '../../src/main/projects/registry';
-import { environmentFor, localEnvironment, WSL_UNAVAILABLE } from '../../src/main/env';
+import {
+  environmentFor,
+  localEnvironment,
+  UNSUPPORTED_ENVIRONMENT,
+  WSL_UNAVAILABLE,
+} from '../../src/main/env';
 import type { EnvironmentDescriptor } from '../../src/main/env';
+import { SSH_RECONNECT_REASONS } from '../../src/main/env/ssh';
+import { PROJECT_UNREACHABLE } from '../../src/main/projects/registry';
 import { fakeWslTransport } from '../support/fake-wsl-transport';
+import { fakeSshTransport } from '../support/fake-ssh-transport';
 import { DEFAULT_RULES } from '../../src/shared/project-rules';
 import type { Environment } from '../../src/main/env/types';
 import { createProjectStore, type Project } from '../../src/main/projects/store';
@@ -547,5 +555,270 @@ describe('WSL projects through the registry (AC8, D42)', () => {
     expect(made).toEqual([WSL]);
     expect(registry.environmentOf(id)?.path).toBe(posix);
     expect(registry.projects().map((project) => project.environment)).toEqual([WSL]);
+  });
+});
+
+/** Lets the background reconnect at start finish (it resolves on the next turns of the event loop). */
+function settle(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 20));
+}
+
+/** The one stored project of a test, written to the store file before the registry is made. */
+function seedStore(environment: unknown, root: string): string {
+  const id = randomUUID();
+  mkdirSync(join(base, 'data'), { recursive: true });
+  writeFileSync(
+    storePath,
+    JSON.stringify({
+      version: 1,
+      projects: [{ id, name: 'Seeded', environment, root, rules: DEFAULT_RULES }],
+    }),
+  );
+  return id;
+}
+
+describe('connections: unreachable projects, reconnect and the state (AC11, D43)', () => {
+  const silent = { info: () => undefined, error: () => undefined };
+  const serverRecord = (id: string) => ({
+    id,
+    name: 'Server',
+    host: 'server.example',
+    port: 22,
+    user: 'deploy',
+    auth: { method: 'agent' as const },
+    hostKey: null,
+  });
+
+  it('an SSH project is added after its connect, with its root checked, and is connected', async () => {
+    const serverId = 'cccccccc-0000-4000-8000-000000000001';
+    const remote = join(base, 'remote-add');
+    mkdirSync(join(remote, 'srv', 'app'), { recursive: true });
+    const transport = fakeSshTransport(remote);
+    const ssh = {
+      servers: { get: (id: string) => (id === serverId ? serverRecord(id) : null) },
+      secrets: {
+        save: () => undefined,
+        read: () => null,
+        delete: () => false,
+        listNames: () => [],
+      },
+      logger: silent,
+      transportFor: () => transport,
+    };
+    const { registry, startLock } = await makeRegistry({
+      environmentFor: (descriptor) => environmentFor(descriptor, { ssh }),
+    });
+    const added = await registry.addProject({
+      name: 'Remote',
+      environment: { kind: 'ssh', server: serverId },
+      root: '/srv/app',
+    });
+    expect(added.ok).toBe(true);
+    if (!added.ok) return;
+    expect(registry.stateOf(added.project.id)).toBe('connected');
+    expect(registry.environmentOf(added.project.id)).not.toBeNull();
+    expect(startLock).toHaveBeenCalledWith(expect.anything(), '/srv/app');
+  });
+
+  it('an SSH add to a server that cannot be reached is refused with its reason, and stores nothing', async () => {
+    const serverId = 'cccccccc-0000-4000-8000-000000000002';
+    const remote = join(base, 'remote-down');
+    mkdirSync(join(remote, 'srv', 'app'), { recursive: true });
+    const transport = fakeSshTransport(remote, { connectFailure: 'unreachable' });
+    const ssh = {
+      servers: { get: (id: string) => (id === serverId ? serverRecord(id) : null) },
+      secrets: {
+        save: () => undefined,
+        read: () => null,
+        delete: () => false,
+        listNames: () => [],
+      },
+      logger: silent,
+      transportFor: () => transport,
+    };
+    const { registry, startLock } = await makeRegistry({
+      environmentFor: (descriptor) => environmentFor(descriptor, { ssh }),
+    });
+    expect(
+      await registry.addProject({
+        name: 'Down',
+        environment: { kind: 'ssh', server: serverId },
+        root: '/srv/app',
+      }),
+    ).toEqual({ ok: false, reason: SSH_RECONNECT_REASONS.unreachable });
+    expect(startLock).not.toHaveBeenCalled();
+    expect(registry.projects()).toEqual([]);
+  });
+
+  it('a made project that cannot be reached at start is listed, refused with PROJECT_UNREACHABLE, has no watcher, and reconnect brings it back', async () => {
+    const serverId = 'cccccccc-0000-4000-8000-000000000003';
+    const remote = join(base, 'remote-start');
+    mkdirSync(join(remote, 'srv', 'app'), { recursive: true });
+    const transport = fakeSshTransport(remote, { connectFailure: 'unreachable' });
+    const ssh = {
+      servers: { get: (id: string) => (id === serverId ? serverRecord(id) : null) },
+      secrets: {
+        save: () => undefined,
+        read: () => null,
+        delete: () => false,
+        listNames: () => [],
+      },
+      logger: silent,
+      transportFor: () => transport,
+    };
+    const id = seedStore({ kind: 'ssh', server: serverId }, '/srv/app');
+    const { registry, startLock } = await makeRegistry({
+      environmentFor: (descriptor) => environmentFor(descriptor, { ssh }),
+    });
+    await settle();
+    expect(registry.projects().map((project) => project.id)).toEqual([id]);
+    expect(registry.stateOf(id)).toBe('unreachable');
+    expect(startLock).not.toHaveBeenCalled();
+    expect(registry.buildOptionsFor(id)).toBeNull();
+    expect(registry.environmentOf(id)).toBeNull();
+    expect(await registry.handlerFor('approve-spec')(request('approve-spec', id))).toEqual({
+      ok: false,
+      code: 'refused',
+      reason: PROJECT_UNREACHABLE,
+    });
+
+    transport.script.connectFailure = undefined;
+    expect(await registry.reconnect(id)).toEqual({ ok: true });
+    expect(registry.stateOf(id)).toBe('connected');
+    expect(startLock).toHaveBeenCalledWith(expect.anything(), '/srv/app');
+    expect(registry.environmentOf(id)).not.toBeNull();
+  });
+
+  it('a project whose environment cannot be made is listed, refused as unknown, removable, and reconnect makes it again', async () => {
+    const serverId = 'cccccccc-0000-4000-8000-000000000004';
+    const remote = join(base, 'remote-unmade');
+    mkdirSync(join(remote, 'srv', 'app'), { recursive: true });
+    const transport = fakeSshTransport(remote);
+    let known = false;
+    const ssh = {
+      servers: { get: (id: string) => (known && id === serverId ? serverRecord(id) : null) },
+      secrets: {
+        save: () => undefined,
+        read: () => null,
+        delete: () => false,
+        listNames: () => [],
+      },
+      logger: silent,
+      transportFor: () => transport,
+    };
+    const id = seedStore({ kind: 'ssh', server: serverId }, '/srv/app');
+    const { registry, startLock } = await makeRegistry({
+      environmentFor: (descriptor) => environmentFor(descriptor, { ssh }),
+    });
+    expect(registry.projects().map((project) => project.id)).toEqual([id]);
+    expect(registry.stateOf(id)).toBe('unreachable');
+    expect(startLock).not.toHaveBeenCalled();
+    expect(await registry.handlerFor('approve-spec')(request('approve-spec', id))).toEqual({
+      ok: false,
+      code: 'refused',
+      reason: 'no project with this id',
+    });
+    expect(await registry.reconnect(id)).toEqual({
+      ok: false,
+      reason: UNSUPPORTED_ENVIRONMENT,
+    });
+
+    known = true;
+    expect(await registry.reconnect(id)).toEqual({ ok: true });
+    expect(registry.stateOf(id)).toBe('connected');
+    expect(startLock).toHaveBeenCalledWith(expect.anything(), '/srv/app');
+
+    // An unreachable, never-made project is removable too.
+    const removed = await registry.removeProject(id);
+    expect(removed.ok).toBe(true);
+    expect(registry.stateOf(id)).toBeNull();
+  });
+
+  it('a dropped connection moves a project to unreachable, closes its watcher and tells the listeners, and never reconnects by itself', async () => {
+    const serverId = 'cccccccc-0000-4000-8000-000000000005';
+    const remote = join(base, 'remote-drop');
+    mkdirSync(join(remote, 'srv', 'app'), { recursive: true });
+    const transport = fakeSshTransport(remote);
+    await transport.connect();
+    const ssh = {
+      servers: { get: (id: string) => (id === serverId ? serverRecord(id) : null) },
+      secrets: {
+        save: () => undefined,
+        read: () => null,
+        delete: () => false,
+        listNames: () => [],
+      },
+      logger: silent,
+      transportFor: () => transport,
+    };
+    const id = seedStore({ kind: 'ssh', server: serverId }, '/srv/app');
+    const { registry, watchers } = await makeRegistry({
+      environmentFor: (descriptor) => environmentFor(descriptor, { ssh }),
+    });
+    await settle();
+    expect(registry.stateOf(id)).toBe('connected');
+    const events: Array<{ projectId: string; state: string }> = [];
+    const stop = registry.onStateChange((event) => events.push(event));
+
+    const connect = vi.spyOn(transport, 'connect');
+    const before = connect.mock.calls.length;
+    transport.drop();
+    await settle();
+    expect(events).toEqual([{ projectId: id, state: 'unreachable' }]);
+    expect(registry.stateOf(id)).toBe('unreachable');
+    expect(watchers[0]?.close).toHaveBeenCalled();
+    expect(registry.environmentOf(id)).toBeNull();
+    expect(registry.buildOptionsFor(id)).toBeNull();
+    expect(await registry.handlerFor('mark-done')(request('mark-done', id))).toEqual({
+      ok: false,
+      code: 'refused',
+      reason: PROJECT_UNREACHABLE,
+    });
+    expect(connect.mock.calls.length).toBe(before);
+
+    stop();
+    expect(await registry.reconnect(id)).toEqual({ ok: true });
+    expect(registry.stateOf(id)).toBe('connected');
+    expect(events).toEqual([{ projectId: id, state: 'unreachable' }]);
+  });
+
+  it('a WSL project on a stopped distribution is listed unreachable at start, and reconnect restores it once the share is back', async () => {
+    const share = join(base, 'share-stopped');
+    mkdirSync(join(share, 'home', 'u', 'project'), { recursive: true });
+    const transport = fakeWslTransport(share);
+    transport.script.share = join(base, 'share-missing');
+    const id = seedStore({ kind: 'wsl', distribution: 'Ubuntu' }, '/home/u/project');
+    const { registry, startLock } = await makeRegistry({
+      environmentFor: (descriptor) =>
+        environmentFor(descriptor, { platform: 'win32', transportFor: () => transport }),
+    });
+    await settle();
+    expect(registry.projects().map((project) => project.id)).toEqual([id]);
+    expect(registry.stateOf(id)).toBe('unreachable');
+    expect(startLock).not.toHaveBeenCalled();
+    expect(await registry.handlerFor('approve-spec')(request('approve-spec', id))).toEqual({
+      ok: false,
+      code: 'refused',
+      reason: PROJECT_UNREACHABLE,
+    });
+    expect(await registry.removeProject(id)).toMatchObject({ ok: true });
+  });
+
+  it('a WSL project whose share comes back is reconnected by reconnect(id), which restarts its watcher', async () => {
+    const share = join(base, 'share-back');
+    mkdirSync(join(share, 'home', 'u', 'project'), { recursive: true });
+    const transport = fakeWslTransport(share);
+    transport.script.share = join(base, 'share-gone');
+    const id = seedStore({ kind: 'wsl', distribution: 'Ubuntu' }, '/home/u/project');
+    const { registry, startLock } = await makeRegistry({
+      environmentFor: (descriptor) =>
+        environmentFor(descriptor, { platform: 'win32', transportFor: () => transport }),
+    });
+    await settle();
+    expect(registry.stateOf(id)).toBe('unreachable');
+    transport.script.share = undefined;
+    expect(await registry.reconnect(id)).toEqual({ ok: true });
+    expect(registry.stateOf(id)).toBe('connected');
+    expect(startLock).toHaveBeenCalledWith(expect.anything(), '/home/u/project');
   });
 });

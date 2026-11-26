@@ -5,7 +5,12 @@
 // The WSL kind is built on Windows only, and the platform and the transport maker can be injected for
 // the tests.
 
+import type { SshServer } from '../projects/servers';
+import type { SecretStore } from '../secrets/store';
+import type { Logger } from '../log';
 import { localEnvironment } from './local';
+import { createSshEnvironment } from './ssh';
+import { appSshTransport, type SshTransport } from './ssh-transport';
 import { appWslTransport, createWslEnvironment, type WslTransport } from './wsl';
 import { isDistributionName } from './wsl-detect';
 import type { Environment, ToolEnvironment } from './types';
@@ -23,16 +28,52 @@ export const WSL_UNAVAILABLE = 'WSL projects are available only on Windows';
 /** The outcome of choosing a backend. */
 export type EnvironmentResult = { ok: true; env: Environment } | { ok: false; reason: string };
 
-/** The descriptor of a project's environment: the kind, and for WSL the distribution. */
+/** The descriptor of a project's environment: the kind, the WSL distribution, or the SSH server id. */
 export interface EnvironmentDescriptor {
   readonly kind: string;
   readonly distribution?: unknown;
+  readonly server?: unknown;
 }
 
-/** What environmentFor may be given in tests: the platform and the transport maker. */
+/** What the SSH kind needs (D43): the saved servers, the secrets and the log, and the transport maker for tests. */
+export interface SshDeps {
+  /** The saved server with this id, or null. */
+  servers: { get(id: string): SshServer | null };
+  secrets: SecretStore;
+  logger: Logger;
+  /** Makes a server's transport. Default: the app's transport over ssh2. Tests inject a fake. */
+  transportFor?: (server: SshServer) => SshTransport;
+}
+
+/** What environmentFor may be given: the platform and the transport maker for WSL, and the SSH deps. */
 export interface EnvironmentDeps {
   platform?: NodeJS.Platform;
   transportFor?: (distribution: string) => WslTransport;
+  ssh?: SshDeps;
+}
+
+/** A saved server id: a lowercase UUID (D43). */
+const SERVER_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/**
+ * One transport per saved server id (D43): every project on a server shares its client and its connection.
+ * Made when the first project on the server needs one. Making one does not connect.
+ */
+const sshTransports = new Map<string, SshTransport>();
+
+function sshTransportFor(server: SshServer, ssh: SshDeps): SshTransport {
+  let transport = sshTransports.get(server.id);
+  if (transport === undefined) {
+    transport =
+      ssh.transportFor?.(server) ??
+      appSshTransport(server, {
+        secrets: ssh.secrets,
+        logger: ssh.logger,
+        latest: (id) => ssh.servers.get(id),
+      });
+    sshTransports.set(server.id, transport);
+  }
+  return transport;
 }
 
 /**
@@ -55,6 +96,17 @@ export function environmentFor(
     if (!isDistributionName(distribution)) return { ok: false, reason: UNSUPPORTED_ENVIRONMENT };
     const transport = (deps.transportFor ?? appWslTransport)(distribution);
     return { ok: true, env: createWslEnvironment({ distribution, transport }) };
+  }
+  if (descriptor.kind === 'ssh') {
+    // An unknown or malformed server id is refused; nothing is connected here (D43).
+    const id = descriptor.server;
+    if (typeof id !== 'string' || !SERVER_ID.test(id) || deps.ssh === undefined) {
+      return { ok: false, reason: UNSUPPORTED_ENVIRONMENT };
+    }
+    const server = deps.ssh.servers.get(id);
+    if (server === null) return { ok: false, reason: UNSUPPORTED_ENVIRONMENT };
+    const transport = sshTransportFor(server, deps.ssh);
+    return { ok: true, env: createSshEnvironment({ server, transport }) };
   }
   return { ok: false, reason: UNSUPPORTED_ENVIRONMENT };
 }

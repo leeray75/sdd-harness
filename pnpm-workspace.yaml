@@ -4,3 +4,6 @@ allowBuilds:
   electron: true
   esbuild: true
   electron-winstaller: false
+  # ssh2 works without its optional native cpu-features (D43), so neither is built.
+  cpu-features: false
+  ssh2: false

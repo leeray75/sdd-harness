@@ -34,7 +34,7 @@ Users add repo folders on this computer, in WSL, on an SSH server or in a dev co
 
 ## Decide during planning
 
-- SSH library and how credentials are handled
+- SSH library and how credentials are handled: decided in `p4-env-ssh`, recorded as D43 (`ssh2`; credentials from the secret store at connect time; pinned host keys).
 - How dev containers are attached (docker exec vs devcontainer CLI)
 
 ## Suggested subtasks

@@ -15,6 +15,7 @@ import { createSpecHandlers } from './human/spec-handlers';
 import { log } from './log';
 import { createProjectRegistry } from './projects/registry';
 import { createProjectStore, type Project } from './projects/store';
+import { createServerStore, SERVERS_FILE_NAME } from './projects/servers';
 import {
   parseSecretsArgs,
   runSecretsCommand,
@@ -203,6 +204,16 @@ async function setUpProjects(): Promise<void> {
   });
   await store.load();
 
+  // The saved SSH servers (D43) live in app data beside the projects; their secrets are in the secret store.
+  // No IPC reaches them yet (p4-projects-screen).
+  const secrets = createElectronSecretStore();
+  const servers = createServerStore({
+    filePath: join(app.getPath('userData'), SERVERS_FILE_NAME),
+    secrets,
+    logger: log,
+  });
+  await servers.load();
+
   const devProject: Project | undefined =
     devProjectRoot === undefined
       ? undefined
@@ -219,7 +230,8 @@ async function setUpProjects(): Promise<void> {
   const createdRegistry = createProjectRegistry({
     store,
     ...(devProject === undefined ? {} : { devProject }),
-    environmentFor,
+    environmentFor: (descriptor) =>
+      environmentFor(descriptor, { ssh: { servers, secrets, logger: log } }),
     startLock: (env, root) => {
       const lock = createSpecLockWatcher({
         env,

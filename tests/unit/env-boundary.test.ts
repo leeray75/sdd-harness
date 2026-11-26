@@ -105,3 +105,26 @@ describe('only the WSL backend and its detection name wsl.exe (AC10, D42)', () =
     }
   });
 });
+
+describe('only the SSH transport imports ssh2 (AC14, D43)', () => {
+  it('no file under src outside src/main/env/ssh-transport.ts imports ssh2', () => {
+    const files = tsFiles('src');
+    expect(files.length).toBeGreaterThan(40);
+    const importsSsh2 = /(?:from\s*|require\(\s*|import\(\s*|import\s+)['"]ssh2(?:\/[^'"]*)?['"]/;
+    for (const file of files) {
+      if (file === 'src/main/env/ssh-transport.ts') continue;
+      expect(textOf(file), file).not.toMatch(importsSsh2);
+    }
+    expect(textOf('src/main/env/ssh-transport.ts')).toMatch(/from 'ssh2'/);
+  });
+
+  it('the SSH modules under src/main import no node:fs, node:fs/promises or node:child_process (except the env folder)', () => {
+    for (const file of [
+      'src/main/projects/servers.ts',
+      'src/main/env/ssh.ts',
+      'src/main/env/ssh-command.ts',
+    ]) {
+      expect(textOf(file), file).not.toMatch(SYSTEM_IMPORT);
+    }
+  });
+});

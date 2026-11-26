@@ -284,6 +284,13 @@ const gitPart: Environment['git'] = {
   ignoredEntries: (root, env) => git.ignoredEntries(root, env),
 };
 
+/** The local folder is always reachable: its state never changes and its reconnect always works (D43). */
+const connectionPart: Environment['connection'] = {
+  state: () => 'connected',
+  onChange: () => () => undefined,
+  reconnect: async () => ({ ok: true }),
+};
+
 let local: Environment | undefined;
 
 /**
@@ -297,6 +304,7 @@ export function localEnvironment(): Environment {
     process: processPart(),
     watch: watchPart,
     git: gitPart,
+    connection: connectionPart,
   };
   return local;
 }
