@@ -35,7 +35,7 @@ let transport: FakeTransport;
 let env: Environment;
 
 beforeEach(() => {
-  base = mkdtempSync(join(realpathSync(tmpdir()), 'env-wsl-'));
+  base = mkdtempSync(join(realpathSync.native(tmpdir()), 'env-wsl-'));
   share = join(base, 'share');
   mkdirSync(share, { recursive: true });
   transport = fakeWslTransport(share);
@@ -244,7 +244,7 @@ describe('symlink and chmod run a fixed command through the transport (AC2)', ()
 
 /** Whether this machine can make a symbolic link on the temp folder (Windows needs developer mode). */
 function canMakeSymlink(): boolean {
-  const probe = mkdtempSync(join(realpathSync(tmpdir()), 'env-wsl-probe-'));
+  const probe = mkdtempSync(join(realpathSync.native(tmpdir()), 'env-wsl-probe-'));
   try {
     mkdirSync(join(probe, 'target'));
     symlinkSync(join(probe, 'target'), join(probe, 'link'), 'dir');

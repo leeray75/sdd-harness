@@ -26,7 +26,7 @@ let base: string;
 let root: string;
 
 beforeAll(() => {
-  base = mkdtempSync(join(realpathSync(tmpdir()), 'env-recording-'));
+  base = mkdtempSync(join(realpathSync.native(tmpdir()), 'env-recording-'));
   root = join(base, 'root');
   mkdirSync(join(root, 'docs', 'specs', FEATURE), { recursive: true });
   writeFileSync(join(root, 'a.txt'), 'needle in a file');
