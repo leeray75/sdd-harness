@@ -145,7 +145,7 @@ beforeAll(() => {
   writeFileSync(join(onShare, 'a.txt'), 'needle in a file');
   writeFileSync(join(onShare, 'docs', 'specs', FEATURE, 'SPECS.md'), '# Spec\n\nGoals\n');
   mkdirSync(join(share, 'usr', 'bin'), { recursive: true });
-  writeFileSync(join(share, 'usr', 'bin', 'tool'), '#!/bin/sh\n');
+  writeFileSync(join(share, 'usr', 'bin', 'tool'), '#!/bin/sh\n', { mode: 0o755 });
 });
 
 /** A recording WSL environment: a fresh fake transport, and a call list of its own. */
