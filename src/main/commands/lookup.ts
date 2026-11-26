@@ -2,8 +2,8 @@
 // Pure except for the file checks, which only stat files. Runs only in main. Reasons are fixed
 // strings that never echo the program, the arguments or a path.
 
-import { accessSync, constants, statSync } from 'node:fs';
 import { posix, win32 } from 'node:path';
+import type { ToolEnvironment } from '../env/types';
 
 export const NOT_ON_PATH = 'the program was not found on PATH';
 export const UNSAFE_CMD_LINE = "this command can't run safely through cmd.exe";
@@ -39,14 +39,18 @@ function pathsFor(platform: NodeJS.Platform) {
   return platform === 'win32' ? win32 : posix;
 }
 
-/** True for a regular file, and on POSIX an executable one. */
-function isRunnable(file: string, platform: NodeJS.Platform): boolean {
+/** True for a regular file, and on POSIX an executable one, through the environment's files part. */
+async function isRunnable(
+  env: ToolEnvironment,
+  file: string,
+  platform: NodeJS.Platform,
+): Promise<boolean> {
   try {
-    if (!statSync(file).isFile()) {
+    if (!(await env.files.stat(file)).isFile()) {
       return false;
     }
     if (platform !== 'win32') {
-      accessSync(file, constants.X_OK);
+      await env.files.access(file, 'execute');
     }
     return true;
   } catch {
@@ -55,29 +59,31 @@ function isRunnable(file: string, platform: NodeJS.Platform): boolean {
 }
 
 /**
- * The file a bare program name runs. The minimal environment's PATH is searched in order; on
- * Windows each PATHEXT extension is tried first, then the name as given, in each folder. A
- * program that already has a separator is checked as a path and not searched for. Returns the
- * first runnable file, or the fixed reason when there is none.
+ * The file a bare program name runs. The PATH in `vars` is searched in order; on Windows each
+ * PATHEXT extension is tried first, then the name as given, in each folder. A program that already
+ * has a separator is checked as a path and not searched for. Returns the first runnable file, or
+ * the fixed reason when there is none. Checks go through `env.files` (D41).
  */
-export function resolveProgram(
+export async function resolveProgram(
+  env: ToolEnvironment,
   program: string,
-  env: NodeJS.ProcessEnv,
+  vars: NodeJS.ProcessEnv,
   platform: NodeJS.Platform,
-  probe: (file: string) => boolean = (file) => isRunnable(file, platform),
-): ProgramLookup {
+): Promise<ProgramLookup> {
   if (program.length === 0) {
     return { ok: false, reason: NOT_ON_PATH };
   }
   const path = pathsFor(platform);
   if (/[\\/]/.test(program)) {
-    return probe(program) ? { ok: true, file: program } : { ok: false, reason: NOT_ON_PATH };
+    return (await isRunnable(env, program, platform))
+      ? { ok: true, file: program }
+      : { ok: false, reason: NOT_ON_PATH };
   }
-  const pathValue = valueOf(env, 'PATH', platform) ?? '';
+  const pathValue = valueOf(vars, 'PATH', platform) ?? '';
   const folders = pathValue.split(platform === 'win32' ? ';' : ':').filter((dir) => dir.length > 0);
   const extensions =
     platform === 'win32'
-      ? (valueOf(env, 'PATHEXT', platform) ?? DEFAULT_PATHEXT)
+      ? (valueOf(vars, 'PATHEXT', platform) ?? DEFAULT_PATHEXT)
           .split(';')
           .filter((ext) => ext.length > 0)
       : [];
@@ -85,7 +91,7 @@ export function resolveProgram(
     const names = [...extensions.map((ext) => program + ext), program];
     for (const name of names) {
       const file = path.join(folder, name);
-      if (probe(file)) {
+      if (await isRunnable(env, file, platform)) {
         return { ok: true, file };
       }
     }

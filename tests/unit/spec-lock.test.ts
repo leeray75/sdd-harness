@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync
 import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { localEnvironment } from '../../src/main/env';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   approvalOf,
@@ -70,74 +71,74 @@ function state(feature: string, sha256: string, editing = false): SpecStateFile 
 /** Writes a SPECS.md for `feature` and a state that locks it to the file's current hash. */
 async function lockFeature(feature: string, text = SPEC, editing = false): Promise<void> {
   await put(`${feature}/SPECS.md`, text);
-  const hash = await hashSpec(root, feature);
+  const hash = await hashSpec(localEnvironment(), root, feature);
   if (hash === null) throw new Error('the test spec could not be hashed');
-  const written = await writeSpecState(root, state(feature, hash, editing));
+  const written = await writeSpecState(localEnvironment(), root, state(feature, hash, editing));
   expect(written.ok).toBe(true);
 }
 
 describe('approval round trip at the lock level (AC1)', () => {
   it('is approved right after the lock is written, and changed after an edit', async () => {
     await lockFeature('p3-x');
-    expect(await approvalOf(root, 'p3-x')).toBe('approved');
+    expect(await approvalOf(localEnvironment(), root, 'p3-x')).toBe('approved');
     await put('p3-x/SPECS.md', `${SPEC}\nmore\n`);
-    expect(await approvalOf(root, 'p3-x')).toBe('changed');
+    expect(await approvalOf(localEnvironment(), root, 'p3-x')).toBe('changed');
   });
 
   it('stays approved after a CRLF-only re-save, and after a BOM is added', async () => {
     await lockFeature('p3-x');
     await put('p3-x/SPECS.md', SPEC.replace(/\n/g, '\r\n'));
-    expect(await approvalOf(root, 'p3-x')).toBe('approved');
+    expect(await approvalOf(localEnvironment(), root, 'p3-x')).toBe('approved');
     await put('p3-x/SPECS.md', '﻿' + SPEC);
-    expect(await approvalOf(root, 'p3-x')).toBe('approved');
+    expect(await approvalOf(localEnvironment(), root, 'p3-x')).toBe('approved');
   });
 
   it('is none with no state file, and none when another feature is locked', async () => {
     await put('p3-x/SPECS.md', SPEC);
-    expect(await approvalOf(root, 'p3-x')).toBe('none');
+    expect(await approvalOf(localEnvironment(), root, 'p3-x')).toBe('none');
     await lockFeature('p3-other');
-    expect(await approvalOf(root, 'p3-x')).toBe('none');
+    expect(await approvalOf(localEnvironment(), root, 'p3-x')).toBe('none');
   });
 
   it('is unchecked when SPECS.md is missing, and when the state file is malformed', async () => {
     await lockFeature('p3-x');
     await rm(join(specsDir(), 'p3-x', 'SPECS.md'));
-    expect(await approvalOf(root, 'p3-x')).toBe('unchecked');
+    expect(await approvalOf(localEnvironment(), root, 'p3-x')).toBe('unchecked');
     await put('p3-x/SPECS.md', SPEC);
     await writeFile(join(specsDir(), '.sdd-state.json'), '{broken');
-    expect(await approvalOf(root, 'p3-x')).toBe('unchecked');
+    expect(await approvalOf(localEnvironment(), root, 'p3-x')).toBe('unchecked');
   });
 
   it('is changed with editing true, even when the hash still matches', async () => {
     await lockFeature('p3-x', SPEC, true);
-    expect(await approvalOf(root, 'p3-x')).toBe('changed');
+    expect(await approvalOf(localEnvironment(), root, 'p3-x')).toBe('changed');
   });
 
   it('is none for a null feature with no lock, and unchecked for a null feature with a bad lock', async () => {
-    expect(await approvalOf(root, null)).toBe('none');
+    expect(await approvalOf(localEnvironment(), root, null)).toBe('none');
     await put('p3-x/SPECS.md', SPEC);
     await writeFile(join(specsDir(), '.sdd-state.json'), 'nope');
-    expect(await approvalOf(root, null)).toBe('unchecked');
+    expect(await approvalOf(localEnvironment(), root, null)).toBe('unchecked');
   });
 });
 
 describe('readSpecState (AC2)', () => {
   it('reports absent when docs/specs or the state file is missing', async () => {
-    expect(await readSpecState(root)).toEqual({ kind: 'absent' });
+    expect(await readSpecState(localEnvironment(), root)).toEqual({ kind: 'absent' });
     await put('p3-x/SPECS.md', SPEC);
-    expect(await readSpecState(root)).toEqual({ kind: 'absent' });
+    expect(await readSpecState(localEnvironment(), root)).toEqual({ kind: 'absent' });
   });
 
   it('reads a valid state file', async () => {
     await lockFeature('p3-x');
-    const read = await readSpecState(root);
+    const read = await readSpecState(localEnvironment(), root);
     expect(read.kind).toBe('ok');
     if (read.kind === 'ok') expect(read.state.feature).toBe('p3-x');
   });
 
   it('reports an oversized state file as unreadable, without reading it whole', async () => {
     await put('.sdd-state.json', 'x'.repeat(MAX_SPEC_STATE_BYTES + 1));
-    expect(await readSpecState(root)).toEqual({
+    expect(await readSpecState(localEnvironment(), root)).toEqual({
       kind: 'unreadable',
       reason: 'the file is over the size cap',
     });
@@ -145,17 +146,20 @@ describe('readSpecState (AC2)', () => {
 
   it('reports a state file that is a directory as unreadable', async () => {
     mkdirSync(join(specsDir(), '.sdd-state.json'), { recursive: true });
-    expect(await readSpecState(root)).toEqual({ kind: 'unreadable', reason: 'not a regular file' });
+    expect(await readSpecState(localEnvironment(), root)).toEqual({
+      kind: 'unreadable',
+      reason: 'not a regular file',
+    });
   });
 
   it('reports a malformed or wrong-version file as unreadable with the parser reason', async () => {
     await put('.sdd-state.json', 'not json');
-    expect(await readSpecState(root)).toEqual({
+    expect(await readSpecState(localEnvironment(), root)).toEqual({
       kind: 'unreadable',
       reason: 'the state file is not valid JSON',
     });
     await put('.sdd-state.json', JSON.stringify({ ...state('p3-x', 'a'.repeat(64)), version: 9 }));
-    expect(await readSpecState(root)).toEqual({
+    expect(await readSpecState(localEnvironment(), root)).toEqual({
       kind: 'unreadable',
       reason: 'the state file version is not supported',
     });
@@ -166,7 +170,7 @@ describe('readSpecState (AC2)', () => {
     async () => {
       await put('target.json', serializeSpecState(state('p3-x', 'a'.repeat(64))));
       await symlink(join(specsDir(), 'target.json'), join(specsDir(), '.sdd-state.json'));
-      expect(await readSpecState(root)).toEqual({
+      expect(await readSpecState(localEnvironment(), root)).toEqual({
         kind: 'unreadable',
         reason: 'a symbolic link is not followed',
       });
@@ -177,23 +181,23 @@ describe('readSpecState (AC2)', () => {
 describe('writeSpecState (AC2)', () => {
   it('writes the file and leaves no temp file behind', async () => {
     await put('p3-x/SPECS.md', SPEC);
-    const result = await writeSpecState(root, state('p3-x', 'a'.repeat(64)));
+    const result = await writeSpecState(localEnvironment(), root, state('p3-x', 'a'.repeat(64)));
     expect(result).toEqual({ ok: true });
     expect(readdirSync(specsDir()).filter((name) => name.endsWith('.tmp'))).toEqual([]);
-    const read = await readSpecState(root);
+    const read = await readSpecState(localEnvironment(), root);
     expect(read.kind).toBe('ok');
   });
 
   it('leaves no temp file behind when the rename fails, and reports the failure', async () => {
     // A folder where the state file should be: renaming a file onto it fails on every OS.
     mkdirSync(join(specsDir(), '.sdd-state.json'), { recursive: true });
-    const result = await writeSpecState(root, state('p3-x', 'a'.repeat(64)));
+    const result = await writeSpecState(localEnvironment(), root, state('p3-x', 'a'.repeat(64)));
     expect(result.ok).toBe(false);
     expect(readdirSync(specsDir()).filter((name) => name.endsWith('.tmp'))).toEqual([]);
   });
 
   it('reports a missing docs/specs without throwing', async () => {
-    const result = await writeSpecState(root, state('p3-x', 'a'.repeat(64)));
+    const result = await writeSpecState(localEnvironment(), root, state('p3-x', 'a'.repeat(64)));
     expect(result).toEqual({ ok: false, reason: 'docs/specs is not a folder' });
   });
 });
@@ -201,24 +205,24 @@ describe('writeSpecState (AC2)', () => {
 describe('hashSpec', () => {
   it('hashes the normalized text, so a BOM and CRLF do not change it', async () => {
     await put('p3-x/SPECS.md', SPEC);
-    const plain = await hashSpec(root, 'p3-x');
+    const plain = await hashSpec(localEnvironment(), root, 'p3-x');
     await put('p3-x/SPECS.md', '﻿' + SPEC.replace(/\n/g, '\r\n'));
-    expect(await hashSpec(root, 'p3-x')).toBe(plain);
+    expect(await hashSpec(localEnvironment(), root, 'p3-x')).toBe(plain);
     expect(plain).toMatch(/^[0-9a-f]{64}$/);
   });
 
   it('is null for a missing file, an invalid feature, and a file over the cap', async () => {
-    expect(await hashSpec(root, 'p3-x')).toBeNull();
-    expect(await hashSpec(root, 'a--b')).toBeNull();
+    expect(await hashSpec(localEnvironment(), root, 'p3-x')).toBeNull();
+    expect(await hashSpec(localEnvironment(), root, 'a--b')).toBeNull();
     await put('p3-x/SPECS.md', 'x'.repeat(MAX_SPEC_FILE_BYTES + 1));
-    expect(await hashSpec(root, 'p3-x')).toBeNull();
+    expect(await hashSpec(localEnvironment(), root, 'p3-x')).toBeNull();
   });
 
   it.skipIf(!FILE_SYMLINKS)('is null for a symbolic link to a spec', async () => {
     await put('target/SPECS.md', SPEC);
     await mkdir(join(specsDir(), 'p3-x'), { recursive: true });
     await symlink(join(specsDir(), 'target', 'SPECS.md'), join(specsDir(), 'p3-x', 'SPECS.md'));
-    expect(await hashSpec(root, 'p3-x')).toBeNull();
+    expect(await hashSpec(localEnvironment(), root, 'p3-x')).toBeNull();
   });
 });
 
@@ -249,25 +253,25 @@ describe('scanSpecFoldersWithLock (AC5)', () => {
   it('detects a locked folder with no ledger as spec-approved, and an edited one as spec-changed', async () => {
     await put('p3-x/PLAN.md', 'Status: approved\n');
     await lockFeature('p3-x');
-    const approved = await scanSpecFoldersWithLock(root);
+    const approved = await scanSpecFoldersWithLock(localEnvironment(), root);
     expect(approved.folders[0]?.detection.node).toBe('spec-approved');
     expect(approved.current).toBe('p3-x');
 
     await put('p3-x/SPECS.md', `${SPEC}\nedited\n`);
-    const changed = await scanSpecFoldersWithLock(root);
+    const changed = await scanSpecFoldersWithLock(localEnvironment(), root);
     expect(changed.folders[0]?.detection.node).toBe('spec-changed');
   });
 
   it('gives the other folders none, and picks the newest folder when there is no lock', async () => {
     await put('alpha/PLAN.md', 'Status: draft\n');
     await lockFeature('p3-x');
-    const locked = await scanSpecFoldersWithLock(root);
+    const locked = await scanSpecFoldersWithLock(localEnvironment(), root);
     const alpha = locked.folders.find((folder) => folder.feature === 'alpha');
     expect(alpha?.detection.node).toBe('planning');
     expect(locked.current).toBe('p3-x');
 
     await rm(join(specsDir(), '.sdd-state.json'));
-    const unlocked = await scanSpecFoldersWithLock(root);
+    const unlocked = await scanSpecFoldersWithLock(localEnvironment(), root);
     expect(unlocked.current).not.toBeNull();
     expect(unlocked.folders.every((folder) => folder.detection.node !== 'spec-approved')).toBe(
       true,
@@ -281,7 +285,7 @@ describe('scanSpecFolders with a throwing approvalOf (AC5)', () => {
     await put('alpha/SPECS.md', '---\nstatus: draft\nticket:\n---\n');
     await put('beta/PLAN.md', 'Status: draft\n');
     await put('beta/SPECS.md', '---\nstatus: draft\nticket:\n---\n');
-    const folders = await scanSpecFolders(root, (feature) => {
+    const folders = await scanSpecFolders(localEnvironment(), root, (feature) => {
       if (feature === 'alpha') throw new Error('boom');
       return 'none';
     });

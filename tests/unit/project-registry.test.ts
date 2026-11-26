@@ -8,7 +8,13 @@ import { createShipHandlers } from '../../src/main/human/ship-handlers';
 import { createSpecHandlers } from '../../src/main/human/spec-handlers';
 import type { Logger } from '../../src/main/log';
 import { DEFAULT_POLICY_CONTEXT, type PolicyContext } from '../../src/main/policy/context';
-import { createProjectRegistry, type ProjectRegistry } from '../../src/main/projects/registry';
+import {
+  createProjectRegistry,
+  type ProjectRegistry,
+  type ProjectRegistryDeps,
+} from '../../src/main/projects/registry';
+import { environmentFor, localEnvironment } from '../../src/main/env';
+import type { Environment } from '../../src/main/env/types';
 import { createProjectStore, type Project } from '../../src/main/projects/store';
 import type { ToolRunner } from '../../src/main/agent/router';
 import { createInProcessJobRunner } from '../../src/main/workflow/job-runner';
@@ -134,9 +140,14 @@ function specStatus(folder: string): string {
 }
 
 /** Builds a registry over a fresh store, with fake watchers that are recorded. */
-async function makeRegistry(options: { devProject?: Project } = {}) {
+async function makeRegistry(
+  options: {
+    devProject?: Project;
+    environmentFor?: ProjectRegistryDeps['environmentFor'];
+  } = {},
+) {
   const watchers: FakeWatcher[] = [];
-  const startLock = vi.fn((root: string) => {
+  const startLock = vi.fn((_env: Environment, root: string) => {
     const value: SpecLockValue = { feature: null, approval: 'unchecked' };
     const watcher: FakeWatcher = {
       root,
@@ -158,11 +169,13 @@ async function makeRegistry(options: { devProject?: Project } = {}) {
   const registry: ProjectRegistry = createProjectRegistry({
     store,
     ...(options.devProject === undefined ? {} : { devProject: options.devProject }),
+    environmentFor: options.environmentFor ?? environmentFor,
     startLock,
-    makeSpecHandlers: ({ project, refresh }) =>
-      createSpecHandlers({ root: project.root, now: () => NOW, onLockChanged: refresh }),
-    makeShipHandlers: ({ project, refresh, controllerNode }) =>
+    makeSpecHandlers: ({ project, env, refresh }) =>
+      createSpecHandlers({ env, root: project.root, now: () => NOW, onLockChanged: refresh }),
+    makeShipHandlers: ({ project, env, refresh, controllerNode }) =>
       createShipHandlers({
+        env,
         root: project.root,
         onLockChanged: refresh,
         controllerNode,
@@ -218,6 +231,7 @@ describe('the project list (G4, G6)', () => {
           root: projB,
           rules: { roundLimit: 3, modelPolicy: 'defaults', commitFormat: '{ticket}: {summary}' },
         },
+        environmentFor,
         startLock: () => ({}) as SpecLockWatcher,
         makeSpecHandlers: () => ({}) as never,
         makeShipHandlers: () => ({}) as never,
@@ -406,6 +420,7 @@ describe('build options from the project rules (AC4, G3)', () => {
       reviewer: [{ text: REVIEW_SPEC_1 }],
     });
     const runner = createInProcessJobRunner({
+      env: localEnvironment(),
       root: projA,
       provider: scripted,
       model: 'test-model',
@@ -413,6 +428,7 @@ describe('build options from the project rules (AC4, G3)', () => {
       toolRunner: noTool,
     });
     const created = await createBuildController({
+      env: localEnvironment(),
       root: projA,
       feature: FEATURE,
       runner,
@@ -432,5 +448,38 @@ describe('build options from the project rules (AC4, G3)', () => {
       (entry: ScriptedRequest) => entry.job === 'reviewer',
     );
     expect(reviewerRuns).toHaveLength(1);
+  });
+});
+
+describe('environments (AC8, D41)', () => {
+  it('gives each project one environment, and environmentOf returns it or null for an unknown id', async () => {
+    const { registry, startLock } = await makeRegistry();
+    const added = await registry.addProject({ name: 'E', environment: LOCAL, root: projA });
+    expect(added.ok).toBe(true);
+    if (!added.ok) return;
+    const env = registry.environmentOf(added.project.id);
+    expect(env).toBe(localEnvironment());
+    expect(registry.environmentOf('no-such-project')).toBeNull();
+    expect(startLock).toHaveBeenCalledWith(env, projA);
+  });
+
+  it('refuses a project whose environment cannot be made, through handlerFor, with no watcher', async () => {
+    const { registry, startLock } = await makeRegistry({
+      devProject: {
+        id: 'dev',
+        name: 'dev',
+        environment: LOCAL,
+        root: projB,
+        rules: { roundLimit: 3, modelPolicy: 'defaults', commitFormat: '{ticket}: {summary}' },
+      },
+      environmentFor: () => ({ ok: false, reason: 'the environment is not available' }),
+    });
+    expect(startLock).not.toHaveBeenCalled();
+    expect(registry.environmentOf('dev')).toBeNull();
+    expect(await registry.handlerFor('approve-spec')(request('approve-spec', 'dev'))).toEqual({
+      ok: false,
+      code: 'refused',
+      reason: 'no project with this id',
+    });
   });
 });

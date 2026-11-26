@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, unlinkSync, writeFileSync 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { localEnvironment, toolEnvironment } from '../../src/main/env';
 import { hasGitSegment, resolveInRoot, type ResolvedPath } from '../../src/main/tools/paths';
 
 /** True when this OS lets the test process create a symlink (Windows may refuse). */
@@ -82,98 +83,165 @@ function expectResolved(result: ResolvedPath): Extract<ResolvedPath, { ok: true 
 
 describe('resolveInRoot: root and path checks', () => {
   it('refuses a missing root, an empty root, and a root that is a file', async () => {
-    expect(expectRefused(await resolveInRoot(undefined, 'a.txt', { mustExist: true }))).toContain(
-      'no root',
-    );
-    expect(expectRefused(await resolveInRoot('', 'a.txt', { mustExist: true }))).toContain(
-      'no root',
-    );
     expect(
-      expectRefused(await resolveInRoot(join(base, 'missing'), 'a.txt', { mustExist: true })),
+      expectRefused(
+        await resolveInRoot(toolEnvironment(localEnvironment()), undefined, 'a.txt', {
+          mustExist: true,
+        }),
+      ),
+    ).toContain('no root');
+    expect(
+      expectRefused(
+        await resolveInRoot(toolEnvironment(localEnvironment()), '', 'a.txt', { mustExist: true }),
+      ),
+    ).toContain('no root');
+    expect(
+      expectRefused(
+        await resolveInRoot(toolEnvironment(localEnvironment()), join(base, 'missing'), 'a.txt', {
+          mustExist: true,
+        }),
+      ),
     ).toContain('root');
     expect(
-      expectRefused(await resolveInRoot(join(root, 'a.txt'), 'x.txt', { mustExist: false })),
+      expectRefused(
+        await resolveInRoot(toolEnvironment(localEnvironment()), join(root, 'a.txt'), 'x.txt', {
+          mustExist: false,
+        }),
+      ),
     ).toContain('root');
   });
 
   it('refuses an empty or non-string path', async () => {
     for (const bad of ['', 7, null, undefined, ['a.txt']]) {
-      expect(expectRefused(await resolveInRoot(root, bad, { mustExist: false }))).toContain(
-        'non-empty string',
-      );
+      expect(
+        expectRefused(
+          await resolveInRoot(toolEnvironment(localEnvironment()), root, bad, { mustExist: false }),
+        ),
+      ).toContain('non-empty string');
     }
   });
 
   it('refuses an absolute path, even one inside the root', async () => {
     const reason = expectRefused(
-      await resolveInRoot(root, join(root, 'a.txt'), { mustExist: true }),
+      await resolveInRoot(toolEnvironment(localEnvironment()), root, join(root, 'a.txt'), {
+        mustExist: true,
+      }),
     );
     expect(reason).toContain('absolute');
-    expect(expectRefused(await resolveInRoot(root, '/etc/passwd', { mustExist: true }))).toContain(
-      'absolute',
-    );
+    expect(
+      expectRefused(
+        await resolveInRoot(toolEnvironment(localEnvironment()), root, '/etc/passwd', {
+          mustExist: true,
+        }),
+      ),
+    ).toContain('absolute');
   });
 
   it('refuses `..` paths that escape, including ones that go through a folder', async () => {
     expect(
-      expectRefused(await resolveInRoot(root, '../outside/secret.txt', { mustExist: true })),
+      expectRefused(
+        await resolveInRoot(toolEnvironment(localEnvironment()), root, '../outside/secret.txt', {
+          mustExist: true,
+        }),
+      ),
     ).toContain('outside');
     expect(
-      expectRefused(await resolveInRoot(root, 'sub/../../outside/secret.txt', { mustExist: true })),
+      expectRefused(
+        await resolveInRoot(
+          toolEnvironment(localEnvironment()),
+          root,
+          'sub/../../outside/secret.txt',
+          { mustExist: true },
+        ),
+      ),
     ).toContain('outside');
-    expect(expectRefused(await resolveInRoot(root, '..', { mustExist: true }))).toContain(
-      'outside',
-    );
     expect(
-      expectRefused(await resolveInRoot(root, '../new-file.txt', { mustExist: false })),
+      expectRefused(
+        await resolveInRoot(toolEnvironment(localEnvironment()), root, '..', { mustExist: true }),
+      ),
+    ).toContain('outside');
+    expect(
+      expectRefused(
+        await resolveInRoot(toolEnvironment(localEnvironment()), root, '../new-file.txt', {
+          mustExist: false,
+        }),
+      ),
     ).toContain('outside');
   });
 
   it('allows a `..` path that stays inside the root', async () => {
-    const found = expectResolved(await resolveInRoot(root, 'sub/../a.txt', { mustExist: true }));
+    const found = expectResolved(
+      await resolveInRoot(toolEnvironment(localEnvironment()), root, 'sub/../a.txt', {
+        mustExist: true,
+      }),
+    );
     expect(found.rel).toBe('a.txt');
   });
 
   it('never echoes the path in a reason', async () => {
     const reason = expectRefused(
-      await resolveInRoot(root, 'secret-name-7731/../../x', { mustExist: true }),
+      await resolveInRoot(toolEnvironment(localEnvironment()), root, 'secret-name-7731/../../x', {
+        mustExist: true,
+      }),
     );
     expect(reason).not.toContain('secret-name');
     expect(
-      expectRefused(await resolveInRoot(root, 'missing-7731.txt', { mustExist: true })),
+      expectRefused(
+        await resolveInRoot(toolEnvironment(localEnvironment()), root, 'missing-7731.txt', {
+          mustExist: true,
+        }),
+      ),
     ).not.toContain('missing-7731');
   });
 });
 
 describe('resolveInRoot: existing and missing files', () => {
   it('resolves an existing file to its real target and root-relative path', async () => {
-    const found = expectResolved(await resolveInRoot(root, 'sub/inner.txt', { mustExist: true }));
+    const found = expectResolved(
+      await resolveInRoot(toolEnvironment(localEnvironment()), root, 'sub/inner.txt', {
+        mustExist: true,
+      }),
+    );
     expect(found.rel).toBe('sub/inner.txt');
     expect(found.target.endsWith('inner.txt')).toBe(true);
   });
 
   it('refuses a missing file when it must exist', async () => {
-    expect(expectRefused(await resolveInRoot(root, 'nope.txt', { mustExist: true }))).toContain(
-      'does not exist',
-    );
+    expect(
+      expectRefused(
+        await resolveInRoot(toolEnvironment(localEnvironment()), root, 'nope.txt', {
+          mustExist: true,
+        }),
+      ),
+    ).toContain('does not exist');
   });
 
   it('allows a file that does not exist yet when its parent exists inside the root', async () => {
-    const found = expectResolved(await resolveInRoot(root, 'sub/new.txt', { mustExist: false }));
+    const found = expectResolved(
+      await resolveInRoot(toolEnvironment(localEnvironment()), root, 'sub/new.txt', {
+        mustExist: false,
+      }),
+    );
     expect(found.rel).toBe('sub/new.txt');
     expect(found.target).toBe(join(found.root, 'sub', 'new.txt'));
   });
 
   it('allows a file whose missing parent folders are plain names inside the root', async () => {
     const found = expectResolved(
-      await resolveInRoot(root, 'deep/er/new.txt', { mustExist: false }),
+      await resolveInRoot(toolEnvironment(localEnvironment()), root, 'deep/er/new.txt', {
+        mustExist: false,
+      }),
     );
     expect(found.rel).toBe('deep/er/new.txt');
   });
 
   it('refuses a missing file whose parent is a file, not a folder', async () => {
     expect(
-      expectRefused(await resolveInRoot(root, 'a.txt/child.txt', { mustExist: false })),
+      expectRefused(
+        await resolveInRoot(toolEnvironment(localEnvironment()), root, 'a.txt/child.txt', {
+          mustExist: false,
+        }),
+      ),
     ).toContain('not a folder');
   });
 });
@@ -190,20 +258,40 @@ describe('resolveInRoot: .git refusal', () => {
     '.git /config',
     'x\\.git\\config',
   ])('refuses %s', async (path) => {
-    expect(expectRefused(await resolveInRoot(root, path, { mustExist: false }))).toContain('.git');
+    expect(
+      expectRefused(
+        await resolveInRoot(toolEnvironment(localEnvironment()), root, path, { mustExist: false }),
+      ),
+    ).toContain('.git');
   });
 
   it('allows names that only contain git', async () => {
     writeFileSync(join(root, 'gitfile.txt'), 'x');
     mkdirSync(join(root, '.github'));
-    expectResolved(await resolveInRoot(root, 'gitfile.txt', { mustExist: true }));
-    expectResolved(await resolveInRoot(root, '.github', { mustExist: true }));
-    expectResolved(await resolveInRoot(root, 'my.git-notes.txt', { mustExist: false }));
+    expectResolved(
+      await resolveInRoot(toolEnvironment(localEnvironment()), root, 'gitfile.txt', {
+        mustExist: true,
+      }),
+    );
+    expectResolved(
+      await resolveInRoot(toolEnvironment(localEnvironment()), root, '.github', {
+        mustExist: true,
+      }),
+    );
+    expectResolved(
+      await resolveInRoot(toolEnvironment(localEnvironment()), root, 'my.git-notes.txt', {
+        mustExist: false,
+      }),
+    );
   });
 
   it('refuses a missing .git path too', async () => {
     expect(
-      expectRefused(await resolveInRoot(root, '.git/new.txt', { mustExist: false })),
+      expectRefused(
+        await resolveInRoot(toolEnvironment(localEnvironment()), root, '.git/new.txt', {
+          mustExist: false,
+        }),
+      ),
     ).toContain('.git');
   });
 
@@ -218,7 +306,11 @@ describe('resolveInRoot: .git refusal', () => {
     symlinkSync(join(root, '.git'), join(root, 'git-link'), 'junction');
     try {
       expect(
-        expectRefused(await resolveInRoot(root, 'git-link/config', { mustExist: true })),
+        expectRefused(
+          await resolveInRoot(toolEnvironment(localEnvironment()), root, 'git-link/config', {
+            mustExist: true,
+          }),
+        ),
       ).toContain('.git');
     } finally {
       unlinkSync(join(root, 'git-link'));
@@ -231,7 +323,11 @@ describe('resolveInRoot: symlinks', () => {
     symlinkSync(join(outside, 'secret.txt'), join(root, 'file-escape.txt'), 'file');
     try {
       expect(
-        expectRefused(await resolveInRoot(root, 'file-escape.txt', { mustExist: true })),
+        expectRefused(
+          await resolveInRoot(toolEnvironment(localEnvironment()), root, 'file-escape.txt', {
+            mustExist: true,
+          }),
+        ),
       ).toContain('outside');
     } finally {
       unlinkSync(join(root, 'file-escape.txt'));
@@ -242,7 +338,9 @@ describe('resolveInRoot: symlinks', () => {
     symlinkSync(join(root, 'a.txt'), join(root, 'inner-link.txt'), 'file');
     try {
       const found = expectResolved(
-        await resolveInRoot(root, 'inner-link.txt', { mustExist: true }),
+        await resolveInRoot(toolEnvironment(localEnvironment()), root, 'inner-link.txt', {
+          mustExist: true,
+        }),
       );
       expect(found.rel).toBe('a.txt');
     } finally {
@@ -256,10 +354,18 @@ describe('resolveInRoot: symlinks', () => {
       symlinkSync(outside, join(root, 'out-dir'), 'junction');
       try {
         expect(
-          expectRefused(await resolveInRoot(root, 'out-dir/new.txt', { mustExist: false })),
+          expectRefused(
+            await resolveInRoot(toolEnvironment(localEnvironment()), root, 'out-dir/new.txt', {
+              mustExist: false,
+            }),
+          ),
         ).toContain('outside');
         expect(
-          expectRefused(await resolveInRoot(root, 'out-dir/secret.txt', { mustExist: true })),
+          expectRefused(
+            await resolveInRoot(toolEnvironment(localEnvironment()), root, 'out-dir/secret.txt', {
+              mustExist: true,
+            }),
+          ),
         ).toContain('outside');
       } finally {
         unlinkSync(join(root, 'out-dir'));
@@ -274,7 +380,11 @@ describe('resolveInRoot: symlinks', () => {
       symlinkSync(join(outside, 'not-yet.txt'), join(root, 'dangling.txt'), 'file');
       try {
         expect(
-          expectRefused(await resolveInRoot(root, 'dangling.txt', { mustExist: true })),
+          expectRefused(
+            await resolveInRoot(toolEnvironment(localEnvironment()), root, 'dangling.txt', {
+              mustExist: true,
+            }),
+          ),
         ).toContain('does not exist');
       } finally {
         unlinkSync(join(root, 'dangling.txt'));

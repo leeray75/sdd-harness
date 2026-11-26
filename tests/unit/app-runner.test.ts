@@ -6,6 +6,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:f
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { localEnvironment } from '../../src/main/env';
 import { createAppJobRunner } from '../../src/main/workflow/app-runner';
 import type { LiveSpec } from '../../src/main/policy/context';
 import { formatRuleEvent, makeRuleEvent, type RuleLogger } from '../../src/main/policy/rule-event';
@@ -54,7 +55,8 @@ describe('createAppJobRunner (AC5)', () => {
     const provider = createScriptedProvider(script);
     const { logger, info, error } = recordingLogger();
     let live: LiveSpec = { feature: null, spec: 'none' };
-    const runner = createAppJobRunner({
+    const runner = await createAppJobRunner({
+      env: localEnvironment(),
       root,
       provider,
       model: 'test-model',

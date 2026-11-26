@@ -2,8 +2,7 @@
 // Rust are read; a missing, unreadable or unparseable marker contributes nothing and never
 // throws. The reader is synchronous and runs once, at host start. Runs only in main.
 
-import { lstatSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import type { DirEntryInfo, FileStat, ToolEnvironment } from '../env/types';
 
 /** One command the project runs: a bare program name and its exact arguments. */
 export interface CommandForm {
@@ -27,30 +26,44 @@ export interface MarkerFiles {
 /** Largest marker file read, in bytes. Anything bigger is treated as unreadable. */
 export const MARKER_MAX_BYTES = 1024 * 1024;
 
-/** A reader over one project root. Symlinks are not followed, so a marker cannot point outside. */
-export function rootMarkerFiles(root: string, maxBytes: number = MARKER_MAX_BYTES): MarkerFiles {
-  const statOf = (relPath: string) => {
-    try {
-      return lstatSync(join(root, relPath));
-    } catch {
-      return null;
+/**
+ * A reader over one project root, taken through the environment (D41). It reads the root's own
+ * files once, up front, so detectCommands can stay a pure function over the snapshot. A file is a
+ * regular file (a folder or a symlink is not one), and its text is kept when it is within
+ * `maxBytes`. Names below the root are not read, so they are absent. Nothing outside the root is
+ * followed.
+ */
+export async function rootMarkerFiles(
+  env: ToolEnvironment,
+  root: string,
+  maxBytes: number = MARKER_MAX_BYTES,
+): Promise<MarkerFiles> {
+  const present = new Set<string>();
+  const texts = new Map<string, string>();
+  let entries: DirEntryInfo[];
+  try {
+    entries = await env.files.readdir(root);
+  } catch {
+    entries = [];
+  }
+  for (const entry of entries) {
+    if (!entry.isFile()) {
+      continue;
     }
-  };
+    present.add(entry.name);
+    const path = env.path.join(root, entry.name);
+    try {
+      const stat: FileStat = await env.files.lstat(path);
+      if (stat.isFile() && stat.size <= maxBytes) {
+        texts.set(entry.name, (await env.files.readFile(path)).toString('utf8'));
+      }
+    } catch {
+      // Unreadable or gone: the detector sees no text for it, as before.
+    }
+  }
   return {
-    exists(relPath) {
-      return statOf(relPath)?.isFile() === true;
-    },
-    readText(relPath) {
-      const stat = statOf(relPath);
-      if (stat === null || !stat.isFile() || stat.size > maxBytes) {
-        return null;
-      }
-      try {
-        return readFileSync(join(root, relPath), 'utf8');
-      } catch {
-        return null;
-      }
-    },
+    exists: (relPath) => present.has(relPath),
+    readText: (relPath) => texts.get(relPath) ?? null,
   };
 }
 

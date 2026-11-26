@@ -63,6 +63,8 @@ The writer's commands get the network limit. The reviewer's do not.
 | macOS                                        | When `/usr/bin/sandbox-exec` exists, the command runs under a profile that denies outbound network to any address except localhost.          | `os`             |
 | Windows, and any OS without the method above | Only the dead proxy variables and the offline flags (below).                                                                                 | `proxy-only`     |
 
+**Where the limit is applied (D41).** The local environment backend applies it (`src/main/env/local.ts`), and its two probes are in `src/main/env/probes.ts`. Commands run from the project root through the environment's process part, which kills the whole process tree on timeout. The protected files are read and reverted through the environment's files part. A remote backend (WSL, SSH, a dev container) applies the limit as far as its own system allows and reports the level it got, in the same two values; see [environments.md](environments.md).
+
 Every writer command logs one `rule network:` line with its level. An `os` level is logged as info, and `proxy-only` as a warning.
 
 On every OS the writer's command also gets:

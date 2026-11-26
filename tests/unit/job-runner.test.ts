@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ProviderError } from '../../src/agent/provider/types';
 import type { Message, Provider, StreamEvent } from '../../src/agent/provider/types';
+import { localEnvironment } from '../../src/main/env';
 import { createInProcessJobRunner, type JobRunner } from '../../src/main/workflow/job-runner';
 import { DEFAULT_POLICY_CONTEXT, type PolicyContext } from '../../src/main/policy/context';
 import type { ToolRunner } from '../../src/main/agent/router';
@@ -27,6 +28,7 @@ function runnerWith(
   } = {},
 ): JobRunner {
   return createInProcessJobRunner({
+    env: localEnvironment(),
     root: ROOT,
     provider,
     model: MODEL,
@@ -244,6 +246,7 @@ describe('createInProcessJobRunner: rule events (AC6)', () => {
     onRuleEvent?: (e: RuleEvent) => void,
   ) {
     return createInProcessJobRunner({
+      env: localEnvironment(),
       root: ROOT,
       provider,
       model: MODEL,
@@ -300,6 +303,7 @@ describe('createInProcessJobRunner: rule events (AC6)', () => {
     const events: RuleEvent[] = [];
     const toolRunner = okTool();
     const runner = createInProcessJobRunner({
+      env: localEnvironment(),
       root: ROOT,
       provider,
       model: MODEL,
@@ -326,6 +330,7 @@ describe('createInProcessJobRunner: rule events (AC6)', () => {
     });
     const toolRunner = okTool();
     const runner = createInProcessJobRunner({
+      env: localEnvironment(),
       root: ROOT,
       provider,
       model: MODEL,

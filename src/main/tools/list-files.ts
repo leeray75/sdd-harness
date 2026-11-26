@@ -2,10 +2,10 @@
 // root whose root-relative paths match a glob. Runs only in main, only after the gate allows
 // the call. Reasons are fixed strings: they never echo the path or the pattern.
 
-import { promises as fs } from 'node:fs';
 import { MAX_TOOL_OUTPUT_LENGTH } from '../../shared/agent-protocol';
 import type { ListFilesArgs } from '../../shared/tools';
 import type { ToolRunResult } from '../agent/router';
+import type { ToolEnvironment } from '../env/types';
 import { hasNodeModulesSegment, NODE_MODULES_REASON, resolveInRoot } from './paths';
 import { globToRegExp, walkFiles, type FoundFile } from './walk';
 
@@ -30,6 +30,7 @@ export type MatchResult =
  * sorted. Shared by list_files and search_text, so both see the same set of files.
  */
 export async function collectMatchingFiles(
+  env: ToolEnvironment,
   root: unknown,
   path: string | undefined,
   glob: string | undefined,
@@ -44,25 +45,29 @@ export async function collectMatchingFiles(
   if (path !== undefined && hasNodeModulesSegment(path)) {
     return { ok: false, reason: NODE_MODULES_REASON };
   }
-  const resolved = await resolveInRoot(root, path ?? '.', { mustExist: true });
+  const resolved = await resolveInRoot(env, root, path ?? '.', { mustExist: true });
   if (!resolved.ok) {
     return resolved;
   }
   try {
-    if (!(await fs.stat(resolved.target)).isDirectory()) {
+    if (!(await env.files.stat(resolved.target)).isDirectory()) {
       return { ok: false, reason: NOT_A_FOLDER };
     }
   } catch {
     return { ok: false, reason: NOT_A_FOLDER };
   }
   const matcher = globToRegExp(glob ?? DEFAULT_GLOB);
-  const all = await walkFiles(resolved.root, resolved.target);
+  const all = await walkFiles(env, resolved.root, resolved.target);
   return { ok: true, root: resolved.root, files: all.filter((file) => matcher.test(file.rel)) };
 }
 
 /** Lists the matching regular files under a folder of the root, one per line, sorted. */
-export async function listFilesInRoot(root: unknown, args: ListFilesArgs): Promise<ToolRunResult> {
-  const matched = await collectMatchingFiles(root, args.path, args.pattern);
+export async function listFilesInRoot(
+  env: ToolEnvironment,
+  root: unknown,
+  args: ListFilesArgs,
+): Promise<ToolRunResult> {
+  const matched = await collectMatchingFiles(env, root, args.path, args.pattern);
   if (!matched.ok) {
     return { ok: false, reason: matched.reason };
   }

@@ -1,11 +1,11 @@
 // Writes a whole file by writing a temporary file in the same folder and renaming it into
 // place. On Windows a rename can fail while another program has the target open, so a failed
 // rename is retried briefly. If every attempt fails, the temporary file is removed and the
-// result is a fixed failure. Runs only in main.
+// result is a fixed failure. The writes go through the environment's files part (D41), so the
+// same steps hold for any backend. Runs only in main.
 
 import { randomBytes } from 'node:crypto';
-import { promises as fs } from 'node:fs';
-import { basename, dirname, join } from 'node:path';
+import type { FilesPart } from '../env/types';
 
 /** Rename attempts before the write is given up. */
 export const RENAME_ATTEMPTS = 5;
@@ -25,9 +25,9 @@ export interface AtomicWriteOptions {
   retryMs?: number;
 }
 
-async function removeQuietly(path: string): Promise<void> {
+async function removeQuietly(files: FilesPart, path: string): Promise<void> {
   try {
-    await fs.rm(path, { force: true });
+    await files.rm(path, { force: true });
   } catch {
     // Nothing more can be done; the name is random, so it cannot clash with a later write.
   }
@@ -38,23 +38,35 @@ function delay(ms: number): Promise<void> {
 }
 
 /**
- * Writes `data` to `target` through a temporary file in the same folder. `target` must be a
- * path whose folder exists. Never leaves the temporary file behind.
+ * The temporary name beside `target`: the same folder, a dot, the target's name, a random part
+ * and `.tmp`. The folder is everything up to the last separator, so both `/` and `\` work.
+ */
+function tempNameFor(target: string): string {
+  const cut = Math.max(target.lastIndexOf('/'), target.lastIndexOf('\\'));
+  const folder = target.slice(0, cut + 1);
+  const name = target.slice(cut + 1);
+  return `${folder}.${name}.${randomBytes(6).toString('hex')}.tmp`;
+}
+
+/**
+ * Writes `data` to `target` through a temporary file in the same folder, over `files`. `target`
+ * must be a path whose folder exists. Never leaves the temporary file behind.
  */
 export async function writeFileAtomic(
+  files: FilesPart,
   target: string,
   data: Buffer,
   options: AtomicWriteOptions = {},
 ): Promise<AtomicWriteResult> {
-  const rename = options.rename ?? ((from: string, to: string) => fs.rename(from, to));
+  const rename = options.rename ?? ((from: string, to: string) => files.rename(from, to));
   const attempts = options.attempts ?? RENAME_ATTEMPTS;
   const retryMs = options.retryMs ?? RENAME_RETRY_MS;
-  const temp = join(dirname(target), `.${basename(target)}.${randomBytes(6).toString('hex')}.tmp`);
+  const temp = tempNameFor(target);
 
   try {
-    await fs.writeFile(temp, data, { flag: 'wx' });
+    await files.writeFile(temp, data, { flag: 'wx' });
   } catch {
-    await removeQuietly(temp);
+    await removeQuietly(files, temp);
     return { ok: false, reason: WRITE_FAILED };
   }
 
@@ -64,7 +76,7 @@ export async function writeFileAtomic(
       return { ok: true };
     } catch {
       if (attempt >= attempts) {
-        await removeQuietly(temp);
+        await removeQuietly(files, temp);
         return { ok: false, reason: RENAME_FAILED };
       }
       await delay(retryMs * attempt);

@@ -23,9 +23,12 @@ import {
   writeAtomic,
   writeSpecState,
 } from '../workflow/spec-lock';
+import type { Environment } from '../env/types';
 import type { HumanActionHandler } from './channel';
 
 export interface SpecHandlersDeps {
+  /** The project's environment (D41). The spec and the state file are read and written through it. */
+  env: Environment;
   /** The project root. The spec and the state file are read and written under it. */
   root: string;
   /** The clock for approvedAt. */
@@ -66,7 +69,7 @@ function refuse(reason: string): HumanActionResult {
  * request only, and reads the feature from it.
  */
 export function createSpecHandlers(deps: SpecHandlersDeps): SpecHandlers {
-  const { root } = deps;
+  const { env, root } = deps;
 
   async function notify(): Promise<void> {
     try {
@@ -78,13 +81,13 @@ export function createSpecHandlers(deps: SpecHandlersDeps): SpecHandlers {
 
   async function approve(request: HumanActionRequest): Promise<HumanActionResult> {
     const { feature } = request;
-    const path = await featureFilePath(root, feature, 'SPECS.md');
+    const path = await featureFilePath(env, root, feature, 'SPECS.md');
     if (path === null) return refuse(SPEC_UNREADABLE);
-    const read = await readRegularText(path, MAX_SPEC_FILE_BYTES);
+    const read = await readRegularText(env, path, MAX_SPEC_FILE_BYTES);
     if (!read.ok) return refuse(SPEC_UNREADABLE);
     if (!hasRequiredHeadings(read.text)) return refuse(SPEC_HEADINGS);
 
-    const lock = lockForApproval(await readSpecState(root));
+    const lock = lockForApproval(await readSpecState(env, root));
     if (approvalFor(lock, feature, hashText(read.text)) === 'approved') {
       return refuse(ALREADY_APPROVED);
     }
@@ -92,7 +95,7 @@ export function createSpecHandlers(deps: SpecHandlersDeps): SpecHandlers {
     // The time is read before SPECS.md changes, so a failing clock cannot leave a spec half-approved.
     const approvedAt = deps.now().toISOString();
     const approvedText = setFrontmatterStatus(read.text, 'approved');
-    const written = await writeAtomic(path, approvedText);
+    const written = await writeAtomic(env, path, approvedText);
     if (!written.ok) return refuse(SPEC_WRITE_FAILED);
 
     const state: SpecStateFile = {
@@ -102,10 +105,10 @@ export function createSpecHandlers(deps: SpecHandlersDeps): SpecHandlers {
       approvedAt,
       editing: false,
     };
-    const saved = await writeSpecState(root, state);
+    const saved = await writeSpecState(env, root, state);
     if (!saved.ok) {
       // Put the previous text back, so the spec and the lock agree again.
-      await writeAtomic(path, read.text);
+      await writeAtomic(env, path, read.text);
       return refuse(STATE_WRITE_FAILED);
     }
     await notify();
@@ -114,18 +117,18 @@ export function createSpecHandlers(deps: SpecHandlersDeps): SpecHandlers {
 
   async function edit(request: HumanActionRequest): Promise<HumanActionResult> {
     const { feature } = request;
-    const lock = lockForApproval(await readSpecState(root));
+    const lock = lockForApproval(await readSpecState(env, root));
     if (lock === null) return refuse(NO_LOCK);
     if (lock === 'unreadable') return refuse(STATE_UNREADABLE);
     if (lock.feature !== feature) return refuse(OTHER_FEATURE);
-    const hash = await hashSpec(root, feature);
+    const hash = await hashSpec(env, root, feature);
     if (approvalFor(lock, feature, hash) !== 'approved') return refuse(NOT_APPROVED);
     if (deps.onEditRequested) {
       const answer = deps.onEditRequested(feature);
       if (!answer.ok) return refuse(answer.reason);
     }
 
-    const saved = await writeSpecState(root, { ...lock, editing: true });
+    const saved = await writeSpecState(env, root, { ...lock, editing: true });
     if (!saved.ok) return refuse(EDIT_WRITE_FAILED);
     await notify();
     return { ok: true };

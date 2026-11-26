@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { localEnvironment } from '../../src/main/env';
 import { createInProcessJobRunner, type JobRunner } from '../../src/main/workflow/job-runner';
 import {
   createBuildController,
@@ -145,9 +146,9 @@ async function lockFeature(text: string): Promise<void> {
   const path = join(root, 'docs', 'specs', FEATURE, 'SPECS.md');
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, text);
-  const hash = await hashSpec(root, FEATURE);
+  const hash = await hashSpec(localEnvironment(), root, FEATURE);
   if (hash === null) throw new Error('the test spec could not be hashed');
-  const written = await writeSpecState(root, {
+  const written = await writeSpecState(localEnvironment(), root, {
     version: 1,
     feature: FEATURE,
     sha256: hash,
@@ -200,6 +201,7 @@ async function makeController(
   const runner =
     options.runner ??
     createInProcessJobRunner({
+      env: localEnvironment(),
       root,
       provider,
       model: 'test-model',
@@ -207,6 +209,7 @@ async function makeController(
       toolRunner: noTool,
     });
   const created = await createBuildController({
+    env: localEnvironment(),
     root,
     feature: FEATURE,
     runner,
@@ -250,6 +253,7 @@ describe('roundLimit (AC2)', () => {
   it('refuses a build with a bad limit, runs nothing and writes no file', async () => {
     await lockFeature(SPEC_V1);
     const created = await createBuildController({
+      env: localEnvironment(),
       root,
       feature: FEATURE,
       runner: vi.fn<JobRunner>(),
@@ -264,7 +268,13 @@ describe('roundLimit (AC2)', () => {
 
   it('refuses a feature that is not approved, and a bad slug', async () => {
     const runner = vi.fn<JobRunner>();
-    const deps = { root, runner, models: { writer: 'w', reviewer: 'r' }, now: () => new Date() };
+    const deps = {
+      env: localEnvironment(),
+      root,
+      runner,
+      models: { writer: 'w', reviewer: 'r' },
+      now: () => new Date(),
+    };
     expect(await createBuildController({ ...deps, feature: 'Bad Slug' })).toEqual({
       ok: false,
       reason: 'the feature is not a valid slug',

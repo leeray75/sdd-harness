@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHumanActionChannel, type HumanActionSender } from '../../src/main/human/channel';
 import type { GestureTracker } from '../../src/main/human/gesture';
+import { localEnvironment } from '../../src/main/env';
 import { createShipHandlers } from '../../src/main/human/ship-handlers';
 import type { Logger } from '../../src/main/log';
 import * as ship from '../../src/main/workflow/ship';
@@ -45,6 +46,7 @@ function handlersWith(
   } = {},
 ) {
   return createShipHandlers({
+    env: localEnvironment(),
     root,
     onLockChanged: overrides.onLockChanged ?? (() => undefined),
     controllerNode: overrides.controllerNode ?? (() => null),

@@ -5,16 +5,14 @@
 // PATH; on Windows a .cmd or .bat it resolves to runs through cmd.exe, and only when the
 // check allowed it and its arguments are safe tokens. Around the run, the protected files are
 // read-only while it runs and reverted after it (D31); the writer's command gets the network
-// limit. Runs only in main, only after the gate allows the call. Reasons are fixed strings:
-// they never echo the program, arguments, paths or output.
+// limit. The process is started through the environment (D41), which holds the timeout, the
+// tree kill and the network limit. Runs only in main, only after the gate allows the call.
+// Reasons are fixed strings: they never echo the program, arguments, paths or output.
 
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
-import { promises as fs } from 'node:fs';
 import { MAX_TOOL_OUTPUT_LENGTH, type JobId } from '../../shared/agent-protocol';
 import type { RunCommandArgs } from '../../shared/tools';
 import type { ToolRunResult } from '../agent/router';
 import { cmdExeFor, cmdLineFor, isCommandScript, resolveProgram } from '../commands/lookup';
-import { chooseNetwork, probeNetwork, wrapCommand, writerNetworkEnv } from '../commands/network';
 import {
   lockSpecFolder,
   restoreAfterRun,
@@ -22,6 +20,7 @@ import {
   type RestoreResult,
   type RevertArea,
 } from '../commands/protect';
+import type { ToolEnvironment } from '../env/types';
 import { NOT_A_COMMAND_JOB } from '../policy/command-allowlist';
 import type { CommandCall, CommandCheck } from '../policy/context';
 import { makeNetworkEvent, makeRevertEvent, type RuleEvent } from '../policy/rule-event';
@@ -32,9 +31,6 @@ export const COMMAND_DEFAULT_TIMEOUT_MS = 600_000;
 
 /** Bytes of combined output kept (the tail). Room is left for the status and cut lines. */
 export const COMMAND_OUTPUT_TAIL_BYTES = MAX_TOOL_OUTPUT_LENGTH - 512;
-
-/** How long to wait for the output streams after the process exits, for a grandchild that holds them open. */
-const STREAM_GRACE_MS = 250;
 
 /** Who is asking, the check that decides it, and where the events of the call go. Set by main. */
 export interface CommandContext {
@@ -47,7 +43,7 @@ export interface CommandContext {
 export interface RunCommandOptions {
   /** Timeout in milliseconds, set by main. Ignored unless it is a positive integer. */
   timeoutMs?: number;
-  /** The platform to act for. Defaults to the running one; tests set it. */
+  /** The platform to act for. Defaults to the environment's; tests set it. */
   platform?: NodeJS.Platform;
   /** The parent environment the minimal one is taken from. Defaults to the app's; tests set it. */
   parentEnv?: NodeJS.ProcessEnv;
@@ -119,30 +115,6 @@ export function programRefusal(program: string): string | null {
   return null;
 }
 
-/** Stops the process and everything it started: taskkill /T on Windows, the process group elsewhere. */
-function killTree(child: ChildProcess, platform: NodeJS.Platform): void {
-  const pid = child.pid;
-  if (pid === undefined) {
-    return;
-  }
-  try {
-    if (platform === 'win32') {
-      execFileSync('taskkill', ['/pid', String(pid), '/T', '/F'], {
-        stdio: 'ignore',
-        windowsHide: true,
-      });
-    } else {
-      process.kill(-pid, 'SIGKILL');
-    }
-  } catch {
-    try {
-      child.kill('SIGKILL');
-    } catch {
-      // The process has already gone.
-    }
-  }
-}
-
 function statusLine(code: number | null, signal: NodeJS.Signals | null): string {
   if (code !== null) {
     return `exit code ${code}`;
@@ -156,97 +128,49 @@ interface ProcessPlan {
   argv: string[];
   cwd: string;
   env: NodeJS.ProcessEnv;
-  platform: NodeJS.Platform;
   timeoutMs: number;
+  /** The network policy: the writer's command is `none`, the reviewer's `normal`. */
+  network: 'normal' | 'none';
   /** True for a cmd.exe line, which Node must pass without quoting it again. */
   verbatim: boolean;
 }
 
 /**
- * Starts the process and waits for it, with the timeout and the output tail. Returns ok with the
- * status and the tail, or failed when the process cannot be started. Never rejects.
+ * Starts the process through the environment and waits for it, with the output tail. Returns ok
+ * with the status and the tail, or failed when the process cannot be started. Never rejects.
  */
-function runProcess(plan: ProcessPlan): Promise<ToolRunResult> {
-  const { platform, timeoutMs } = plan;
-  return new Promise<ToolRunResult>((resolvePromise) => {
-    let child: ChildProcess;
-    try {
-      child = spawn(plan.file, plan.argv, {
-        cwd: plan.cwd,
-        env: plan.env,
-        shell: false,
-        windowsVerbatimArguments: plan.verbatim,
-        windowsHide: true,
-        // On POSIX the child leads its own process group, so a timeout can kill its children too.
-        detached: platform !== 'win32',
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
-    } catch {
-      resolvePromise({ ok: false, reason: START_FAILED });
-      return;
-    }
+async function runProcess(env: ToolEnvironment, plan: ProcessPlan): Promise<ToolRunResult> {
+  let tail: Buffer = Buffer.alloc(0);
+  let dropped = false;
 
-    let settled = false;
-    let graceTimer: NodeJS.Timeout | undefined;
-    let tail: Buffer = Buffer.alloc(0);
-    let dropped = false;
+  const withOutput = (status: string): ToolRunResult => {
+    const text = tail.toString('utf8');
+    const cut = dropped ? `${TRUNCATED_NOTE}\n` : '';
+    const body = `${cut}${text}`;
+    return { ok: true, output: body.length > 0 ? `${status}\n${body}` : status };
+  };
 
-    // The timeout's const is declared below; finish only reads it from callbacks that run later.
-    const finish = (result: ToolRunResult): void => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      clearTimeout(timeoutTimer);
-      if (graceTimer !== undefined) clearTimeout(graceTimer);
-      resolvePromise(result);
-    };
-
-    const withOutput = (status: string): ToolRunResult => {
-      const text = tail.toString('utf8');
-      const cut = dropped ? `${TRUNCATED_NOTE}\n` : '';
-      const body = `${cut}${text}`;
-      return { ok: true, output: body.length > 0 ? `${status}\n${body}` : status };
-    };
-
-    const onData = (chunk: Buffer): void => {
-      if (settled) {
-        return;
-      }
+  const outcome = await env.process.spawn(plan.file, plan.argv, {
+    cwd: plan.cwd,
+    env: plan.env,
+    timeoutMs: plan.timeoutMs,
+    network: plan.network,
+    verbatimArguments: plan.verbatim,
+    onOutput: (chunk) => {
       tail = Buffer.concat([tail, chunk]);
       if (tail.length > COMMAND_OUTPUT_TAIL_BYTES) {
         tail = tail.subarray(tail.length - COMMAND_OUTPUT_TAIL_BYTES);
         dropped = true;
       }
-    };
-    child.stdout?.on('data', onData);
-    child.stderr?.on('data', onData);
-
-    child.on('error', () => {
-      // An error before the process started means it could not be started. Later errors
-      // (for example a failed kill) do not change the result.
-      if (child.pid === undefined) {
-        finish({ ok: false, reason: START_FAILED });
-      }
-    });
-
-    child.on('exit', (code, signal) => {
-      if (settled) {
-        return;
-      }
-      // Give the output streams a moment to finish, in case a grandchild still holds them.
-      graceTimer = setTimeout(() => finish(withOutput(statusLine(code, signal))), STREAM_GRACE_MS);
-    });
-
-    child.on('close', (code, signal) => {
-      finish(withOutput(statusLine(code, signal)));
-    });
-
-    const timeoutTimer = setTimeout(() => {
-      killTree(child, platform);
-      finish(withOutput(`timed out after ${timeoutMs} ms; the process tree was killed`));
-    }, timeoutMs);
+    },
   });
+  if (!outcome.started) {
+    return { ok: false, reason: START_FAILED };
+  }
+  if (outcome.timedOut) {
+    return withOutput(`timed out after ${plan.timeoutMs} ms; the process tree was killed`);
+  }
+  return withOutput(statusLine(outcome.code, outcome.signal));
 }
 
 /** The result lines for the areas a restore reverted, and one for a partial restore. */
@@ -265,19 +189,21 @@ function revertLines(restore: RestoreResult): string[] {
  *
  * Order: the program is refused by git; the check decides the call again; the program is found
  * on PATH; a Windows script gets a safe cmd.exe line; the cwd is checked; the protected files are
- * snapshotted (refused over the cap); the writer's command gets the network limit; the spec
- * folder is locked; the program runs; the protected set is restored, whatever happened.
- * Returns ok with the exit status, the output tail and one line per area reverted, whatever the
- * exit code. Returns failed for any refusal before the run, and for a program that cannot start.
- * Nothing is started before the checks before the run have passed.
+ * snapshotted (refused over the cap); the writer's command gets the network limit (its level is
+ * reported before anything starts); the spec folder is locked; the program runs; the protected
+ * set is restored, whatever happened. Returns ok with the exit status, the output tail and one
+ * line per area reverted, whatever the exit code. Returns failed for any refusal before the run,
+ * and for a program that cannot start. Nothing is started before the checks before the run have
+ * passed.
  */
 export async function runCommandInRoot(
+  env: ToolEnvironment,
   root: unknown,
   args: RunCommandArgs,
   context: CommandContext,
   options: RunCommandOptions = {},
 ): Promise<ToolRunResult> {
-  const platform = options.platform ?? process.platform;
+  const platform = options.platform ?? env.process.platform;
   const refusal = programRefusal(args.program);
   if (refusal !== null) {
     return { ok: false, reason: refusal };
@@ -300,8 +226,8 @@ export async function runCommandInRoot(
   }
   const emit = (event: RuleEvent): void => context.onRuleEvent?.(event);
 
-  const env = commandEnv(options.parentEnv ?? process.env, platform);
-  const lookup = resolveProgram(args.program, env, platform);
+  const childEnv = commandEnv(options.parentEnv ?? process.env, platform);
+  const lookup = await resolveProgram(env, args.program, childEnv, platform);
   if (!lookup.ok) {
     return { ok: false, reason: lookup.reason };
   }
@@ -313,16 +239,16 @@ export async function runCommandInRoot(
     if (!line.ok) {
       return { ok: false, reason: line.reason };
     }
-    command = cmdExeFor(env);
+    command = cmdExeFor(childEnv);
     commandArgs = ['/d', '/s', '/c', line.line];
   }
 
-  const resolved = await resolveInRoot(root, args.cwd ?? '.', { mustExist: true });
+  const resolved = await resolveInRoot(env, root, args.cwd ?? '.', { mustExist: true });
   if (!resolved.ok) {
     return { ok: false, reason: resolved.reason };
   }
   try {
-    if (!(await fs.stat(resolved.target)).isDirectory()) {
+    if (!(await env.files.stat(resolved.target)).isDirectory()) {
       return { ok: false, reason: CWD_NOT_FOLDER };
     }
   } catch {
@@ -335,10 +261,10 @@ export async function runCommandInRoot(
       : COMMAND_DEFAULT_TIMEOUT_MS;
 
   // The protected set is taken before anything changes; over the cap, nothing starts.
-  const protection = await snapshotForRun({
+  const protection = await snapshotForRun(env, {
     root: resolved.root,
     job,
-    env,
+    env: childEnv,
     maxBytes: options.protectMaxBytes,
   });
   if (!protection.ok) {
@@ -346,17 +272,11 @@ export async function runCommandInRoot(
   }
   const snapshot = protection.snapshot;
 
-  // The writer's command gets the network limit and the dead proxies; the reviewer's, nothing.
-  let spawnCommand = command;
-  let spawnArgs = commandArgs;
-  let spawnEnv = env;
-  if (job === 'writer') {
-    const network = chooseNetwork(platform, await probeNetwork(platform));
-    const wrapped = wrapCommand(network, command, commandArgs);
-    spawnCommand = wrapped.command;
-    spawnArgs = wrapped.args;
-    spawnEnv = { ...env, ...writerNetworkEnv() };
-    emit(makeNetworkEvent(args.program, network.level));
+  // The writer's command gets the network limit; the reviewer's gets nothing. The level is
+  // reported here, before the lock, as it always was.
+  const network = job === 'writer' ? 'none' : 'normal';
+  if (network === 'none') {
+    emit(makeNetworkEvent(args.program, await env.process.networkLevel()));
   }
 
   // The lock and the run sit in a try, and the restore is in the finally, so it runs after a
@@ -364,20 +284,20 @@ export async function runCommandInRoot(
   let outcome: ToolRunResult | null;
   let restore: RestoreResult;
   try {
-    await lockSpecFolder(snapshot);
-    outcome = await runProcess({
-      file: spawnCommand,
-      argv: spawnArgs,
+    await lockSpecFolder(env, snapshot);
+    outcome = await runProcess(env, {
+      file: command,
+      argv: commandArgs,
       cwd: resolved.target,
-      env: spawnEnv,
-      platform,
+      env: childEnv,
       timeoutMs,
+      network,
       verbatim: viaCmd,
     });
   } catch {
     outcome = null;
   } finally {
-    restore = await restoreAfterRun(snapshot);
+    restore = await restoreAfterRun(env, snapshot);
   }
   for (const record of restore.records) {
     emit(makeRevertEvent(job, record.path, record.action));

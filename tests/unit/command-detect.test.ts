@@ -8,6 +8,7 @@ import {
   rootMarkerFiles,
   type MarkerFiles,
 } from '../../src/main/commands/detect';
+import { localEnvironment, toolEnvironment } from '../../src/main/env';
 
 /** An in-memory reader over a map of root-relative paths to text. */
 function memory(files: Record<string, string>): MarkerFiles {
@@ -246,8 +247,8 @@ describe('rootMarkerFiles: the root-backed reader', () => {
     rmSync(base, { recursive: true, force: true });
   });
 
-  it('reports files and not folders, and reads text', () => {
-    const reader = rootMarkerFiles(base);
+  it('reports files and not folders, and reads text', async () => {
+    const reader = await rootMarkerFiles(toolEnvironment(localEnvironment()), base);
     expect(reader.exists('package.json')).toBe(true);
     expect(reader.exists('folder-marker')).toBe(false);
     expect(reader.exists('missing.txt')).toBe(false);
@@ -255,20 +256,29 @@ describe('rootMarkerFiles: the root-backed reader', () => {
     expect(reader.readText('missing.txt')).toBeNull();
   });
 
-  it('refuses to read a file over the size cap', () => {
-    expect(rootMarkerFiles(base, 1024).readText('big.json')).toBeNull();
-    expect(rootMarkerFiles(base, 4096).readText('big.json')).not.toBeNull();
+  it('refuses to read a file over the size cap', async () => {
+    expect(
+      (await rootMarkerFiles(toolEnvironment(localEnvironment()), base, 1024)).readText('big.json'),
+    ).toBeNull();
+    expect(
+      (await rootMarkerFiles(toolEnvironment(localEnvironment()), base, 4096)).readText('big.json'),
+    ).not.toBeNull();
   });
 
-  it('detects the commands of a real folder', () => {
-    expect(detectCommands(rootMarkerFiles(base)).test[0]).toEqual({
+  it('detects the commands of a real folder', async () => {
+    expect(
+      detectCommands(await rootMarkerFiles(toolEnvironment(localEnvironment()), base)).test[0],
+    ).toEqual({
       program: 'npm',
       args: ['test'],
     });
   });
 
-  it('gives nothing for a folder that does not exist, and does not throw', () => {
-    const reader = rootMarkerFiles(join(base, 'no-such-root'));
+  it('gives nothing for a folder that does not exist, and does not throw', async () => {
+    const reader = await rootMarkerFiles(
+      toolEnvironment(localEnvironment()),
+      join(base, 'no-such-root'),
+    );
     expect(detectCommands(reader)).toEqual({ test: [], build: [] });
   });
 });

@@ -10,6 +10,7 @@ import type { Message, Provider } from '../../agent/provider/types';
 import { TURN_CAPS } from '../../shared/build-docs';
 import { makeToolRunner } from '../agent/host';
 import type { ToolRunner } from '../agent/router';
+import type { Environment } from '../env/types';
 import type { PolicyContext } from '../policy/context';
 import { checkToolCall } from '../policy/gate';
 import type { RuleEvent } from '../policy/rule-event';
@@ -29,6 +30,8 @@ export type JobRunResult =
 export type JobRunner = (request: JobRunRequest) => Promise<JobRunResult>;
 
 export interface JobRunnerOptions {
+  /** The project's environment (D41). The tools and the command runner reach the project only through it. */
+  env: Environment;
   /** The project root. Tools work only inside it. */
   root: string;
   provider: Provider;
@@ -58,7 +61,7 @@ export function createInProcessJobRunner(options: JobRunnerOptions): JobRunner {
   };
   const toolRunner =
     options.toolRunner ??
-    makeToolRunner(options.root, {
+    makeToolRunner(options.env, options.root, {
       commandCheck: options.contextNow().commandCheck,
       onRuleEvent: emit,
     });

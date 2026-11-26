@@ -7,10 +7,13 @@
 import type { HumanActionRequest, HumanActionResult } from '../../shared/human-actions';
 import type { NodeId } from '../../shared/workflow';
 import { DEFAULT_RULES } from '../../shared/project-rules';
+import type { Environment } from '../env/types';
 import { approveResult, markDone, type ShipOptions, type ShipResult } from '../workflow/ship';
 import type { HumanActionHandler } from './channel';
 
 export interface ShipHandlersDeps {
+  /** The project's environment (D41): the feature folder and git are reached through it. */
+  env: Environment;
   /** The project root. The feature folder and git are used under it. */
   root: string;
   /** Called after each call, so the watcher re-reads the lock. Errors are ignored. */
@@ -47,11 +50,16 @@ export function createShipHandlers(deps: ShipHandlersDeps): ShipHandlers {
 
   async function run(
     request: HumanActionRequest,
-    step: (root: string, feature: string, options: ShipOptions) => Promise<ShipResult>,
+    step: (
+      env: Environment,
+      root: string,
+      feature: string,
+      options: ShipOptions,
+    ) => Promise<ShipResult>,
   ): Promise<HumanActionResult> {
     let outcome: ShipResult;
     try {
-      outcome = await step(deps.root, request.feature, {
+      outcome = await step(deps.env, deps.root, request.feature, {
         controllerNode: () => deps.controllerNode(request.feature),
         commitFormat: deps.commitFormat ?? DEFAULT_RULES.commitFormat,
       });

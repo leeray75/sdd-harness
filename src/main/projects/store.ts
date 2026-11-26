@@ -20,6 +20,7 @@ import {
   type ProjectRules,
 } from '../../shared/project-rules';
 import type { Logger } from '../log';
+import { localEnvironment } from '../env';
 import { writeFileAtomic } from '../tools/atomic-write';
 
 /** Where a project's folder is. Only `local` exists now; later subtasks add wsl, ssh and container. */
@@ -192,7 +193,11 @@ export function createProjectStore(options: ProjectStoreOptions): ProjectStore {
     try {
       await fs.mkdir(dirname(filePath), { recursive: true });
       const text = `${JSON.stringify({ version: FILE_VERSION, projects: next }, null, 2)}\n`;
-      const written = await writeFileAtomic(filePath, Buffer.from(text, 'utf8'));
+      const written = await writeFileAtomic(
+        localEnvironment().files,
+        filePath,
+        Buffer.from(text, 'utf8'),
+      );
       return written.ok;
     } catch {
       return false;

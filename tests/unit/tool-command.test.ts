@@ -12,6 +12,7 @@ import {
   type RunCommandOptions,
 } from '../../src/main/tools/run-command';
 import type { ToolRunResult } from '../../src/main/agent/router';
+import { localEnvironment, toolEnvironment } from '../../src/main/env';
 
 /** A check that allows every call, for the tests that are about running, not about the check. */
 const ALLOW_CONTEXT: CommandContext = { job: 'writer', check: () => ({ allow: true }) };
@@ -22,7 +23,7 @@ function runCommandInRoot(
   args: { program: string; args: string[]; cwd?: string },
   options?: RunCommandOptions,
 ): Promise<ToolRunResult> {
-  return runWithContext(root, args, ALLOW_CONTEXT, options);
+  return runWithContext(toolEnvironment(localEnvironment()), root, args, ALLOW_CONTEXT, options);
 }
 
 // Small Node scripts the tests run through process.execPath. They are CommonJS and live in
@@ -143,9 +144,15 @@ describe('programRefusal: .cmd and .bat (D31: the command check decides)', () =>
       check: () => ({ allow: false, reason: "this command is not on the project's allowlist" }),
     };
     const reason = expectFailed(
-      await runWithContext(root, { program: 'pnpm.cmd', args: ['test'] }, denied, {
-        platform: 'win32',
-      }),
+      await runWithContext(
+        toolEnvironment(localEnvironment()),
+        root,
+        { program: 'pnpm.cmd', args: ['test'] },
+        denied,
+        {
+          platform: 'win32',
+        },
+      ),
     );
     expect(reason).toBe("this command is not on the project's allowlist");
   });
@@ -168,6 +175,7 @@ describe('runCommandInRoot: the command check', () => {
     const marker = join(root, 'check-ran.txt');
     const reason = expectFailed(
       await runWithContext(
+        toolEnvironment(localEnvironment()),
         root,
         {
           program: process.execPath,
@@ -191,9 +199,15 @@ describe('runCommandInRoot: the command check', () => {
 
   it('refuses a program that is not on PATH, with the fixed reason and no name', async () => {
     const reason = expectFailed(
-      await runWithContext(root, { program: 'no-such-tool-7731', args: [] }, ALLOW_CONTEXT, {
-        parentEnv: { PATH: join(base, 'empty-folder') },
-      }),
+      await runWithContext(
+        toolEnvironment(localEnvironment()),
+        root,
+        { program: 'no-such-tool-7731', args: [] },
+        ALLOW_CONTEXT,
+        {
+          parentEnv: { PATH: join(base, 'empty-folder') },
+        },
+      ),
     );
     expect(reason).toBe('the program was not found on PATH');
     expect(reason).not.toContain('7731');

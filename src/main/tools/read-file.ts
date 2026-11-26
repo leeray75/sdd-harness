@@ -3,7 +3,7 @@
 // the call. Pure apart from fs. Reasons are fixed strings: they never echo the path or the
 // file's contents.
 
-import { promises as fs } from 'node:fs';
+import type { ToolEnvironment } from '../env/types';
 import { resolveInRoot } from './paths';
 
 /** Largest file, in bytes, that read_file returns. Larger files are refused, never truncated. */
@@ -24,8 +24,12 @@ function fail(reason: string): ReadFileResult {
  * no root, a missing or non-directory root, absolute paths, `.git` paths, paths or symlinks
  * that resolve outside the root, directories, missing files, and files over READ_FILE_MAX_BYTES.
  */
-export async function readFileInRoot(root: unknown, path: unknown): Promise<ReadFileResult> {
-  const resolved = await resolveInRoot(root, path, { mustExist: true });
+export async function readFileInRoot(
+  env: ToolEnvironment,
+  root: unknown,
+  path: unknown,
+): Promise<ReadFileResult> {
+  const resolved = await resolveInRoot(env, root, path, { mustExist: true });
   if (!resolved.ok) {
     return fail(resolved.reason);
   }
@@ -33,7 +37,7 @@ export async function readFileInRoot(root: unknown, path: unknown): Promise<Read
 
   let info;
   try {
-    info = await fs.stat(realFile);
+    info = await env.files.stat(realFile);
   } catch {
     return fail(READ_FAILED);
   }
@@ -46,7 +50,7 @@ export async function readFileInRoot(root: unknown, path: unknown): Promise<Read
 
   let bytes: Buffer;
   try {
-    bytes = await fs.readFile(realFile);
+    bytes = await env.files.readFile(realFile);
   } catch {
     return fail(READ_FAILED);
   }

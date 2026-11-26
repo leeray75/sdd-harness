@@ -10,6 +10,7 @@
 import { featureFilePath, readRegularText, approvalOf, writeAtomic } from './spec-lock';
 import { MAX_SPEC_FILE_BYTES } from './spec-folders';
 import type { JobRunner } from './job-runner';
+import type { Environment } from '../env/types';
 import { WRITER_TASKS } from '../../agent/jobs/writer';
 import { REVIEWER_TASKS } from '../../agent/jobs/reviewer';
 import type { Message } from '../../agent/provider/types';
@@ -66,6 +67,8 @@ export type BuildOutcome =
 export type ResumeChoice = 'continue' | 'revise' | 'stop';
 
 export interface BuildControllerOptions {
+  /** The project's environment (D41). The spec and the build documents are read and written through it. */
+  env: Environment;
   root: string;
   feature: string;
   runner: JobRunner;
@@ -187,6 +190,7 @@ class BuildLoop implements BuildController {
   private readonly doc: BuildState;
 
   constructor(
+    private readonly env: Environment,
     private readonly root: string,
     private readonly runner: JobRunner,
     private readonly now: () => Date,
@@ -301,7 +305,7 @@ class BuildLoop implements BuildController {
       if (this.current !== 'spec-changed' || !this.doc.resumeOnApprove) {
         return refused('the spec is not waiting for a revision approval');
       }
-      if ((await approvalOf(this.root, this.doc.feature)) !== 'approved') {
+      if ((await approvalOf(this.env, this.root, this.doc.feature)) !== 'approved') {
         return refused('the spec is not approved');
       }
       const moved = this.advance('REAPPROVE');
@@ -682,8 +686,9 @@ class BuildLoop implements BuildController {
   }
 
   private async writeSummary(): Promise<void> {
-    const specs = await featureFilePath(this.root, this.doc.feature, 'SPECS.md');
-    const specsText = specs === null ? null : await readRegularText(specs, MAX_SPEC_FILE_BYTES);
+    const specs = await featureFilePath(this.env, this.root, this.doc.feature, 'SPECS.md');
+    const specsText =
+      specs === null ? null : await readRegularText(this.env, specs, MAX_SPEC_FILE_BYTES);
     const ticket = parseSpecs(specsText?.ok ? specsText.text : null).ticket;
     const changes = await this.readChanges();
     const state: BuildState = {
@@ -695,20 +700,20 @@ class BuildLoop implements BuildController {
   }
 
   private async readChanges(): Promise<string | null> {
-    const path = await featureFilePath(this.root, this.doc.feature, 'changes.md');
+    const path = await featureFilePath(this.env, this.root, this.doc.feature, 'changes.md');
     if (path === null) {
       return null;
     }
-    const read = await readRegularText(path, MAX_SPEC_FILE_BYTES);
+    const read = await readRegularText(this.env, path, MAX_SPEC_FILE_BYTES);
     return read.ok ? read.text : null;
   }
 
   private async writeDoc(file: SpecFileName, text: string): Promise<void> {
-    const path = await featureFilePath(this.root, this.doc.feature, file);
+    const path = await featureFilePath(this.env, this.root, this.doc.feature, file);
     if (path === null) {
       throw new Error('the feature folder is not a real folder');
     }
-    const written = await writeAtomic(path, text);
+    const written = await writeAtomic(this.env, path, text);
     if (!written.ok) {
       throw new Error(written.reason);
     }
@@ -767,7 +772,7 @@ export async function createBuildController(
   if (!isFeatureSlug(options.feature)) {
     return { ok: false, reason: 'the feature is not a valid slug' };
   }
-  if ((await approvalOf(options.root, options.feature)) !== 'approved') {
+  if ((await approvalOf(options.env, options.root, options.feature)) !== 'approved') {
     return { ok: false, reason: 'the spec is not approved' };
   }
   const limit = roundLimit(options.roundLimit);
@@ -775,6 +780,7 @@ export async function createBuildController(
     return { ok: false, reason: limit.reason };
   }
   const controller = new BuildLoop(
+    options.env,
     options.root,
     options.runner,
     options.now,

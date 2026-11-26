@@ -1,12 +1,12 @@
 // Protects files while a command runs and reverts what the command changed (D31). Main takes a
 // snapshot of the protected set for the job, makes docs/specs read-only, runs the command, and
 // then restores the set: contents and modes of changed files, files and folders the command
-// deleted, and files and folders it created. Runs only in main. Reasons are fixed strings that
-// never echo a path or a file's contents.
+// deleted, and files and folders it created. Every file and path call goes through the
+// environment (D41), and the git-ignored entries come from its ignoredEntries, so this module
+// does not import the git module. Runs only in main. Reasons are fixed strings that never echo a
+// path or a file's contents.
 
-import { promises as fs } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { ignoredEntries } from '../git/git';
+import type { ToolEnvironment } from '../env/types';
 import type { RevertAction } from '../policy/rule-event';
 
 /** Total bytes of protected files a snapshot may hold: 256 MiB. Over it, the command is refused. */
@@ -130,21 +130,22 @@ export function isIgnored(rel: string, isDir: boolean, ignored: ReadonlySet<stri
 }
 
 /**
- * The git-ignored entries of the root, from the read-only query in the git module (D31, moved to
- * src/main/git/git.ts). Null when git is missing or the root is not a repository.
+ * The git-ignored entries of the root, from the environment's read-only query (D31; the git part of
+ * the environment, D38). Null when git is missing or the root is not a repository.
  */
 export function gitIgnoredEntries(
+  env: ToolEnvironment,
   root: string,
-  env: NodeJS.ProcessEnv,
+  processEnv: NodeJS.ProcessEnv,
 ): Promise<Set<string> | null> {
-  return ignoredEntries(root, env);
+  return env.ignoredEntries(root, processEnv);
 }
 
-async function statEntry(root: string, rel: string): Promise<Listed | null> {
-  const abs = join(root, rel);
+async function statEntry(env: ToolEnvironment, root: string, rel: string): Promise<Listed | null> {
+  const abs = env.path.join(root, rel);
   let stat;
   try {
-    stat = await fs.lstat(abs);
+    stat = await env.files.lstat(abs);
   } catch (error) {
     if (isMissing(error)) {
       return null;
@@ -152,7 +153,7 @@ async function statEntry(root: string, rel: string): Promise<Listed | null> {
     throw error;
   }
   if (stat.isSymbolicLink()) {
-    return { kind: 'link', abs, target: await fs.readlink(abs) };
+    return { kind: 'link', abs, target: await env.files.readlink(abs) };
   }
   if (stat.isDirectory()) {
     return { kind: 'dir', abs, mode: stat.mode & 0o777 };
@@ -164,6 +165,7 @@ async function statEntry(root: string, rel: string): Promise<Listed | null> {
 }
 
 async function listFolder(
+  env: ToolEnvironment,
   root: string,
   scope: Scope,
   rel: string,
@@ -171,7 +173,7 @@ async function listFolder(
   out: Map<string, Listed>,
 ): Promise<void> {
   if (rel !== '') {
-    const entry = await statEntry(root, rel);
+    const entry = await statEntry(env, root, rel);
     if (entry === null || entry.kind !== 'dir') {
       return;
     }
@@ -179,7 +181,7 @@ async function listFolder(
   }
   let names: string[];
   try {
-    names = await fs.readdir(join(root, rel));
+    names = (await env.files.readdir(env.path.join(root, rel))).map((entry) => entry.name);
   } catch (error) {
     if (isMissing(error)) {
       return;
@@ -194,7 +196,7 @@ async function listFolder(
       }
     }
     const childRel = rel === '' ? name : `${rel}/${name}`;
-    const entry = await statEntry(root, childRel);
+    const entry = await statEntry(env, root, childRel);
     if (entry === null) {
       continue;
     }
@@ -202,7 +204,7 @@ async function listFolder(
       continue;
     }
     if (entry.kind === 'dir') {
-      await listFolder(root, scope, childRel, ignored, out);
+      await listFolder(env, root, scope, childRel, ignored, out);
     } else {
       out.set(childRel, entry);
     }
@@ -211,6 +213,7 @@ async function listFolder(
 
 /** Everything in the protected set now, keyed by root-relative path. */
 async function listProtected(
+  env: ToolEnvironment,
   root: string,
   scopes: readonly Scope[],
   ignored: ReadonlySet<string>,
@@ -218,9 +221,9 @@ async function listProtected(
   const out = new Map<string, Listed>();
   for (const scope of scopes) {
     if (scope.recursive) {
-      await listFolder(root, scope, scope.rel, ignored, out);
+      await listFolder(env, root, scope, scope.rel, ignored, out);
     } else {
-      const entry = await statEntry(root, scope.rel);
+      const entry = await statEntry(env, root, scope.rel);
       if (entry !== null && entry.kind !== 'dir') {
         out.set(scope.rel, entry);
       }
@@ -232,25 +235,28 @@ async function listProtected(
 /**
  * Takes the snapshot for a job before its command runs. Refused, with a fixed reason, when the
  * protected files add up to more than `maxBytes` (256 MiB by default) or cannot be read. The
- * caller passes the root's real path and an environment for git.
+ * caller passes the root's real path and the process environment git's query runs with.
  */
-export async function snapshotForRun(options: {
-  root: string;
-  job: ProtectedJob;
-  env: NodeJS.ProcessEnv;
-  maxBytes?: number;
-}): Promise<SnapshotResult> {
+export async function snapshotForRun(
+  env: ToolEnvironment,
+  options: {
+    root: string;
+    job: ProtectedJob;
+    env: NodeJS.ProcessEnv;
+    maxBytes?: number;
+  },
+): Promise<SnapshotResult> {
   const { root, job } = options;
   const maxBytes = options.maxBytes ?? PROTECT_CAP_BYTES;
   const scopes = scopesFor(job);
   const ignored =
     job === 'reviewer'
-      ? ((await gitIgnoredEntries(root, options.env)) ?? new Set<string>())
+      ? ((await gitIgnoredEntries(env, root, options.env)) ?? new Set<string>())
       : new Set<string>();
 
   let listed: Map<string, Listed>;
   try {
-    listed = await listProtected(root, scopes, ignored);
+    listed = await listProtected(env, root, scopes, ignored);
   } catch {
     return { ok: false, reason: UNREADABLE_REASON };
   }
@@ -268,7 +274,11 @@ export async function snapshotForRun(options: {
   try {
     for (const [rel, entry] of listed) {
       if (entry.kind === 'file') {
-        saved.set(rel, { kind: 'file', mode: entry.mode, bytes: await fs.readFile(entry.abs) });
+        saved.set(rel, {
+          kind: 'file',
+          mode: entry.mode,
+          bytes: await env.files.readFile(entry.abs),
+        });
       } else if (entry.kind === 'link') {
         saved.set(rel, { kind: 'link', target: entry.target });
       } else {
@@ -289,19 +299,19 @@ export async function snapshotForRun(options: {
  * read-only attribute goes on its files). Each entry is recorded before it is changed, so a
  * restore puts back whatever was changed, even when this stops part way.
  */
-export async function lockSpecFolder(snapshot: Snapshot): Promise<void> {
+export async function lockSpecFolder(env: ToolEnvironment, snapshot: Snapshot): Promise<void> {
   for (const [rel, saved] of snapshot.saved) {
     if (!isUnder(rel, SPEC_ROOT) || saved.kind === 'link') {
       continue;
     }
-    const abs = join(snapshot.root, rel);
+    const abs = env.path.join(snapshot.root, rel);
     snapshot.locked.push({ abs, mode: saved.mode });
-    await fs.chmod(abs, saved.mode & ~WRITE_BITS);
+    await env.files.chmod(abs, saved.mode & ~WRITE_BITS);
   }
 }
 
-async function chmodQuiet(abs: string, mode: number): Promise<void> {
-  await fs.chmod(abs, mode).catch(() => undefined);
+async function chmodQuiet(env: ToolEnvironment, abs: string, mode: number): Promise<void> {
+  await env.files.chmod(abs, mode).catch(() => undefined);
 }
 
 function depthOf(rel: string): number {
@@ -309,11 +319,11 @@ function depthOf(rel: string): number {
 }
 
 /** Removes one entry the command created, or replaced, so that the saved state can go back. */
-async function removeEntry(abs: string, entry: Listed): Promise<void> {
+async function removeEntry(env: ToolEnvironment, abs: string, entry: Listed): Promise<void> {
   if (entry.kind === 'file') {
-    await chmodQuiet(abs, 0o666);
+    await chmodQuiet(env, abs, 0o666);
   }
-  await fs.rm(abs, { recursive: true, force: true });
+  await env.files.rm(abs, { recursive: true, force: true });
 }
 
 /**
@@ -321,6 +331,7 @@ async function removeEntry(abs: string, entry: Listed): Promise<void> {
  * is compared by bytes and mode; a folder or link by kind (and target).
  */
 async function restoreOne(
+  env: ToolEnvironment,
   abs: string,
   saved: Saved,
   current: Listed | null,
@@ -331,10 +342,10 @@ async function restoreOne(
     }
     const action = current === null ? 're-created' : 'restored';
     if (current !== null) {
-      await removeEntry(abs, current);
+      await removeEntry(env, abs, current);
     }
-    await fs.mkdir(abs, { recursive: true });
-    await chmodQuiet(abs, saved.mode);
+    await env.files.mkdir(abs, { recursive: true });
+    await chmodQuiet(env, abs, saved.mode);
     return action;
   }
 
@@ -344,30 +355,30 @@ async function restoreOne(
     }
     const action = current === null ? 're-created' : 'restored';
     if (current !== null) {
-      await removeEntry(abs, current);
+      await removeEntry(env, abs, current);
     }
-    await fs.mkdir(dirname(abs), { recursive: true });
-    await fs.symlink(saved.target, abs);
+    await env.files.mkdir(env.path.dirname(abs), { recursive: true });
+    await env.files.symlink(saved.target, abs);
     return action;
   }
 
   if (current?.kind === 'file') {
-    const bytes = await fs.readFile(abs);
+    const bytes = await env.files.readFile(abs);
     if (bytes.equals(saved.bytes) && current.mode === saved.mode) {
       return 'same';
     }
-    await chmodQuiet(abs, 0o666);
-    await fs.writeFile(abs, saved.bytes);
-    await fs.chmod(abs, saved.mode);
+    await chmodQuiet(env, abs, 0o666);
+    await env.files.writeFile(abs, saved.bytes);
+    await env.files.chmod(abs, saved.mode);
     return 'restored';
   }
   const action = current === null ? 're-created' : 'restored';
   if (current !== null) {
-    await removeEntry(abs, current);
+    await removeEntry(env, abs, current);
   }
-  await fs.mkdir(dirname(abs), { recursive: true });
-  await fs.writeFile(abs, saved.bytes);
-  await fs.chmod(abs, saved.mode);
+  await env.files.mkdir(env.path.dirname(abs), { recursive: true });
+  await env.files.writeFile(abs, saved.bytes);
+  await env.files.chmod(abs, saved.mode);
   return action;
 }
 
@@ -378,7 +389,10 @@ async function restoreOne(
  * removed when empty, deepest first. Returns one record per path changed, and `incomplete` when
  * a path could not be put back. Never throws.
  */
-export async function restoreAfterRun(snapshot: Snapshot): Promise<RestoreResult> {
+export async function restoreAfterRun(
+  env: ToolEnvironment,
+  snapshot: Snapshot,
+): Promise<RestoreResult> {
   const { root } = snapshot;
   const records: RevertRecord[] = [];
   let incomplete = false;
@@ -387,7 +401,7 @@ export async function restoreAfterRun(snapshot: Snapshot): Promise<RestoreResult
   };
 
   for (const { abs, mode } of [...snapshot.locked].reverse()) {
-    await chmodQuiet(abs, mode);
+    await chmodQuiet(env, abs, mode);
   }
   snapshot.locked.length = 0;
 
@@ -402,7 +416,12 @@ export async function restoreAfterRun(snapshot: Snapshot): Promise<RestoreResult
       continue;
     }
     try {
-      const outcome = await restoreOne(join(root, rel), saved, await statEntry(root, rel));
+      const outcome = await restoreOne(
+        env,
+        env.path.join(root, rel),
+        saved,
+        await statEntry(env, root, rel),
+      );
       if (outcome !== 'same') {
         note(rel, outcome);
       }
@@ -415,8 +434,9 @@ export async function restoreAfterRun(snapshot: Snapshot): Promise<RestoreResult
   // created that git ignores (for example a log) is kept, as the rule says.
   let now: Map<string, Listed>;
   try {
-    const fresh = snapshot.job === 'reviewer' ? await gitIgnoredEntries(root, snapshot.env) : null;
-    now = await listProtected(root, snapshot.scopes, fresh ?? snapshot.ignored);
+    const fresh =
+      snapshot.job === 'reviewer' ? await gitIgnoredEntries(env, root, snapshot.env) : null;
+    now = await listProtected(env, root, snapshot.scopes, fresh ?? snapshot.ignored);
   } catch {
     return { records, incomplete: true };
   }
@@ -427,7 +447,7 @@ export async function restoreAfterRun(snapshot: Snapshot): Promise<RestoreResult
       continue;
     }
     try {
-      await removeEntry(entry.abs, entry);
+      await removeEntry(env, entry.abs, entry);
       note(rel, 'deleted');
     } catch {
       incomplete = true;
@@ -441,7 +461,7 @@ export async function restoreAfterRun(snapshot: Snapshot): Promise<RestoreResult
     .sort((a, b) => depthOf(b) - depthOf(a));
   for (const rel of createdFolders) {
     try {
-      await fs.rmdir(join(root, rel));
+      await env.files.rmdir(env.path.join(root, rel));
       note(rel, 'deleted');
     } catch {
       // Not empty (it holds ignored or kept files), or already gone: nothing to revert.
@@ -452,7 +472,7 @@ export async function restoreAfterRun(snapshot: Snapshot): Promise<RestoreResult
   for (const rel of savedRels) {
     const saved = snapshot.saved.get(rel);
     if (saved?.kind === 'dir') {
-      await chmodQuiet(join(root, rel), saved.mode);
+      await chmodQuiet(env, env.path.join(root, rel), saved.mode);
     }
   }
 

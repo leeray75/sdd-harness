@@ -2,13 +2,13 @@
 // hashes a feature's SPECS.md, and gives each feature its approval. It is the only main-side place
 // that reads the state file or hashes a spec. The values and the rules are in
 // src/shared/spec-state.ts. Nothing here throws: a failure is a result, and a symbolic link, a
-// non-file or an oversized file is never followed or read whole.
+// non-file or an oversized file is never followed or read whole. Every file call goes through the
+// environment's files part (D41), so the lock works the same on any backend.
 
 import { createHash, randomBytes } from 'node:crypto';
-import { lstat, open, rename, rm, writeFile, type FileHandle } from 'node:fs/promises';
-import { join } from 'node:path';
 import { SPEC_FILES, SPECS_DIR, specFilePath, type SpecFileName } from '../../shared/spec-docs';
 import type { Approval } from '../../shared/spec-detect';
+import type { FileHandleLike, Environment } from '../env/types';
 import {
   MAX_SPEC_STATE_BYTES,
   SPEC_STATE_FILE,
@@ -42,9 +42,9 @@ function errorCode(error: unknown): string {
   return 'error';
 }
 
-async function lstatOrNull(path: string) {
+async function lstatOrNull(env: Environment, path: string) {
   try {
-    return await lstat(path);
+    return await env.files.lstat(path);
   } catch (error) {
     if (errorCode(error) === 'ENOENT' || errorCode(error) === 'ENOTDIR') return null;
     throw error;
@@ -52,9 +52,9 @@ async function lstatOrNull(path: string) {
 }
 
 /** True when `path` is a folder that is not a symbolic link or junction. */
-async function isRealDir(path: string): Promise<boolean> {
+async function isRealDir(env: Environment, path: string): Promise<boolean> {
   try {
-    const stats = await lstat(path);
+    const stats = await env.files.lstat(path);
     return stats.isDirectory() && !stats.isSymbolicLink();
   } catch {
     return false;
@@ -65,14 +65,18 @@ async function isRealDir(path: string): Promise<boolean> {
  * Reads a regular file of at most `cap` bytes as UTF-8 text. A symbolic link, a non-file, a file
  * over the cap (or one that grew past it) and any I/O error are returned as a reason.
  */
-export async function readRegularText(path: string, cap: number): Promise<TextRead> {
-  let handle: FileHandle | undefined;
+export async function readRegularText(
+  env: Environment,
+  path: string,
+  cap: number,
+): Promise<TextRead> {
+  let handle: FileHandleLike | undefined;
   try {
-    const stats = await lstat(path);
+    const stats = await env.files.lstat(path);
     if (stats.isSymbolicLink()) return { ok: false, reason: 'a symbolic link is not followed' };
     if (!stats.isFile()) return { ok: false, reason: 'not a regular file' };
     if (stats.size > cap) return { ok: false, reason: 'the file is over the size cap' };
-    handle = await open(path, 'r');
+    handle = await env.files.open(path, 'r');
     const buffer = Buffer.alloc(cap + 1);
     const { bytesRead } = await handle.read(buffer, 0, cap + 1, 0);
     if (bytesRead > cap) return { ok: false, reason: 'the file is over the size cap' };
@@ -89,22 +93,22 @@ export async function readRegularText(path: string, cap: number): Promise<TextRe
  * symbolic link, a non-file, a file over MAX_SPEC_STATE_BYTES, an I/O error, or a file that does
  * not parse (the parser's fixed reason). Never throws.
  */
-export async function readSpecState(root: string): Promise<SpecStateRead> {
+export async function readSpecState(env: Environment, root: string): Promise<SpecStateRead> {
   try {
-    const dir = join(root, SPECS_DIR);
-    const dirStats = await lstatOrNull(dir);
+    const dir = env.path.join(root, SPECS_DIR);
+    const dirStats = await lstatOrNull(env, dir);
     if (dirStats === null) return { kind: 'absent' };
     if (dirStats.isSymbolicLink() || !dirStats.isDirectory()) {
       return { kind: 'unreadable', reason: 'docs/specs is not a folder' };
     }
-    const path = join(dir, SPEC_STATE_FILE);
-    const fileStats = await lstatOrNull(path);
+    const path = env.path.join(dir, SPEC_STATE_FILE);
+    const fileStats = await lstatOrNull(env, path);
     if (fileStats === null) return { kind: 'absent' };
     if (fileStats.isSymbolicLink()) {
       return { kind: 'unreadable', reason: 'a symbolic link is not followed' };
     }
     if (!fileStats.isFile()) return { kind: 'unreadable', reason: 'not a regular file' };
-    const read = await readRegularText(path, MAX_SPEC_STATE_BYTES);
+    const read = await readRegularText(env, path, MAX_SPEC_STATE_BYTES);
     if (!read.ok) return { kind: 'unreadable', reason: read.reason };
     const parsed = parseSpecState(read.text);
     if (!parsed.ok) return { kind: 'unreadable', reason: parsed.reason };
@@ -126,24 +130,32 @@ export function lockForApproval(read: SpecStateRead): LockForApproval {
  * renamed over the file, so a reader sees the old file or the new one. The temp file is removed
  * when anything fails. Never throws.
  */
-export async function writeSpecState(root: string, state: SpecStateFile): Promise<WriteResult> {
-  const dir = join(root, SPECS_DIR);
-  if (!(await isRealDir(dir))) return { ok: false, reason: 'docs/specs is not a folder' };
-  return writeAtomic(join(dir, SPEC_STATE_FILE), serializeSpecState(state));
+export async function writeSpecState(
+  env: Environment,
+  root: string,
+  state: SpecStateFile,
+): Promise<WriteResult> {
+  const dir = env.path.join(root, SPECS_DIR);
+  if (!(await isRealDir(env, dir))) return { ok: false, reason: 'docs/specs is not a folder' };
+  return writeAtomic(env, env.path.join(dir, SPEC_STATE_FILE), serializeSpecState(state));
 }
 
 /**
  * Writes `text` to `path` by a temp file in the same folder and a rename. The temp file is removed
  * when anything fails. Never throws.
  */
-export async function writeAtomic(path: string, text: string): Promise<WriteResult> {
+export async function writeAtomic(
+  env: Environment,
+  path: string,
+  text: string,
+): Promise<WriteResult> {
   const temp = `${path}.${randomBytes(6).toString('hex')}.tmp`;
   try {
-    await writeFile(temp, text, { encoding: 'utf8', flag: 'wx' });
-    await rename(temp, path);
+    await env.files.writeFile(temp, text, { flag: 'wx' });
+    await env.files.rename(temp, path);
     return { ok: true };
   } catch (error) {
-    await rm(temp, { force: true }).catch(() => undefined);
+    await env.files.rm(temp, { force: true }).catch(() => undefined);
     return { ok: false, reason: errorCode(error) };
   }
 }
@@ -159,6 +171,7 @@ export function hashText(text: string): string {
  * a symbolic link or a junction.
  */
 export async function featureFilePath(
+  env: Environment,
   root: string,
   feature: string,
   file: SpecFileName,
@@ -166,21 +179,25 @@ export async function featureFilePath(
   if (specFilePath(feature, file) === null || !(SPEC_FILES as readonly string[]).includes(file)) {
     return null;
   }
-  const specsDir = join(root, SPECS_DIR);
-  if (!(await isRealDir(specsDir))) return null;
-  const folder = join(specsDir, feature);
-  if (!(await isRealDir(folder))) return null;
-  return join(folder, file);
+  const specsDir = env.path.join(root, SPECS_DIR);
+  if (!(await isRealDir(env, specsDir))) return null;
+  const folder = env.path.join(specsDir, feature);
+  if (!(await isRealDir(env, folder))) return null;
+  return env.path.join(folder, file);
 }
 
 /**
  * The SHA-256 of a feature's normalized SPECS.md, or null when the file is missing, unreadable, a
  * symbolic link, or over MAX_SPEC_FILE_BYTES.
  */
-export async function hashSpec(root: string, feature: string): Promise<string | null> {
-  const path = await featureFilePath(root, feature, 'SPECS.md');
+export async function hashSpec(
+  env: Environment,
+  root: string,
+  feature: string,
+): Promise<string | null> {
+  const path = await featureFilePath(env, root, feature, 'SPECS.md');
   if (path === null) return null;
-  const read = await readRegularText(path, MAX_SPEC_FILE_BYTES);
+  const read = await readRegularText(env, path, MAX_SPEC_FILE_BYTES);
   return read.ok ? hashText(read.text) : null;
 }
 
@@ -188,11 +205,15 @@ export async function hashSpec(root: string, feature: string): Promise<string | 
  * The approval of one feature, read from disk. `feature` may be null (no feature open), which
  * gives `none` unless the state file is unreadable, which gives `unchecked`.
  */
-export async function approvalOf(root: string, feature: string | null): Promise<Approval> {
-  const lock = lockForApproval(await readSpecState(root));
+export async function approvalOf(
+  env: Environment,
+  root: string,
+  feature: string | null,
+): Promise<Approval> {
+  const lock = lockForApproval(await readSpecState(env, root));
   const locked =
     lock !== null && lock !== 'unreadable' && feature !== null && lock.feature === feature;
-  const hash = locked ? await hashSpec(root, feature) : null;
+  const hash = locked ? await hashSpec(env, root, feature) : null;
   return approvalFor(lock, feature, hash);
 }
 
@@ -218,13 +239,14 @@ export function currentFeature(read: SpecStateRead, folders: readonly SpecFolder
  * is hashed. Each folder's approval is then given to scanSpecFolders synchronously.
  */
 export async function scanSpecFoldersWithLock(
+  env: Environment,
   root: string,
 ): Promise<{ folders: SpecFolder[]; current: string | null }> {
-  const read = await readSpecState(root);
+  const read = await readSpecState(env, root);
   const lock = lockForApproval(read);
   const lockedFeature = lock !== null && lock !== 'unreadable' ? lock.feature : null;
-  const lockedHash = lockedFeature === null ? null : await hashSpec(root, lockedFeature);
-  const folders = await scanSpecFolders(root, (feature) =>
+  const lockedHash = lockedFeature === null ? null : await hashSpec(env, root, lockedFeature);
+  const folders = await scanSpecFolders(env, root, (feature) =>
     approvalFor(lock, feature, feature === lockedFeature ? lockedHash : null),
   );
   return { folders, current: currentFeature(read, folders) };

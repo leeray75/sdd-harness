@@ -11,6 +11,7 @@ import {
 } from '../../src/main/agent/host';
 import { DEFAULT_POLICY_CONTEXT, type CommandCheck } from '../../src/main/policy/context';
 import { checkToolCall } from '../../src/main/policy/gate';
+import { localEnvironment } from '../../src/main/env';
 
 // host.ts imports Electron for the fork and the quit hook. The runner does not use it.
 vi.mock('electron', () => ({
@@ -30,7 +31,10 @@ type DirectRunner = (
 ) => ReturnType<ToolRunner>;
 
 function makeToolRunner(root?: string, options: ToolRunnerOptions = {}): DirectRunner {
-  const runner = makeHostRunner(root, { commandCheck: ALLOW_ANY_COMMAND, ...options });
+  const runner = makeHostRunner(localEnvironment(), root, {
+    commandCheck: ALLOW_ANY_COMMAND,
+    ...options,
+  });
   return (call) => runner({ job: 'writer', ...call });
 }
 
