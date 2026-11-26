@@ -8,7 +8,7 @@ import {
   UNSUPPORTED_ENVIRONMENT,
   WSL_UNAVAILABLE,
 } from '../../src/main/env';
-import { createWslEnvironment, WSL_LAUNCHER } from '../../src/main/env/wsl';
+import { createWslEnvironment, linuxResult, WSL_LAUNCHER } from '../../src/main/env/wsl';
 import type { Environment } from '../../src/main/env/types';
 import {
   fakeWslTransport,
@@ -884,5 +884,79 @@ describe('environmentFor builds the WSL backend on Windows only (AC7)', () => {
   it('keeps the local kind unchanged, and refuses an unknown kind', () => {
     expect(environmentFor({ kind: 'local' })).toEqual({ ok: true, env: localEnvironment() });
     expect(environmentFor({ kind: 'ssh' })).toEqual({ ok: false, reason: UNSUPPORTED_ENVIRONMENT });
+  });
+
+  it('checks the distribution name before the platform (AC2)', () => {
+    let built = false;
+    for (const platform of ['linux', 'darwin', 'win32'] as const) {
+      for (const descriptor of [{ kind: 'wsl' }, { kind: 'wsl', distribution: '-bad name' }]) {
+        const result = environmentFor(descriptor, {
+          platform,
+          transportFor: () => {
+            built = true;
+            return transport;
+          },
+        });
+        expect(result).toEqual({ ok: false, reason: UNSUPPORTED_ENVIRONMENT });
+      }
+    }
+    expect(built).toBe(false);
+  });
+
+  it('a valid name off Windows gives WSL_UNAVAILABLE on linux (AC2)', () => {
+    expect(
+      environmentFor(
+        { kind: 'wsl', distribution: DISTRO },
+        { platform: 'linux', transportFor: () => transport },
+      ),
+    ).toEqual({ ok: false, reason: WSL_UNAVAILABLE });
+  });
+});
+
+/** The Node code a function throws, or undefined when it does not throw. */
+function errorCodeOf(fn: () => unknown): unknown {
+  try {
+    fn();
+    return undefined;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code;
+  }
+}
+
+// The mapping of realpath and readlink results (AC1). The string cases run on any host: a POSIX share root
+// is a POSIX path here, and a UNC root is the app's Windows form, so no symlink is needed for either.
+describe('linuxResult maps a share result to a Linux path (AC1)', () => {
+  const POSIX_ROOT = '/srv/share';
+  const UNC_ROOT = '\\\\wsl.localhost\\Ubuntu';
+
+  it('a POSIX root: a result inside the share maps back to its Linux path', () => {
+    expect(linuxResult(POSIX_ROOT, '/srv/share/home/u/project')).toBe('/home/u/project');
+    expect(linuxResult(POSIX_ROOT, '/srv/share')).toBe('/');
+  });
+
+  it('a POSIX root: a host path outside the share gives ENOENT', () => {
+    expect(errorCodeOf(() => linuxResult(POSIX_ROOT, '/srv/other/secret'))).toBe('ENOENT');
+    expect(errorCodeOf(() => linuxResult(POSIX_ROOT, '/etc/passwd'))).toBe('ENOENT');
+  });
+
+  it('a UNC root: a /-prefixed result is a Linux path and is returned unchanged', () => {
+    expect(linuxResult(UNC_ROOT, '/home/u/project')).toBe('/home/u/project');
+    expect(linuxResult(UNC_ROOT, '/')).toBe('/');
+  });
+
+  it('a relative link target is kept as written, on either root', () => {
+    expect(linuxResult(POSIX_ROOT, 'real.txt')).toBe('real.txt');
+    expect(linuxResult(UNC_ROOT, 'real.txt')).toBe('real.txt');
+  });
+});
+
+describe('environmentFor refuses WSL off Windows only after the name check (AC2)', () => {
+  it('gives UNSUPPORTED_ENVIRONMENT on every platform for a missing name', () => {
+    for (const platform of ['win32', 'linux', 'darwin'] as const) {
+      expect(environmentFor({ kind: 'wsl' }, { platform })).toEqual({
+        ok: false,
+        reason: UNSUPPORTED_ENVIRONMENT,
+      });
+    }
   });
 });

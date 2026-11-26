@@ -78,8 +78,9 @@ function sshTransportFor(server: SshServer, ssh: SshDeps): SshTransport {
 
 /**
  * The backend for a project's environment descriptor. The local kind is the local backend. The WSL kind is
- * built on Windows for a valid distribution name, and refused with WSL_UNAVAILABLE elsewhere and with
- * UNSUPPORTED_ENVIRONMENT for a bad or missing name. Any other kind is refused with UNSUPPORTED_ENVIRONMENT.
+ * built on Windows for a valid distribution name. The name is checked first (UNSUPPORTED_ENVIRONMENT for a
+ * bad or missing name, on any platform), then the platform (WSL_UNAVAILABLE off Windows). Any other kind is
+ * refused with UNSUPPORTED_ENVIRONMENT.
  * No reason echoes a value from the descriptor.
  */
 export function environmentFor(
@@ -90,10 +91,10 @@ export function environmentFor(
     return { ok: true, env: localEnvironment() };
   }
   if (descriptor.kind === 'wsl') {
-    const platform = deps.platform ?? process.platform;
-    if (platform !== 'win32') return { ok: false, reason: WSL_UNAVAILABLE };
     const distribution = descriptor.distribution;
     if (!isDistributionName(distribution)) return { ok: false, reason: UNSUPPORTED_ENVIRONMENT };
+    const platform = deps.platform ?? process.platform;
+    if (platform !== 'win32') return { ok: false, reason: WSL_UNAVAILABLE };
     const transport = (deps.transportFor ?? appWslTransport)(distribution);
     return { ok: true, env: createWslEnvironment({ distribution, transport }) };
   }
