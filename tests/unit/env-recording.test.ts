@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -28,7 +28,7 @@ let base: string;
 let root: string;
 
 beforeAll(() => {
-  base = mkdtempSync(join(tmpdir(), 'env-recording-'));
+  base = mkdtempSync(join(realpathSync.native(tmpdir()), 'env-recording-'));
   root = join(base, 'root');
   mkdirSync(join(root, 'docs', 'specs', FEATURE), { recursive: true });
   writeFileSync(join(root, 'a.txt'), 'needle in a file');

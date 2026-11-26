@@ -48,7 +48,7 @@ jobs:
         run: pnpm test
 
   e2e:
-    name: e2e and package (${{ matrix.os }})
+    name: unit, e2e and package (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -69,6 +69,13 @@ jobs:
 
       - name: Install dependencies from the lockfile
         run: pnpm install --frozen-lockfile
+
+      # The unit tests run here and in `check (Linux)`, so every OS runs them. They run before the
+      # sysctl step below on purpose: with unprivileged user namespaces allowed, `unshare` starts to
+      # work on the Linux runner and the writer's commands get the OS wrapper, which the `check` job
+      # never sees. Keeping the order keeps the Linux unit tests on the same path that job runs.
+      - name: Unit tests
+        run: pnpm test
 
       - name: Allow unprivileged user namespaces for Electron (Linux)
         if: runner.os == 'Linux'
