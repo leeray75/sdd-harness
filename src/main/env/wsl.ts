@@ -159,15 +159,19 @@ function linuxFor(shareRoot: string, sharePath: string): string | null {
 }
 
 /**
- * A result the share gives back (realpath or readlink) as a Linux path. A POSIX-absolute result is
- * already Linux; a relative link target is kept as written; a share path outside the share is ENOENT.
+ * A result the share gives back (realpath or readlink) as a Linux path, by four rules in order: a native
+ * absolute result inside the share root maps back to its Linux path; a `/`-prefixed result is a Linux
+ * path, kept as it is, only when the share root is not POSIX-absolute (a UNC root, as on Windows); a
+ * relative result is kept as written; anything else is a host path outside the share, so ENOENT.
  */
-function linuxResult(shareRoot: string, result: string): string {
-  if (result.startsWith('/')) return result;
+export function linuxResult(shareRoot: string, result: string): string {
+  if (nativeIsAbsolute(result)) {
+    const linux = linuxFor(shareRoot, result);
+    if (linux !== null) return linux;
+  }
   if (!nativeIsAbsolute(result)) return result;
-  const linux = linuxFor(shareRoot, result);
-  if (linux === null) throw codeError('ENOENT');
-  return linux;
+  if (result.startsWith('/') && !posix.isAbsolute(shareRoot)) return result;
+  throw codeError('ENOENT');
 }
 
 /** True when a path exists, lstat-style (a dangling link counts). */
