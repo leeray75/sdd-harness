@@ -114,3 +114,4 @@ The phase doc suggested five subtasks; the user chose a split into eight. Today 
 - From `p4-macos-container-scripts`:
   - After PR #33 (`p4-macos-ci-fix`) merges, its CHANGELOG macOS entry and its `docs/environments.md` checklist line should say `realpathSync.native(tmpdir())`, not `realpathSync(tmpdir())`. Both texts exist only on PR #33's branch, so this subtask does not change them.
   - The macOS behaviour of the stat skip is checked by PR #33's macOS job after this merges. Linux runs all 51 scenarios; the skip logic was also checked in a Linux container with a `stat` that rejects `-c` (6 skipped, 45 run).
+  - **Merged:** `57f6b63` (PR #35; work `77f9b9e`, close `9aca0dd`), with the [SUMMARY](../specs/p4-macos-container-scripts/SUMMARY.md). It merged while the Windows and macOS e2e jobs of its run (`45900176570`) were still running; `check (Linux)` and the Linux e2e job had passed.
