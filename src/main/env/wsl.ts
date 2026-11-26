@@ -30,7 +30,7 @@ import type {
 } from './types';
 
 /** The program that starts WSL here. Only this module and wsl-detect.ts name it (AC10). */
-const WSL_EXE = 'wsl.exe';
+export const WSL_EXE = 'wsl.exe';
 
 /** The line the launcher prints first: the marker, then the id of the process group it created. */
 export const WSL_GROUP_MARKER = GROUP_MARKER;

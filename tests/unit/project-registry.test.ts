@@ -26,7 +26,12 @@ import { fakeWslTransport } from '../support/fake-wsl-transport';
 import { fakeSshTransport } from '../support/fake-ssh-transport';
 import { DEFAULT_RULES } from '../../src/shared/project-rules';
 import type { Environment } from '../../src/main/env/types';
-import { createProjectStore, type Project } from '../../src/main/projects/store';
+import { createProjectStore, STORE_REASONS, type Project } from '../../src/main/projects/store';
+import {
+  fakeDocker,
+  type FakeContainer,
+  type FakeDocker,
+} from '../support/fake-container-transport';
 import type { ToolRunner } from '../../src/main/agent/router';
 import { createInProcessJobRunner } from '../../src/main/workflow/job-runner';
 import { createBuildController } from '../../src/main/workflow/build-loop';
@@ -820,5 +825,88 @@ describe('connections: unreachable projects, reconnect and the state (AC11, D43)
     expect(await registry.reconnect(id)).toEqual({ ok: true });
     expect(registry.stateOf(id)).toBe('connected');
     expect(startLock).toHaveBeenCalledWith(expect.anything(), '/home/u/project');
+  });
+});
+
+describe('dev container projects through the registry (AC9, D44)', () => {
+  const FOLDER = '/home/dev/project';
+
+  /** A fake docker with one labelled container whose `/work` folder is a temp folder. */
+  function dockerWith(script: Parameters<typeof fakeDocker>[1] = {}, running = true): FakeDocker {
+    const mount = join(base, 'container');
+    mkdirSync(join(mount, 'work'), { recursive: true });
+    const item: FakeContainer = {
+      id: 'dev1',
+      folder: FOLDER,
+      metadata: JSON.stringify([{ remoteUser: 'dev' }]),
+      running,
+      created: '2026-11-20 10:00:00 +0000 UTC',
+      mount,
+    };
+    return fakeDocker([item], script);
+  }
+
+  const containerEnv = (docker: FakeDocker) => (descriptor: EnvironmentDescriptor) =>
+    environmentFor(descriptor, { containerTransportFor: () => docker });
+
+  it('a container project is added after its connect, with its root checked through the environment', async () => {
+    const docker = dockerWith();
+    const { registry, startLock } = await makeRegistry({ environmentFor: containerEnv(docker) });
+    const added = await registry.addProject({
+      name: 'Container',
+      environment: { kind: 'container', folder: FOLDER, docker: { kind: 'host' } },
+      root: '/work',
+      rules: DEFAULT_RULES,
+    });
+    expect(added.ok).toBe(true);
+    if (!added.ok) return;
+    expect(registry.stateOf(added.project.id)).toBe('connected');
+    expect(startLock).toHaveBeenCalledWith(expect.anything(), '/work');
+  });
+
+  it('an add to a container that cannot be reached is refused with the store root reason, and stores nothing', async () => {
+    const docker = dockerWith({ engineDown: true });
+    const { registry, startLock } = await makeRegistry({ environmentFor: containerEnv(docker) });
+    expect(
+      await registry.addProject({
+        name: 'Container',
+        environment: { kind: 'container', folder: FOLDER, docker: { kind: 'host' } },
+        root: '/work',
+        rules: DEFAULT_RULES,
+      }),
+    ).toEqual({ ok: false, reason: STORE_REASONS.root });
+    expect(registry.projects()).toEqual([]);
+    expect(startLock).not.toHaveBeenCalled();
+  });
+
+  it('a stored container project whose container is stopped is unreachable at start and removable, and reconnect starts it', async () => {
+    const docker = dockerWith({ startFails: true }, false);
+    const id = seedStore({ kind: 'container', folder: FOLDER, docker: { kind: 'host' } }, '/work');
+    const { registry, startLock } = await makeRegistry({ environmentFor: containerEnv(docker) });
+    await settle();
+    expect(registry.projects().map((project) => project.id)).toEqual([id]);
+    expect(registry.stateOf(id)).toBe('unreachable');
+    expect(startLock).not.toHaveBeenCalled();
+    expect(await registry.handlerFor('approve-spec')(request('approve-spec', id))).toEqual({
+      ok: false,
+      code: 'refused',
+      reason: PROJECT_UNREACHABLE,
+    });
+
+    docker.script.startFails = false;
+    expect(await registry.reconnect(id)).toEqual({ ok: true });
+    expect(registry.stateOf(id)).toBe('connected');
+    expect(startLock).toHaveBeenCalledWith(expect.anything(), '/work');
+    expect(docker.containers[0]?.running).toBe(true);
+  });
+
+  it('a stopped container project can be removed while it is unreachable at start', async () => {
+    const docker = dockerWith({ startFails: true }, false);
+    const id = seedStore({ kind: 'container', folder: FOLDER, docker: { kind: 'host' } }, '/work');
+    const { registry } = await makeRegistry({ environmentFor: containerEnv(docker) });
+    await settle();
+    expect(registry.stateOf(id)).toBe('unreachable');
+    expect((await registry.removeProject(id)).ok).toBe(true);
+    expect(registry.projects()).toEqual([]);
   });
 });

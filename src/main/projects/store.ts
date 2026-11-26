@@ -21,17 +21,23 @@ import {
 } from '../../shared/project-rules';
 import type { Logger } from '../log';
 import { localEnvironment } from '../env';
+import { isContainerFolder, parseDockerHost, type DockerHost } from '../env/container-transport';
 import type { Environment } from '../env/types';
 import { isDistributionName } from '../env/wsl-detect';
 import { writeFileAtomic } from '../tools/atomic-write';
 
 /**
- * Where a project's folder is (D40, D42, D43): the local folder, a folder inside a WSL distribution, or a
- * folder on a saved SSH server. The WSL distribution is the one name the environment factory accepts; the
- * SSH server is the lowercase UUID of a saved server (src/main/projects/servers.ts).
+ * Where a project's folder is (D40, D42, D43, D44): the local folder, a folder inside a WSL distribution, a
+ * folder on a saved SSH server, or a folder in a dev container. The WSL distribution is the one name the
+ * environment factory accepts; the SSH server is the lowercase UUID of a saved server
+ * (src/main/projects/servers.ts); a dev container is its devcontainer.local_folder label and the Docker host
+ * that runs it (D44).
  */
 export type ProjectEnvironment =
-  { kind: 'local' } | { kind: 'wsl'; distribution: string } | { kind: 'ssh'; server: string };
+  | { kind: 'local' }
+  | { kind: 'wsl'; distribution: string }
+  | { kind: 'ssh'; server: string }
+  | { kind: 'container'; folder: string; docker: DockerHost };
 
 /** One project: a repo folder with its own rules (D40). */
 export interface Project {
@@ -88,7 +94,8 @@ export const STORE_REASONS = {
   root: 'the root must be an absolute path to an existing folder',
   duplicate: 'a project already uses this folder',
   name: 'the name must be 1 to 80 characters with no line break',
-  environment: 'the environment must be local, a WSL distribution or a saved SSH server',
+  environment:
+    'the environment must be local, a WSL distribution, a saved SSH server or a dev container',
   save: 'the projects could not be saved, so nothing changed',
   failed: 'the action failed',
 } as const;
@@ -137,8 +144,9 @@ function cleanName(value: unknown): string | null {
 
 /**
  * The environment a descriptor names, with exactly its keys: `{ kind: 'local' }`, `{ kind: 'wsl',
- * distribution }` with a valid distribution name, or `{ kind: 'ssh', server }` with a saved server's id.
- * Anything else is null. Loading never touches the network (D43).
+ * distribution }` with a valid distribution name, `{ kind: 'ssh', server }` with a saved server's id, or
+ * `{ kind: 'container', folder, docker }` with a folder that passes the folder rule and a Docker host (D44).
+ * Anything else is null. Loading never touches the network or starts a process (D43, D44).
  */
 function parseEnvironment(value: unknown): ProjectEnvironment | null {
   if (!isRecord(value)) return null;
@@ -156,13 +164,36 @@ function parseEnvironment(value: unknown): ProjectEnvironment | null {
     const server = value['server'];
     return typeof server === 'string' && UUID_PATTERN.test(server) ? { kind: 'ssh', server } : null;
   }
+  if (value['kind'] === 'container') {
+    if (keys.length !== 3 || keys[0] !== 'docker' || keys[1] !== 'folder' || keys[2] !== 'kind') {
+      return null;
+    }
+    const folder = value['folder'];
+    const docker = parseDockerHost(value['docker']);
+    return isContainerFolder(folder) && docker !== null
+      ? { kind: 'container', folder, docker }
+      : null;
+  }
   return null;
+}
+
+/** True when two Docker hosts are the same: the host's own docker, or the same WSL distribution (D44). */
+function sameDockerHost(a: DockerHost, b: DockerHost): boolean {
+  if (a.kind === 'host' || b.kind === 'host') return a.kind === b.kind;
+  return a.distribution === b.distribution;
 }
 
 /** A copy of an environment descriptor, so a caller cannot change the stored one. */
 function copyEnvironment(environment: ProjectEnvironment): ProjectEnvironment {
   if (environment.kind === 'local') return { kind: 'local' };
   if (environment.kind === 'wsl') return { kind: 'wsl', distribution: environment.distribution };
+  if (environment.kind === 'container') {
+    const docker: DockerHost =
+      environment.docker.kind === 'host'
+        ? { kind: 'host' }
+        : { kind: 'wsl', distribution: environment.docker.distribution };
+    return { kind: 'container', folder: environment.folder, docker };
+  }
   return { kind: 'ssh', server: environment.server };
 }
 
@@ -194,6 +225,9 @@ function sameProject(
   }
   if (a.kind === 'ssh' && b.kind === 'ssh') {
     return a.server === b.server && rootA === rootB;
+  }
+  if (a.kind === 'container' && b.kind === 'container') {
+    return sameDockerHost(a.docker, b.docker) && a.folder === b.folder && rootA === rootB;
   }
   return sameRoot(rootA, rootB, platform);
 }
