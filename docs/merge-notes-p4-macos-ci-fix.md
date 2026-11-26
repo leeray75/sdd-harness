@@ -7,9 +7,9 @@ last category.
 
 - Branch: `feature/p4-macos-ci-fix` → `main`
 - Pull request: https://github.com/leeray75/sdd-harness/pull/33
-- Head commit: `19ced5c4d7c5216d04d38d8f321b87096e5dd863`
-- Green CI run: https://github.com/leeray75/sdd-harness/actions/runs/45894144761
-- Scope: **10 files, +94/−46. No change under `src/`.** Tests and docs only.
+- Head commit: `1f053d9`
+- Green CI run: https://github.com/leeray75/sdd-harness/actions/runs/45895593885
+- Scope: **11 files, +302/−46. No change under `src/`.** Tests and docs only.
 
 ## 1. What it does
 
@@ -51,7 +51,7 @@ Expected: **no output.** The change touches no product code, no shared test supp
 tests, and no sdd spec folder. If any file appears, stop and re-review.
 
 ```sh
-git diff --stat origin/main...HEAD          # expect 10 files, +94/−46
+git diff --stat origin/main...HEAD          # expect 11 files, +302/−46
 ```
 
 ## 5. Verify each claim
@@ -102,8 +102,21 @@ git diff --stat origin/main...HEAD          # expect 10 files, +94/−46
 
 **Never verified — do not repeat as fact**
 
-- **Windows unit tests green more than once.** One green run. Windows has no historical baseline at
-  all; treat the first few runs as data.
+- **Windows behaviour beyond the runs listed below.** The Windows unit step has passed three times
+  now, but Windows had no unit-test history whatsoever before this PR, so treat these as early data,
+  not a baseline.
+
+### CI run ledger for this branch
+
+| Run           | Head      | Result                                                                                       |
+| ------------- | --------- | -------------------------------------------------------------------------------------------- |
+| `45892757779` | `30b828a` | Windows unit **failed** (8 stand-in-root cases); this is the run that found the resolver bug |
+| `45893521479` | `642ba2e` | Windows unit **passed**; macOS failed on the `env-local` watch flake                         |
+| `45894144761` | `19ced5c` | all four jobs green                                                                          |
+| `45895593885` | `1f053d9` | all four jobs green (current head)                                                           |
+
+Check with `gh run view <id> --json jobs --jq '.jobs[] | "\(.name): \(.conclusion)"'`.
+
 - The WSL and SSH backends against real WSL or a real SSH server: `pnpm test:live` only skipped,
   because it needs `HARNESS_SSH_*` and a Windows+WSL host.
 - `pnpm e2e` on Windows and Linux — CI runs it; it was run by hand on macOS only.
@@ -139,8 +152,8 @@ and `e2e` on Windows, macOS and Linux.
 4. **After the merge**, per `CLAUDE.md`, fill in the status and commit columns of the relevant row
    in `docs/phases/phase-04-progress.md`. Only those two fields; the rest of the docs work was done
    on the branch, as the rule requires.
-5. Optional but recommended: replace this file's "one green run" caveat for Windows once a second
-   Windows run goes green.
+5. Optional: keep the run ledger in §6 current. Windows now has three green unit runs and no
+   pre-existing baseline, so a few more green runs is what would make that claim solid.
 
 ## 9. Triage a red run before calling it a regression
 
