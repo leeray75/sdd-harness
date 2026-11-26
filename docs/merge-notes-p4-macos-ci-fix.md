@@ -10,9 +10,50 @@ last category.
 - Head commit: whatever the tip of `feature/p4-macos-ci-fix` is. Read it with
   `gh pr view 33 --json headRefOid --jq .headRefOid` — this file deliberately does **not** pin a SHA,
   because editing this file is itself a commit and would instantly stale whatever it quoted.
-- Latest green CI run: see the ledger in §6, and `gh pr checks 33` for the live answer.
+- CI: all four jobs were last green together on run `45895593885`. **The current run is red on macOS
+  for the reason in §0, which is not this branch.** Live state: `gh pr checks 33`.
 - Scope: **tests and docs only — nothing under `src/`.** Check with §4, which is the assertion that
   actually matters; the file count moves whenever this file is edited.
+
+## 0. Read this before judging the CI state
+
+As of 2026-11-26 the **macOS unit step on this pull request is red for a reason that is not in this
+branch.** `main` moved forward while this work was in review: PR #34 (`p4-env-container`, D44) merged
+`src/main/env/container.ts` and `tests/unit/container-scripts.test.ts`, and those three cases fail on
+macOS:
+
+```
+the fixed files scripts match the fake and a real POSIX shell (AC4)
+  gives the same answer for stat of a file: ok
+  gives the same answer for stat of a folder: ok
+  gives the same answer for lstat of a dangling link: ok
+```
+
+This is **not** the flake in §9 and **not** a regression from this branch. It reproduces on `main`
+alone, with none of this branch's commits:
+
+```sh
+git worktree add /tmp/main-check origin/main && cd /tmp/main-check
+ln -s <repo>/node_modules node_modules
+npx vitest run tests/unit/container-scripts.test.ts   # 3 failed | 48 passed on macOS
+```
+
+Cause, verified: `src/main/env/container.ts:120` and `:125` build the files scripts with
+`stat -c '<format>'`, which is GNU coreutils syntax. macOS `/usr/bin/stat` is BSD stat and rejects the
+flag outright (`stat: illegal option -- c`, exit 1). The AC4 test runs each fixed script through the
+**host** POSIX shell as well as the fake, so on macOS the real shell takes the script's failure path
+and answers `EACCES` where the fake answers `ok`. The failing assertion is the host-shell one
+(`container-scripts.test.ts:405`, `expect(shell)`).
+
+Why nobody saw it: `container` runs `stat` **inside a Linux container** through `docker exec`, so the
+backend itself is probably right in production; only the test executes the script on the host. And
+before this pull request the unit tests ran only on Linux, where `stat -c` works. This is the same bug
+class this branch exists to catch — a test that assumes a Linux host — now caught in newly merged
+code on its first macOS run.
+
+It blocks the merge under the repo's "green on every job" rule. It should be fixed in its own change
+against `src/main/env/container.ts` / its test, not folded into this pull request, which touches no
+product code.
 
 ## 1. What it does
 
@@ -164,6 +205,9 @@ and `e2e` on Windows, macOS and Linux.
    pre-existing baseline, so a few more green runs is what would make that claim solid.
 
 ## 9. Triage a red run before calling it a regression
+
+First rule out §0: the macOS unit step currently fails on `main`'s container scripts, deterministically,
+which is neither of the two cases below. Then:
 
 Two watch tests are load-sensitive and were previously invisible because only Linux ran them:
 
