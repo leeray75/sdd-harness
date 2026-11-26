@@ -111,3 +111,6 @@ The phase doc suggested five subtasks; the user chose a split into eight. Today 
     - Review round 1 had two minor findings, both rejected. The stray crash dump predates the feature. The stop before the marker matches the spec and is now documented.
     - Round 2 passed.
     - The live walk caught and fixed a transport bug: `stat` never settled for a missing path.
+- From `p4-macos-container-scripts`:
+  - After PR #33 (`p4-macos-ci-fix`) merges, its CHANGELOG macOS entry and its `docs/environments.md` checklist line should say `realpathSync.native(tmpdir())`, not `realpathSync(tmpdir())`. Both texts exist only on PR #33's branch, so this subtask does not change them.
+  - The macOS behaviour of the stat skip is checked by PR #33's macOS job after this merges. Linux runs all 51 scenarios; the skip logic was also checked in a Linux container with a `stat` that rejects `-c` (6 skipped, 45 run).
