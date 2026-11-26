@@ -16,7 +16,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   createHumanActionChannel,
@@ -30,8 +30,17 @@ import { specStateOf, type LiveSpec } from '../../src/main/policy/context';
 import type { RuleLogger } from '../../src/main/policy/rule-event';
 import { createAppJobRunner } from '../../src/main/workflow/app-runner';
 import { createBuildController, type BuildController } from '../../src/main/workflow/build-loop';
-import { approvalOf, scanSpecFoldersWithLock } from '../../src/main/workflow/spec-lock';
-import type { HumanActionId, HumanActionResult } from '../../src/shared/human-actions';
+import { scanSpecFoldersWithLock } from '../../src/main/workflow/spec-lock';
+import { createSpecLockWatcher, type SpecLockWatcher } from '../../src/main/workflow/spec-watch';
+import { environmentFor } from '../../src/main/env';
+import { createProjectRegistry } from '../../src/main/projects/registry';
+import { createProjectStore } from '../../src/main/projects/store';
+import {
+  DEV_PROJECT_ID,
+  type HumanActionId,
+  type HumanActionResult,
+} from '../../src/shared/human-actions';
+import { DEFAULT_RULES } from '../../src/shared/project-rules';
 import type { NodeId } from '../../src/shared/workflow';
 import {
   createScriptedProvider,
@@ -180,8 +189,12 @@ const REVIEWER_SCRIPT: ScriptedTurn[] = [
 // -- the walk's helpers -----------------------------------------------------------------------
 
 let scratch: string | null = null;
+/** Closes the registry of the walk that ran, so its folder watcher does not hold the temp folder. */
+let closeWalkRegistry: (() => void) | null = null;
 
 afterEach(() => {
+  closeWalkRegistry?.();
+  closeWalkRegistry = null;
   if (scratch !== null) {
     rmSync(scratch, { recursive: true, force: true });
     scratch = null;
@@ -307,19 +320,69 @@ async function startWalk(): Promise<Walk> {
   };
   const channel = createHumanActionChannel({ isTrustedSender: () => true, tracker, logger });
 
-  // The live supplier is synchronous, so it holds the lock as read from the files. The handlers'
-  // onLockChanged and the test's own edits call refreshLive.
-  let live: LiveSpec = { feature: FEATURE, spec: 'none' };
+  // The live supplier is synchronous: it reads the lock as the registry's watcher last read it. The
+  // handlers refresh that watcher after each change, and refreshLive refreshes it on demand (D36, D41).
+  let lockWatcher: SpecLockWatcher | null = null;
+  const liveNow = (): LiveSpec => {
+    const value = lockWatcher?.current() ?? { feature: null, approval: 'unchecked' as const };
+    return { feature: value.feature, spec: specStateOf(value.approval) };
+  };
   const refreshLive = async (): Promise<void> => {
-    live = { feature: FEATURE, spec: specStateOf(await approvalOf(root, FEATURE)) };
+    if (lockWatcher === null) throw new Error('the lock watcher is not started');
+    await lockWatcher.refresh();
   };
 
+  // The dev project is the one local project, in the temp repo. The registry makes its environment,
+  // starts its lock watcher and builds its handlers, and the walk takes all of them from there (D41).
+  const registry = createProjectRegistry({
+    store: createProjectStore({
+      filePath: join(dirname(root), 'projects.json'),
+      newId: () => 'headless-walk',
+      now: () => new Date('2026-11-25T10:00:00.000Z'),
+      platform: process.platform,
+      logger,
+    }),
+    devProject: {
+      id: DEV_PROJECT_ID,
+      name: 'dev',
+      environment: { kind: 'local' },
+      root,
+      rules: DEFAULT_RULES,
+    },
+    environmentFor,
+    startLock: (env, lockRoot) => {
+      lockWatcher = createSpecLockWatcher({ env, root: lockRoot, onChange: () => undefined });
+      return lockWatcher;
+    },
+    makeSpecHandlers: ({ env, project, refresh }) =>
+      createSpecHandlers({
+        env,
+        root: project.root,
+        now: () => new Date('2026-11-25T10:00:00.000Z'),
+        onLockChanged: refresh,
+        onEditRequested: () => (walk.controller ? walk.controller.requestEdit() : { ok: true }),
+      }),
+    makeShipHandlers: ({ env, project, refresh, controllerNode }) =>
+      createShipHandlers({
+        env,
+        root: project.root,
+        onLockChanged: refresh,
+        controllerNode,
+        commitFormat: project.rules.commitFormat,
+      }),
+    controllerNode: () => walk.controller?.node() ?? null,
+  });
+  closeWalkRegistry = () => registry.close();
+  const env = registry.environmentOf(DEV_PROJECT_ID);
+  if (env === null) throw new Error('the dev project has no environment');
+
   const provider = createScriptedProvider({ writer: WRITER_SCRIPT, reviewer: REVIEWER_SCRIPT });
-  const runner = createAppJobRunner({
+  const runner = await createAppJobRunner({
+    env,
     root,
     provider,
     model: 'test-model',
-    live: () => live,
+    live: liveNow,
     log: logger,
   });
 
@@ -337,7 +400,7 @@ async function startWalk(): Promise<Walk> {
       remoteRefs: sh(remote, ['for-each-ref', '--format=%(refname) %(objectname)', 'refs/heads']),
     }),
     async nodeNow() {
-      const { folders } = await scanSpecFoldersWithLock(root);
+      const { folders } = await scanSpecFoldersWithLock(env, root);
       return folders[0]?.detection.node ?? 'no folder';
     },
     async human(action, options = {}) {
@@ -346,6 +409,7 @@ async function startWalk(): Promise<Walk> {
     },
     async createController() {
       const created = await createBuildController({
+        env,
         root,
         feature: FEATURE,
         runner,
@@ -358,22 +422,12 @@ async function startWalk(): Promise<Walk> {
     },
   };
 
-  // The handlers read the one controller, as index.ts does through buildControllers (D37).
-  const spec = createSpecHandlers({
-    root,
-    now: () => new Date('2026-11-25T10:00:00.000Z'),
-    onLockChanged: refreshLive,
-    onEditRequested: () => (walk.controller ? walk.controller.requestEdit() : { ok: true }),
-  });
-  const ship = createShipHandlers({
-    root,
-    onLockChanged: refreshLive,
-    controllerNode: () => walk.controller?.node() ?? null,
-  });
-  channel.register('approve-spec', spec['approve-spec']);
-  channel.register('edit-approved-spec', spec['edit-approved-spec']);
-  channel.register('approve-result', ship['approve-result']);
-  channel.register('mark-done', ship['mark-done']);
+  // The handlers are the registry's: each one answers for the request's project (D40). The handlers
+  // read the one controller, as index.ts does through buildControllers (D37).
+  channel.register('approve-spec', registry.handlerFor('approve-spec'));
+  channel.register('edit-approved-spec', registry.handlerFor('edit-approved-spec'));
+  channel.register('approve-result', registry.handlerFor('approve-result'));
+  channel.register('mark-done', registry.handlerFor('mark-done'));
 
   await refreshLive();
   return walk;

@@ -4,8 +4,7 @@
 // writes nothing. It never throws for a missing, unreadable or odd entry: that is reported in the
 // result. Symbolic links and junctions are not followed, and each file read is capped in bytes.
 
-import { lstat, open, readdir, type FileHandle } from 'node:fs/promises';
-import { join } from 'node:path';
+import type { FileHandleLike, Environment } from '../env/types';
 import { type Approval, type FolderDetection, detectFolder } from '../../shared/spec-detect';
 import {
   SPEC_FILES,
@@ -69,9 +68,9 @@ function unreadable(reason: string): FileState {
 
 // isRealDir: a directory that is not a symbolic link or junction. False for anything else, and for
 // an error (a missing folder is not a folder to scan).
-async function isRealDir(path: string): Promise<boolean> {
+async function isRealDir(env: Environment, path: string): Promise<boolean> {
   try {
-    const stats = await lstat(path);
+    const stats = await env.files.lstat(path);
     return stats.isDirectory() && !stats.isSymbolicLink();
   } catch {
     return false;
@@ -81,12 +80,13 @@ async function isRealDir(path: string): Promise<boolean> {
 // readCapped: the first MAX_SPEC_FILE_BYTES bytes of a file, as text. An error is returned as its
 // code, never thrown.
 async function readCapped(
+  env: Environment,
   path: string,
   size: number,
 ): Promise<{ text: string } | { error: string }> {
-  let handle: FileHandle | undefined;
+  let handle: FileHandleLike | undefined;
   try {
-    handle = await open(path, 'r');
+    handle = await env.files.open(path, 'r');
     const buffer = Buffer.alloc(Math.min(size, MAX_SPEC_FILE_BYTES));
     const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
     return { text: buffer.subarray(0, bytesRead).toString('utf8') };
@@ -99,12 +99,13 @@ async function readCapped(
 
 // inspect: the state of one known file, and its text when wanted. Never throws.
 async function inspect(
+  env: Environment,
   path: string,
   wantText: boolean,
 ): Promise<{ file: FileState; text: string | null }> {
   let stats;
   try {
-    stats = await lstat(path);
+    stats = await env.files.lstat(path);
   } catch (error) {
     const code = errorCode(error);
     if (code === 'ENOENT' || code === 'ENOTDIR') return { file: ABSENT, text: null };
@@ -121,7 +122,7 @@ async function inspect(
     truncated: stats.size > MAX_SPEC_FILE_BYTES,
   };
   if (!wantText) return { file: present, text: null };
-  const read = await readCapped(path, stats.size);
+  const read = await readCapped(env, path, stats.size);
   if ('error' in read) return { file: unreadable(read.error), text: null };
   return { file: present, text: read.text };
 }
@@ -141,6 +142,7 @@ function fileProblems(name: SpecFileName, file: FileState): string[] {
  * the known files. Does not check the feature name: the callers do (readSpecFolder).
  */
 export async function readSpecFolderAt(
+  env: Environment,
   dir: string,
   feature: string,
   approval: Approval = 'none',
@@ -154,7 +156,7 @@ export async function readSpecFolderAt(
     'build-ledger.md',
   ]);
   for (const name of SPEC_FILES) {
-    const inspected = await inspect(join(dir, name), wanted.has(name));
+    const inspected = await inspect(env, env.path.join(dir, name), wanted.has(name));
     files[name] = inspected.file;
     texts[name] = inspected.text;
   }
@@ -197,16 +199,17 @@ export async function readSpecFolderAt(
  * none of the known files.
  */
 export async function readSpecFolder(
+  env: Environment,
   projectRoot: string,
   feature: string,
   approval: Approval = 'none',
 ): Promise<SpecFolder | null> {
   if (!isFeatureSlug(feature)) return null;
-  const specsDir = join(projectRoot, SPECS_DIR);
-  if (!(await isRealDir(specsDir))) return null;
-  const dir = join(specsDir, feature);
-  if (!(await isRealDir(dir))) return null;
-  return readSpecFolderAt(dir, feature, approval);
+  const specsDir = env.path.join(projectRoot, SPECS_DIR);
+  if (!(await isRealDir(env, specsDir))) return null;
+  const dir = env.path.join(specsDir, feature);
+  if (!(await isRealDir(env, dir))) return null;
+  return readSpecFolderAt(env, dir, feature, approval);
 }
 
 /**
@@ -215,14 +218,15 @@ export async function readSpecFolder(
  * is missing or unreadable. `approvalOf` gives each feature's approval; it defaults to `none`.
  */
 export async function scanSpecFolders(
+  env: Environment,
   projectRoot: string,
   approvalOf: ApprovalOf = () => 'none',
 ): Promise<SpecFolder[]> {
-  const specsDir = join(projectRoot, SPECS_DIR);
-  if (!(await isRealDir(specsDir))) return [];
+  const specsDir = env.path.join(projectRoot, SPECS_DIR);
+  if (!(await isRealDir(env, specsDir))) return [];
   let entries;
   try {
-    entries = await readdir(specsDir, { withFileTypes: true });
+    entries = await env.files.readdir(specsDir);
   } catch {
     return [];
   }
@@ -239,7 +243,7 @@ export async function scanSpecFolders(
     } catch {
       approval = 'unchecked';
     }
-    const folder = await readSpecFolder(projectRoot, name, approval);
+    const folder = await readSpecFolder(env, projectRoot, name, approval);
     if (folder) folders.push(folder);
   }
   return folders;

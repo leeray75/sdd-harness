@@ -6,6 +6,7 @@ import { runAgentLoop } from '../../src/agent/loop';
 import { createProvider } from '../../src/agent/provider/factory';
 import { SPIKE_DEFAULT_MODELS, SPIKE_DEFAULT_PRESET } from '../../src/agent/spike-provider';
 import { parseHeaderLines } from '../../src/agent/provider/headers';
+import { localEnvironment, toolEnvironment } from '../../src/main/env';
 import { readFileInRoot } from '../../src/main/tools/read-file';
 import { getServerPreset, type WireFormat } from '../../src/shared/server-presets';
 
@@ -62,7 +63,7 @@ describe.skipIf(address === undefined).each(FORMATS)(
             if (name !== 'read_file') {
               return { ok: false, reason: 'no such tool' };
             }
-            return readFileInRoot(spikeRoot, args['path']);
+            return readFileInRoot(toolEnvironment(localEnvironment()), spikeRoot, args['path']);
           },
           onText: () => undefined,
         });

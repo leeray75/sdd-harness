@@ -10,6 +10,7 @@ import { createHash } from 'node:crypto';
 import { appendFile, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { localEnvironment } from '../../src/main/env';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
@@ -71,9 +72,9 @@ async function copyFiles(names: readonly FixtureFile[]): Promise<void> {
 
 /** Writes the approval lock for SPECS.md as it is now on disk (the approval that was given). */
 async function lockNow(): Promise<void> {
-  const hash = await hashSpec(root, FEATURE);
+  const hash = await hashSpec(localEnvironment(), root, FEATURE);
   if (hash === null) throw new Error('the temp SPECS.md could not be hashed');
-  const written = await writeSpecState(root, {
+  const written = await writeSpecState(localEnvironment(), root, {
     version: SPEC_STATE_VERSION,
     feature: FEATURE,
     sha256: hash,
@@ -99,7 +100,7 @@ async function openFolder(): Promise<{
   stage: StageView;
   source: string | null;
 }> {
-  const { folders } = await scanSpecFoldersWithLock(root);
+  const { folders } = await scanSpecFoldersWithLock(localEnvironment(), root);
   expect(folders).toHaveLength(1);
   const detection = folders[0]?.detection;
   if (detection === undefined) throw new Error('the folder was not detected');

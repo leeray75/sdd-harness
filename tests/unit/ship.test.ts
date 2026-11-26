@@ -24,10 +24,12 @@ import {
   type ShipOptions,
 } from '../../src/main/workflow/ship';
 import { readSpecFolder } from '../../src/main/workflow/spec-folders';
+import { localEnvironment } from '../../src/main/env';
 import { approvalOf, hashText } from '../../src/main/workflow/spec-lock';
 import { SPEC_STATE_VERSION, serializeSpecState } from '../../src/shared/spec-state';
 import { DEFAULT_RULES, formatCommitMessage } from '../../src/shared/project-rules';
 import type { NodeId } from '../../src/shared/workflow';
+import { recordingEnvironment } from '../support/recording-env';
 
 // Each test drives its own temp repo: a work repo on a feature branch, a bare remote as a local
 // folder, and an empty hooks folder. No network is used. The fixture is a feature folder at
@@ -191,11 +193,11 @@ function mendCommits(): void {
 
 /** Approves the result with the optional controller node. */
 function approve(options: ShipOptions = {}) {
-  return approveResult(work, FEATURE, options);
+  return approveResult(localEnvironment(), work, FEATURE, options);
 }
 
 function close(options: ShipOptions = {}) {
-  return markDone(work, FEATURE, options);
+  return markDone(localEnvironment(), work, FEATURE, options);
 }
 
 afterEach(() => {
@@ -490,6 +492,38 @@ describe('approve-result commit and push (AC2)', () => {
 // approve-result: push failure, retry, and the refusals after approval (AC4)
 // ---------------------------------------------------------------------------------------------
 
+describe('approve-result through the recording backend (AC6)', () => {
+  it(
+    'stages, commits and pushes through git, and reads and writes SUMMARY.md through files',
+    async () => {
+      build({ ticket: 'T-42' });
+      const rec = recordingEnvironment();
+      expect(await approveResult(rec.env, work, FEATURE, {})).toEqual({ ok: true });
+      for (const method of [
+        'currentBranch',
+        'defaultBranch',
+        'changedPaths',
+        'stage',
+        'commit',
+        'push',
+      ]) {
+        expect(rec.methodsOf('git')).toContain(method);
+      }
+      const onSummary = (part: string, method: string, index: number) =>
+        rec.calls.some(
+          (call) =>
+            call.part === part &&
+            call.method === method &&
+            String(call.args[index]).endsWith('SUMMARY.md'),
+        );
+      expect(onSummary('files', 'open', 0)).toBe(true);
+      expect(onSummary('files', 'rename', 1)).toBe(true);
+      expect(sh(remote, ['rev-parse', BRANCH]).trim()).toBe(head());
+    },
+    SLOW,
+  );
+});
+
 describe('SUMMARY.md must hold a Git state line (revision 1)', () => {
   it(
     'refuses both actions when SUMMARY.md is missing, even with the ledger at done',
@@ -652,7 +686,12 @@ describe('mark-done (AC5)', () => {
       build();
       await approve();
       await close();
-      const folder = await readSpecFolder(work, FEATURE, await approvalOf(work, FEATURE));
+      const folder = await readSpecFolder(
+        localEnvironment(),
+        work,
+        FEATURE,
+        await approvalOf(localEnvironment(), work, FEATURE),
+      );
       expect(folder?.detection.node).toBe('closed');
     },
     SLOW,

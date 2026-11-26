@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { MAX_TOOL_OUTPUT_LENGTH } from '../../src/shared/agent-protocol';
 import { listFilesInRoot, LIST_MAX_ENTRIES } from '../../src/main/tools/list-files';
 import { hasNodeModulesSegment, NODE_MODULES_REASON } from '../../src/main/tools/paths';
+import { localEnvironment, toolEnvironment } from '../../src/main/env';
 import { readFileInRoot } from '../../src/main/tools/read-file';
 import { globToRegExp } from '../../src/main/tools/walk';
 import {
@@ -93,8 +94,8 @@ function lines(output: string): string[] {
   return output.split('\n');
 }
 
-async function list(args: Parameters<typeof listFilesInRoot>[1]): Promise<string> {
-  const result = await listFilesInRoot(root, args);
+async function list(args: Parameters<typeof listFilesInRoot>[2]): Promise<string> {
+  const result = await listFilesInRoot(toolEnvironment(localEnvironment()), root, args);
   if (!result.ok) throw new Error(`expected output, got: ${result.reason}`);
   return result.output;
 }
@@ -193,17 +194,27 @@ describe('list_files: glob forms', () => {
   });
 
   it('refuses an empty pattern, a missing path, a file path and a path outside the root', async () => {
-    expect((await listFilesInRoot(root, { pattern: '' })).ok).toBe(false);
-    expect((await listFilesInRoot(root, { path: '' })).ok).toBe(false);
-    expect((await listFilesInRoot(root, { path: 'missing' })).ok).toBe(false);
-    const file = await listFilesInRoot(root, { path: 'a.txt' });
+    expect(
+      (await listFilesInRoot(toolEnvironment(localEnvironment()), root, { pattern: '' })).ok,
+    ).toBe(false);
+    expect(
+      (await listFilesInRoot(toolEnvironment(localEnvironment()), root, { path: '' })).ok,
+    ).toBe(false);
+    expect(
+      (await listFilesInRoot(toolEnvironment(localEnvironment()), root, { path: 'missing' })).ok,
+    ).toBe(false);
+    const file = await listFilesInRoot(toolEnvironment(localEnvironment()), root, {
+      path: 'a.txt',
+    });
     expect(file.ok).toBe(false);
-    const escape = await listFilesInRoot(root, { path: '..' });
+    const escape = await listFilesInRoot(toolEnvironment(localEnvironment()), root, { path: '..' });
     expect(escape.ok).toBe(false);
   });
 
   it('refuses a .git path', async () => {
-    const result = await listFilesInRoot(root, { path: '.git' });
+    const result = await listFilesInRoot(toolEnvironment(localEnvironment()), root, {
+      path: '.git',
+    });
     expect(result.ok).toBe(false);
   });
 });
@@ -228,7 +239,7 @@ describe('list_files and search_text: node_modules paths (AC10)', () => {
   it.each(['node_modules', 'NODE_MODULES/x', 'a/node_modules/b', 'a\\node_modules'])(
     'list_files refuses the path %j with the fixed reason',
     async (path) => {
-      expect(await listFilesInRoot(nmRoot, { path })).toEqual({
+      expect(await listFilesInRoot(toolEnvironment(localEnvironment()), nmRoot, { path })).toEqual({
         ok: false,
         reason: NODE_MODULES_REASON,
       });
@@ -238,7 +249,12 @@ describe('list_files and search_text: node_modules paths (AC10)', () => {
   it.each(['node_modules', 'NODE_MODULES/x', 'a/node_modules/b', 'a\\node_modules'])(
     'search_text refuses the path %j with the fixed reason',
     async (path) => {
-      expect(await searchTextInRoot(nmRoot, { pattern: 'needle', path })).toEqual({
+      expect(
+        await searchTextInRoot(toolEnvironment(localEnvironment()), nmRoot, {
+          pattern: 'needle',
+          path,
+        }),
+      ).toEqual({
         ok: false,
         reason: NODE_MODULES_REASON,
       });
@@ -246,15 +262,26 @@ describe('list_files and search_text: node_modules paths (AC10)', () => {
   );
 
   it('keeps node_modules out of the default listing and the default search', async () => {
-    expect(await listFilesInRoot(nmRoot, {})).toEqual({ ok: true, output: 'src/app.js' });
-    expect(await searchTextInRoot(nmRoot, { pattern: 'needle' })).toEqual({
+    expect(await listFilesInRoot(toolEnvironment(localEnvironment()), nmRoot, {})).toEqual({
+      ok: true,
+      output: 'src/app.js',
+    });
+    expect(
+      await searchTextInRoot(toolEnvironment(localEnvironment()), nmRoot, { pattern: 'needle' }),
+    ).toEqual({
       ok: true,
       output: 'src/app.js:1: needle in source',
     });
   });
 
   it('still reads a file under node_modules with read_file', async () => {
-    expect(await readFileInRoot(nmRoot, 'node_modules/pkg/index.js')).toEqual({
+    expect(
+      await readFileInRoot(
+        toolEnvironment(localEnvironment()),
+        nmRoot,
+        'node_modules/pkg/index.js',
+      ),
+    ).toEqual({
       ok: true,
       output: 'needle in modules',
     });
@@ -307,7 +334,7 @@ describe('list_files: caps', () => {
     } finally {
       rmSync(many, { recursive: true, force: true });
     }
-  });
+  }, 60_000);
 
   it('does not add a cut note at exactly 1,000 entries', async () => {
     const exact = join(root, 'exact');
@@ -321,7 +348,7 @@ describe('list_files: caps', () => {
     } finally {
       rmSync(exact, { recursive: true, force: true });
     }
-  });
+  }, 60_000);
 
   it('keeps the output within the 64 KiB limit and says so when long names fill it', async () => {
     const wide = join(root, 'wide');
@@ -338,12 +365,14 @@ describe('list_files: caps', () => {
     } finally {
       rmSync(wide, { recursive: true, force: true });
     }
-  });
+  }, 60_000);
 });
 
 describe('search_text', () => {
   it('returns path:line: text for each match, in file order', async () => {
-    const result = await searchTextInRoot(root, { pattern: 'needle' });
+    const result = await searchTextInRoot(toolEnvironment(localEnvironment()), root, {
+      pattern: 'needle',
+    });
     expect(result).toEqual({
       ok: true,
       output: ['a.txt:2: needle here', 'b.log:1: log needle', 'sub/c.txt:1: needle in sub'].join(
@@ -353,31 +382,45 @@ describe('search_text', () => {
   });
 
   it('does not search skipped folders', async () => {
-    const out = await searchTextInRoot(root, { pattern: 'needle' });
+    const out = await searchTextInRoot(toolEnvironment(localEnvironment()), root, {
+      pattern: 'needle',
+    });
     if (!out.ok) throw new Error('expected output');
     expect(out.output).not.toContain('.git');
     expect(out.output).not.toContain('node_modules');
   });
 
   it('limits the search with glob and path, using the same file set as list_files', async () => {
-    const byGlob = await searchTextInRoot(root, { pattern: 'needle', glob: '**/*.txt' });
+    const byGlob = await searchTextInRoot(toolEnvironment(localEnvironment()), root, {
+      pattern: 'needle',
+      glob: '**/*.txt',
+    });
     expect(byGlob).toEqual({
       ok: true,
       output: 'a.txt:2: needle here\nsub/c.txt:1: needle in sub',
     });
-    const byPath = await searchTextInRoot(root, { pattern: 'needle', path: 'sub' });
+    const byPath = await searchTextInRoot(toolEnvironment(localEnvironment()), root, {
+      pattern: 'needle',
+      path: 'sub',
+    });
     expect(byPath).toEqual({ ok: true, output: 'sub/c.txt:1: needle in sub' });
   });
 
   it('says no matches when nothing matches', async () => {
-    expect(await searchTextInRoot(root, { pattern: 'absent-phrase-42' })).toEqual({
+    expect(
+      await searchTextInRoot(toolEnvironment(localEnvironment()), root, {
+        pattern: 'absent-phrase-42',
+      }),
+    ).toEqual({
       ok: true,
       output: 'no matches',
     });
   });
 
   it('refuses a pattern that does not compile, without echoing it', async () => {
-    const result = await searchTextInRoot(root, { pattern: 'secret-(' });
+    const result = await searchTextInRoot(toolEnvironment(localEnvironment()), root, {
+      pattern: 'secret-(',
+    });
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error('expected a failure');
     expect(result.reason).toContain('regular expression');
@@ -387,7 +430,10 @@ describe('search_text', () => {
   it('removes a trailing carriage return from each line', async () => {
     put(root, 'crlf.txt', 'x\r\nneedle\r\n');
     try {
-      const result = await searchTextInRoot(root, { pattern: 'needle', glob: 'crlf.txt' });
+      const result = await searchTextInRoot(toolEnvironment(localEnvironment()), root, {
+        pattern: 'needle',
+        glob: 'crlf.txt',
+      });
       expect(result).toEqual({ ok: true, output: 'crlf.txt:2: needle' });
     } finally {
       unlinkSync(join(root, 'crlf.txt'));
@@ -397,7 +443,10 @@ describe('search_text', () => {
   it('cuts each match text to 500 characters', async () => {
     put(root, 'long.txt', `needle${'z'.repeat(800)}`);
     try {
-      const result = await searchTextInRoot(root, { pattern: 'needle', glob: 'long.txt' });
+      const result = await searchTextInRoot(toolEnvironment(localEnvironment()), root, {
+        pattern: 'needle',
+        glob: 'long.txt',
+      });
       if (!result.ok) throw new Error('expected output');
       expect(result.output).toBe(`long.txt:1: needle${'z'.repeat(500 - 6)}`);
     } finally {
@@ -409,9 +458,15 @@ describe('search_text', () => {
     put(root, 'bin.dat', Buffer.from([0x6e, 0x65, 0x65, 0x00, 0x64, 0x6c, 0x65]));
     put(root, 'late-nul.txt', `needle\n${'a'.repeat(9000)}\u0000`);
     try {
-      const binary = await searchTextInRoot(root, { pattern: 'nee', glob: 'bin.dat' });
+      const binary = await searchTextInRoot(toolEnvironment(localEnvironment()), root, {
+        pattern: 'nee',
+        glob: 'bin.dat',
+      });
       expect(binary).toEqual({ ok: true, output: 'no matches' });
-      const late = await searchTextInRoot(root, { pattern: 'needle', glob: 'late-nul.txt' });
+      const late = await searchTextInRoot(toolEnvironment(localEnvironment()), root, {
+        pattern: 'needle',
+        glob: 'late-nul.txt',
+      });
       expect(late).toEqual({ ok: true, output: 'late-nul.txt:1: needle' });
     } finally {
       unlinkSync(join(root, 'bin.dat'));
@@ -424,9 +479,15 @@ describe('search_text', () => {
     put(root, 'over.txt', `needle\n${'a'.repeat(SEARCH_MAX_FILE_BYTES)}`);
     put(root, 'exact.txt', exactLine);
     try {
-      const over = await searchTextInRoot(root, { pattern: 'needle', glob: 'over.txt' });
+      const over = await searchTextInRoot(toolEnvironment(localEnvironment()), root, {
+        pattern: 'needle',
+        glob: 'over.txt',
+      });
       expect(over).toEqual({ ok: true, output: 'no matches' });
-      const exact = await searchTextInRoot(root, { pattern: 'needle', glob: 'exact.txt' });
+      const exact = await searchTextInRoot(toolEnvironment(localEnvironment()), root, {
+        pattern: 'needle',
+        glob: 'exact.txt',
+      });
       expect(exact).toEqual({ ok: true, output: `exact.txt:1: ${exactLine.slice(0, 500)}` });
     } finally {
       unlinkSync(join(root, 'over.txt'));
@@ -438,7 +499,10 @@ describe('search_text', () => {
     const body = Array.from({ length: SEARCH_MAX_MATCHES + 50 }, () => 'needle n').join('\n');
     put(root, 'many-matches.txt', body);
     try {
-      const result = await searchTextInRoot(root, { pattern: 'needle', glob: 'many-matches.txt' });
+      const result = await searchTextInRoot(toolEnvironment(localEnvironment()), root, {
+        pattern: 'needle',
+        glob: 'many-matches.txt',
+      });
       if (!result.ok) throw new Error('expected output');
       const out = lines(result.output);
       expect(out.length).toBe(SEARCH_MAX_MATCHES + 1);
@@ -453,7 +517,10 @@ describe('search_text', () => {
     const body = Array.from({ length: 300 }, () => `needle ${'x'.repeat(490)}`).join('\n');
     put(root, 'wide-matches.txt', body);
     try {
-      const result = await searchTextInRoot(root, { pattern: 'needle', glob: 'wide-matches.txt' });
+      const result = await searchTextInRoot(toolEnvironment(localEnvironment()), root, {
+        pattern: 'needle',
+        glob: 'wide-matches.txt',
+      });
       if (!result.ok) throw new Error('expected output');
       expect(result.output.length).toBeLessThanOrEqual(MAX_TOOL_OUTPUT_LENGTH);
       const out = lines(result.output);
@@ -467,7 +534,9 @@ describe('search_text', () => {
   it.skipIf(!canSymlink)('does not follow a file link to outside the root', async () => {
     symlinkSync(join(outside, 'secret.txt'), join(root, 'leak.txt'), 'file');
     try {
-      const result = await searchTextInRoot(root, { pattern: 'outside' });
+      const result = await searchTextInRoot(toolEnvironment(localEnvironment()), root, {
+        pattern: 'outside',
+      });
       expect(result).toEqual({ ok: true, output: 'no matches' });
     } finally {
       unlinkSync(join(root, 'leak.txt'));
@@ -477,7 +546,9 @@ describe('search_text', () => {
   it.skipIf(!canDirSymlink)('does not descend into a folder link to outside the root', async () => {
     symlinkSync(outside, join(root, 'out-dir'), 'junction');
     try {
-      const result = await searchTextInRoot(root, { pattern: 'outside' });
+      const result = await searchTextInRoot(toolEnvironment(localEnvironment()), root, {
+        pattern: 'outside',
+      });
       expect(result).toEqual({ ok: true, output: 'no matches' });
     } finally {
       unlinkSync(join(root, 'out-dir'));

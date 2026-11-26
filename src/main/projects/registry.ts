@@ -1,12 +1,14 @@
-// The project registry (p4-project-store, D40). It joins the project store and the dev project
-// (the spike root in an unpackaged run) into one list, starts one spec-lock watcher per project, and
-// gives the human-only channel one handler per action. Each handler looks up the request's project
-// and passes the request to that project's own handler, so an approval only ever touches the
-// folder of the project it names (G4). Main only; no Electron import. The watcher, the handler
-// makers and the store are injected, so tests run on temp folders and a fake watcher.
+// The project registry (p4-project-store, D40; environments, D41). It joins the project store and the
+// dev project (the spike root in an unpackaged run) into one list, makes one environment per project
+// from its descriptor, starts one spec-lock watcher per project, and gives the human-only channel one
+// handler per action. Each handler looks up the request's project and passes the request to that
+// project's own handler, so an approval only ever touches the folder of the project it names (G4).
+// Main only; no Electron import. The watcher, the handler makers, the environment maker and the store
+// are injected, so tests run on temp folders and a fake watcher.
 //
 // A request for a project that is not known (not the dev project, not in the store) is refused
-// with `refused` and the fixed reason, and changes nothing. The build controllers are looked up by
+// with `refused` and the fixed reason, and changes nothing. A project whose environment cannot be made
+// is refused the same way: it gets no watcher and no handlers. The build controllers are looked up by
 // project and feature (controllerNode), and buildOptionsFor hands a project's round limit to the
 // build controller (G3). No build starts from here yet (D39).
 
@@ -17,6 +19,8 @@ import {
 } from '../../shared/human-actions';
 import type { ProjectRules, RoundLimit } from '../../shared/project-rules';
 import type { NodeId } from '../../shared/workflow';
+import type { EnvironmentResult } from '../env';
+import type { Environment } from '../env/types';
 import type { HumanActionHandler } from '../human/channel';
 import type { ShipHandlers } from '../human/ship-handlers';
 import type { SpecHandlers } from '../human/spec-handlers';
@@ -29,6 +33,8 @@ export type ProjectAction = 'approve-spec' | 'edit-approved-spec' | 'approve-res
 /** What a project's spec handlers are built from. */
 export interface ProjectHandlersInput {
   project: Project;
+  /** The project's environment, made once by the registry (D41). */
+  env: Environment;
   /** Refreshes the project's spec-lock watcher. Called after each change. */
   refresh: () => Promise<unknown>;
 }
@@ -42,11 +48,13 @@ export interface ProjectRegistryDeps {
   store: ProjectStore;
   /** The dev project (id `dev`). Not saved in the store; absent when there is no spike root. */
   devProject?: Project;
-  /** Starts the spec-lock watcher for one root (createSpecLockWatcher in the app). */
-  startLock: (root: string) => SpecLockWatcher;
-  /** Builds a project's spec handlers from its root and rules. */
+  /** Makes a project's environment from its descriptor (environmentFor in the app, D41). */
+  environmentFor: (descriptor: { readonly kind: string }) => EnvironmentResult;
+  /** Starts the spec-lock watcher for one root in an environment (createSpecLockWatcher in the app). */
+  startLock: (env: Environment, root: string) => SpecLockWatcher;
+  /** Builds a project's spec handlers from its root, rules and environment. */
   makeSpecHandlers: (input: ProjectHandlersInput) => SpecHandlers;
-  /** Builds a project's ship handlers from its root, rules and commit format. */
+  /** Builds a project's ship handlers from its root, rules, environment and commit format. */
   makeShipHandlers: (input: ProjectShipInput) => ShipHandlers;
   /** The node of a feature's build controller in a project, or null when it has none. */
   controllerNode: (projectId: string, feature: string) => NodeId | null;
@@ -63,13 +71,16 @@ export interface ProjectRegistry {
   removeProject(id: string): Promise<ProjectResult>;
   /** The options a build controller takes for a project: its root and round limit (G3). */
   buildOptionsFor(id: string): { root: string; roundLimit: RoundLimit } | null;
+  /** The project's environment (D41), or null for an unknown project. */
+  environmentOf(projectId: string): Environment | null;
   /** Closes every watcher. Called at quit. */
   close(): void;
 }
 
-/** One project's live parts: its watcher and the handlers built from its root and rules. */
+/** One project's live parts: its environment, its watcher and the handlers built from its root. */
 interface Entry {
   project: Project;
+  env: Environment;
   watcher: SpecLockWatcher;
   spec: SpecHandlers;
   ship: ShipHandlers;
@@ -109,29 +120,46 @@ export function createProjectRegistry(deps: ProjectRegistryDeps): ProjectRegistr
     throw new Error('the dev project must have the id dev');
   }
 
-  /** The handlers of one project, built from its root, rules and the watcher's refresh. */
-  function build(project: Project, watcher: SpecLockWatcher): Pick<Entry, 'spec' | 'ship'> {
+  /** The handlers of one project, built from its root, rules, environment and the watcher's refresh. */
+  function build(
+    project: Project,
+    env: Environment,
+    watcher: SpecLockWatcher,
+  ): Pick<Entry, 'spec' | 'ship'> {
     const refresh = () => watcher.refresh();
     return {
-      spec: deps.makeSpecHandlers({ project, refresh }),
+      spec: deps.makeSpecHandlers({ project, env, refresh }),
       ship: deps.makeShipHandlers({
         project,
+        env,
         refresh,
         controllerNode: (feature) => deps.controllerNode(project.id, feature),
       }),
     };
   }
 
-  /** Starts a project's watcher, builds its handlers and refreshes the watcher once. */
-  function start(project: Project): Entry {
-    const watcher = startLock(project.root);
-    const handlers = build(project, watcher);
+  /**
+   * Makes a project's environment, starts its watcher, builds its handlers and refreshes the watcher
+   * once. Null when the environment cannot be made: the project then has no entry at all.
+   */
+  function start(project: Project): Entry | null {
+    const made = deps.environmentFor(project.environment);
+    if (!made.ok) return null;
+    const env = made.env;
+    const watcher = startLock(env, project.root);
+    const handlers = build(project, env, watcher);
     refreshOnce(watcher);
-    return { project, watcher, ...handlers };
+    return { project, env, watcher, ...handlers };
   }
 
-  if (deps.devProject !== undefined) entries.set(DEV_PROJECT_ID, start(deps.devProject));
-  for (const project of store.list()) entries.set(project.id, start(project));
+  if (deps.devProject !== undefined) {
+    const dev = start(deps.devProject);
+    if (dev !== null) entries.set(DEV_PROJECT_ID, dev);
+  }
+  for (const project of store.list()) {
+    const entry = start(project);
+    if (entry !== null) entries.set(project.id, entry);
+  }
 
   /**
    * The live entry for an id, or undefined. A stored project whose rules changed in the store gets
@@ -143,7 +171,7 @@ export function createProjectRegistry(deps: ProjectRegistryDeps): ProjectRegistr
     const stored = store.get(id);
     if (stored === null) return undefined;
     if (!sameRules(stored.rules, entry.project.rules)) {
-      const handlers = build(stored, entry.watcher);
+      const handlers = build(stored, entry.env, entry.watcher);
       entry.project = stored;
       entry.spec = handlers.spec;
       entry.ship = handlers.ship;
@@ -180,8 +208,14 @@ export function createProjectRegistry(deps: ProjectRegistryDeps): ProjectRegistr
     },
 
     async addProject(input) {
+      // A project whose environment cannot be made is refused before anything is stored.
+      const made = deps.environmentFor(input.environment);
+      if (!made.ok) return { ok: false, reason: made.reason };
       const result = await store.add(input);
-      if (result.ok) entries.set(result.project.id, start(result.project));
+      if (result.ok) {
+        const entry = start(result.project);
+        if (entry !== null) entries.set(result.project.id, entry);
+      }
       return result;
     },
 
@@ -193,7 +227,8 @@ export function createProjectRegistry(deps: ProjectRegistryDeps): ProjectRegistr
       const removed = await store.remove(id);
       if (!removed.ok) {
         // The save failed, so the project is still stored: start its watcher again.
-        entries.set(id, start(entry.project));
+        const again = start(entry.project);
+        if (again !== null) entries.set(id, again);
       }
       return removed;
     },
@@ -202,6 +237,11 @@ export function createProjectRegistry(deps: ProjectRegistryDeps): ProjectRegistr
       const entry = live(id);
       if (entry === undefined) return null;
       return { root: entry.project.root, roundLimit: entry.project.rules.roundLimit };
+    },
+
+    environmentOf(projectId) {
+      const entry = live(projectId);
+      return entry === undefined ? null : entry.env;
     },
 
     close() {

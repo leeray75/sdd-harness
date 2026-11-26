@@ -1,23 +1,13 @@
 // The ship step of the sdd workflow (p3-ship, D38). approveResult commits a feature's approved
 // work and pushes its branch; markDone closes the feature (CLOSE through transition()). Both run
 // only through the human-only channel (src/main/human/ship-handlers.ts, D33). Git runs only through
-// src/main/git/git.ts. Every refusal is a fixed reason that never names a path, a branch, a commit
-// message or git's output. Nothing here throws, and a refusal changes nothing it did not undo.
-// docs/workflow-engine.md ("Ship and close") is the reference.
+// the environment's git part (D41), whose local backend is src/main/git/git.ts. Every refusal is a
+// fixed reason that never names a path, a branch, a commit message or git's output. Nothing here
+// throws, and a refusal changes nothing it did not undo. docs/workflow-engine.md ("Ship and close")
+// is the reference.
 
-import { rm } from 'node:fs/promises';
-import { join } from 'node:path';
-import {
-  aheadOfUpstream,
-  changedPaths,
-  commit,
-  currentBranch,
-  defaultBranch,
-  isRepoPath,
-  push,
-  stage,
-  type GitFailure,
-} from '../git/git';
+import { isRepoPath, type GitFailure } from '../git/git';
+import type { Environment } from '../env/types';
 import { SPECS_DIR, parseSpecs } from '../../shared/spec-docs';
 import {
   MAX_SPEC_STATE_BYTES,
@@ -119,14 +109,15 @@ function relPath(feature: string, name: string): string {
 
 /** Reads one file of a feature folder as text, or null when it is missing or unreadable. */
 async function readFeatureText(
+  env: Environment,
   root: string,
   feature: string,
   name: 'SPECS.md' | 'SUBTASK.md' | 'SUMMARY.md' | 'changes.md',
   cap: number,
 ): Promise<string | null> {
-  const path = await featureFilePath(root, feature, name);
+  const path = await featureFilePath(env, root, feature, name);
   if (path === null) return null;
-  const read = await readRegularText(path, cap);
+  const read = await readRegularText(env, path, cap);
   return read.ok ? read.text : null;
 }
 
@@ -230,6 +221,7 @@ function isAllowed(path: string, feature: string, listed: ReadonlySet<string>): 
  * node is detected with the feature's approval (D35, D36).
  */
 async function gate(
+  env: Environment,
   root: string,
   feature: string,
   options: ShipOptions,
@@ -238,18 +230,18 @@ async function gate(
   if (controller !== null && controller !== 'build-done') {
     return refuse(SHIP_REASONS.buildRunning);
   }
-  const approval = await approvalOf(root, feature);
-  const folder = await readSpecFolder(root, feature, approval);
+  const approval = await approvalOf(env, root, feature);
+  const folder = await readSpecFolder(env, root, feature, approval);
   if (folder === null) return refuse(SHIP_REASONS.folder);
   return { ok: true, value: { node: folder.detection.node, approval } };
 }
 
 /** The branch to commit to: refuses a detached HEAD and the default branch. */
-async function checkBranch(root: string): Promise<Step<string>> {
-  const head = await currentBranch(root);
+async function checkBranch(env: Environment, root: string): Promise<Step<string>> {
+  const head = await env.git.currentBranch(root);
   if (!head.ok) return gitReason(head.code);
   if (!('branch' in head.value)) return refuse(SHIP_REASONS.detached);
-  const defaults = await defaultBranch(root);
+  const defaults = await env.git.defaultBranch(root);
   if (!defaults.ok) return gitReason(defaults.code);
   const named = defaults.value === null ? FALLBACK_DEFAULTS : [defaults.value];
   if (named.includes(head.value.branch)) return refuse(SHIP_REASONS.defaultBranch);
@@ -257,14 +249,19 @@ async function checkBranch(root: string): Promise<Step<string>> {
 }
 
 /** Pushes the branch and returns the fixed reason when the push fails. */
-async function pushBranch(root: string, branch: string, failure: string): Promise<ShipResult> {
-  const pushed = await push(root, branch);
+async function pushBranch(
+  env: Environment,
+  root: string,
+  branch: string,
+  failure: string,
+): Promise<ShipResult> {
+  const pushed = await env.git.push(root, branch);
   return pushed.ok ? { ok: true } : refuse(failure);
 }
 
 /** Restores one text file after a failed step. A failure to restore is ignored. */
-async function restore(path: string, text: string): Promise<void> {
-  await writeAtomic(path, text).catch(() => undefined);
+async function restore(env: Environment, path: string, text: string): Promise<void> {
+  await writeAtomic(env, path, text).catch(() => undefined);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -272,20 +269,21 @@ async function restore(path: string, text: string): Promise<void> {
 // ---------------------------------------------------------------------------------------------
 
 async function approveInner(
+  env: Environment,
   root: string,
   feature: string,
   options: ShipOptions,
 ): Promise<ShipResult> {
-  const gated = await gate(root, feature, options);
+  const gated = await gate(env, root, feature, options);
   if (!gated.ok) return gated;
   if (gated.value.node !== 'build-done') return refuse(SHIP_REASONS.notBuildDone);
   if (gated.value.approval !== 'approved') return refuse(SHIP_REASONS.notApproved);
 
-  const branch = await checkBranch(root);
+  const branch = await checkBranch(env, root);
   if (!branch.ok) return branch;
 
-  const summaryPath = await featureFilePath(root, feature, 'SUMMARY.md');
-  const summaryText = await readFeatureText(root, feature, 'SUMMARY.md', MAX_SPEC_FILE_BYTES);
+  const summaryPath = await featureFilePath(env, root, feature, 'SUMMARY.md');
+  const summaryText = await readFeatureText(env, root, feature, 'SUMMARY.md', MAX_SPEC_FILE_BYTES);
   const current = summaryText === null ? null : gitStateOf(summaryText);
   if (summaryPath === null || summaryText === null || current === null) {
     return refuse(SHIP_REASONS.summary);
@@ -293,26 +291,26 @@ async function approveInner(
 
   // A retry: the work was approved, so nothing is committed again and only the push is retried.
   if (current.includes(APPROVED_MARK)) {
-    const changed = await changedPaths(root);
+    const changed = await env.git.changedPaths(root);
     if (!changed.ok) return gitReason(changed.code);
     if (changed.value.length > 0) return refuse(SHIP_REASONS.approvedDirty);
-    const ahead = await aheadOfUpstream(root);
+    const ahead = await env.git.aheadOfUpstream(root);
     if (!ahead.ok) return gitReason(ahead.code);
     if (ahead.value.upstream && ahead.value.ahead === 0) return refuse(SHIP_REASONS.alreadyPushed);
-    return pushBranch(root, branch.value, SHIP_REASONS.pushKept);
+    return pushBranch(env, root, branch.value, SHIP_REASONS.pushKept);
   }
 
-  const changed = await changedPaths(root);
+  const changed = await env.git.changedPaths(root);
   if (!changed.ok) return gitReason(changed.code);
   const listed = allowedFromChanges(
-    await readFeatureText(root, feature, CHANGES_FILE, MAX_SPEC_FILE_BYTES),
+    await readFeatureText(env, root, feature, CHANGES_FILE, MAX_SPEC_FILE_BYTES),
   );
   if (!changed.value.every((path) => isAllowed(path, feature, listed))) {
     return refuse(SHIP_REASONS.outside);
   }
 
-  const specsText = await readFeatureText(root, feature, 'SPECS.md', MAX_SPEC_FILE_BYTES);
-  const subtaskText = await readFeatureText(root, feature, 'SUBTASK.md', MAX_SPEC_FILE_BYTES);
+  const specsText = await readFeatureText(env, root, feature, 'SPECS.md', MAX_SPEC_FILE_BYTES);
+  const subtaskText = await readFeatureText(env, root, feature, 'SUBTASK.md', MAX_SPEC_FILE_BYTES);
   const ticket = parseSpecs(specsText).ticket;
   const format = options.commitFormat ?? DEFAULT_RULES.commitFormat;
   const message = formatCommitMessage(
@@ -324,27 +322,27 @@ async function approveInner(
   const approvedLine = `Branch ${branch.value}; approved; committed and pushed in the commit that adds this report.`;
   const rewritten = withGitState(summaryText, approvedLine);
   if (rewritten === null) return refuse(SHIP_REASONS.summary);
-  const written = await writeAtomic(summaryPath, rewritten);
+  const written = await writeAtomic(env, summaryPath, rewritten);
   if (!written.ok) return refuse(SHIP_REASONS.summaryWrite);
 
   const paths = [...new Set([...changed.value, relPath(feature, 'SUMMARY.md')])].sort();
   // A failed stage or commit puts the file back and re-stages the paths, so the index matches the
   // restored files and a later approve-result sees the same changes again.
   const undo = async (): Promise<void> => {
-    await restore(summaryPath, summaryText);
-    await stage(root, paths);
+    await restore(env, summaryPath, summaryText);
+    await env.git.stage(root, paths);
   };
-  const staged = await stage(root, paths);
+  const staged = await env.git.stage(root, paths);
   if (!staged.ok) {
     await undo();
     return refuse(SHIP_REASONS.commitFailed);
   }
-  const committed = await commit(root, message);
+  const committed = await env.git.commit(root, message);
   if (!committed.ok) {
     await undo();
     return refuse(SHIP_REASONS.commitFailed);
   }
-  return pushBranch(root, branch.value, SHIP_REASONS.pushKept);
+  return pushBranch(env, root, branch.value, SHIP_REASONS.pushKept);
 }
 
 /**
@@ -353,12 +351,13 @@ async function approveInner(
  * pushes the branch. A second call on approved work only retries the push. Never throws.
  */
 export async function approveResult(
+  env: Environment,
   root: string,
   feature: string,
   options: ShipOptions = {},
 ): Promise<ShipResult> {
   try {
-    return await approveInner(root, feature, options);
+    return await approveInner(env, root, feature, options);
   } catch {
     return refuse(SHIP_REASONS.failed);
   }
@@ -369,11 +368,12 @@ export async function approveResult(
 // ---------------------------------------------------------------------------------------------
 
 async function markDoneInner(
+  env: Environment,
   root: string,
   feature: string,
   options: ShipOptions,
 ): Promise<ShipResult> {
-  const gated = await gate(root, feature, options);
+  const gated = await gate(env, root, feature, options);
   if (!gated.ok) return gated;
   // A closed feature whose close was not pushed is retried here: only the push runs.
   const retry = gated.value.node === 'closed';
@@ -382,47 +382,47 @@ async function markDoneInner(
     if (gated.value.approval !== 'approved') return refuse(SHIP_REASONS.notApproved);
   }
 
-  const summaryText = await readFeatureText(root, feature, 'SUMMARY.md', MAX_SPEC_FILE_BYTES);
+  const summaryText = await readFeatureText(env, root, feature, 'SUMMARY.md', MAX_SPEC_FILE_BYTES);
   const current = summaryText === null ? null : gitStateOf(summaryText);
   // A missing SUMMARY, or one with no Git state line, refuses both actions (revision 1).
   if (current === null) return refuse(SHIP_REASONS.summary);
   if (!current.includes(APPROVED_MARK)) return refuse(SHIP_REASONS.approveFirst);
 
-  const changed = await changedPaths(root);
+  const changed = await env.git.changedPaths(root);
   if (!changed.ok) return gitReason(changed.code);
-  const ahead = await aheadOfUpstream(root);
+  const ahead = await env.git.aheadOfUpstream(root);
   if (!ahead.ok) return gitReason(ahead.code);
   const pushedUpToDate = ahead.value.upstream && ahead.value.ahead === 0;
 
   if (retry) {
     if (changed.value.length > 0) return refuse(SHIP_REASONS.closedDirty);
     if (pushedUpToDate) return refuse(SHIP_REASONS.closedAlready);
-    const branch = await checkBranch(root);
+    const branch = await checkBranch(env, root);
     if (!branch.ok) return branch;
-    return pushBranch(root, branch.value, SHIP_REASONS.pushKeptClose);
+    return pushBranch(env, root, branch.value, SHIP_REASONS.pushKeptClose);
   }
 
   if (changed.value.length > 0 || !pushedUpToDate) return refuse(SHIP_REASONS.pushFirst);
-  const branch = await checkBranch(root);
+  const branch = await checkBranch(env, root);
   if (!branch.ok) return branch;
 
   const step = transition('build-done', 'CLOSE');
   if (!step.ok) return refuse(SHIP_REASONS.notAllowed);
 
-  const specsPath = await featureFilePath(root, feature, 'SPECS.md');
+  const specsPath = await featureFilePath(env, root, feature, 'SPECS.md');
   const specsRead =
-    specsPath === null ? null : await readRegularText(specsPath, MAX_SPEC_FILE_BYTES);
+    specsPath === null ? null : await readRegularText(env, specsPath, MAX_SPEC_FILE_BYTES);
   if (specsPath === null || specsRead === null || !specsRead.ok) {
     return refuse(SHIP_REASONS.specsWrite);
   }
   const specsOriginal = specsRead.text;
 
-  const statePath = join(root, SPEC_STATE_PATH);
-  const lock = await readSpecState(root);
+  const statePath = env.path.join(root, SPEC_STATE_PATH);
+  const lock = await readSpecState(env, root);
   const removeState = lock.kind === 'ok' && lock.state.feature === feature;
   let stateOriginal: string | null = null;
   if (removeState) {
-    const stateRead = await readRegularText(statePath, MAX_SPEC_STATE_BYTES);
+    const stateRead = await readRegularText(env, statePath, MAX_SPEC_STATE_BYTES);
     if (!stateRead.ok) return refuse(SHIP_REASONS.closeWrite);
     stateOriginal = stateRead.text;
   }
@@ -432,33 +432,33 @@ async function markDoneInner(
 
   // Puts both files back and re-stages them, so the index matches the restored files again.
   const undo = async (): Promise<void> => {
-    await restore(specsPath, specsOriginal);
-    if (removeState && stateOriginal !== null) await restore(statePath, stateOriginal);
-    await stage(root, paths);
+    await restore(env, specsPath, specsOriginal);
+    if (removeState && stateOriginal !== null) await restore(env, statePath, stateOriginal);
+    await env.git.stage(root, paths);
   };
 
-  const closed = await writeAtomic(specsPath, setFrontmatterStatus(specsOriginal, 'done'));
+  const closed = await writeAtomic(env, specsPath, setFrontmatterStatus(specsOriginal, 'done'));
   if (!closed.ok) return refuse(SHIP_REASONS.specsWrite);
   if (removeState) {
     try {
-      await rm(statePath);
+      await env.files.rm(statePath);
     } catch {
       await undo();
       return refuse(SHIP_REASONS.closeWrite);
     }
   }
 
-  const staged = await stage(root, paths);
+  const staged = await env.git.stage(root, paths);
   if (!staged.ok) {
     await undo();
     return refuse(SHIP_REASONS.commitFailed);
   }
-  const committed = await commit(root, closeMessage(feature));
+  const committed = await env.git.commit(root, closeMessage(feature));
   if (!committed.ok) {
     await undo();
     return refuse(SHIP_REASONS.commitFailed);
   }
-  return pushBranch(root, branch.value, SHIP_REASONS.pushKeptClose);
+  return pushBranch(env, root, branch.value, SHIP_REASONS.pushKeptClose);
 }
 
 /**
@@ -467,12 +467,13 @@ async function markDoneInner(
  * Never throws.
  */
 export async function markDone(
+  env: Environment,
   root: string,
   feature: string,
   options: ShipOptions = {},
 ): Promise<ShipResult> {
   try {
-    return await markDoneInner(root, feature, options);
+    return await markDoneInner(env, root, feature, options);
   } catch {
     return refuse(SHIP_REASONS.failed);
   }

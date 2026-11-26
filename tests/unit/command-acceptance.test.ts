@@ -17,7 +17,9 @@ import { handleAgentMessage, type RouterDeps, type ToolRunner } from '../../src/
 import { commandPolicyFor, makeToolRunner } from '../../src/main/agent/host';
 import { checkToolCall } from '../../src/main/policy/gate';
 import { DEFAULT_POLICY_CONTEXT } from '../../src/main/policy/context';
-import { chooseNetwork, DEAD_PROXY, probeNetwork } from '../../src/main/commands/network';
+import { chooseNetwork, DEAD_PROXY } from '../../src/main/commands/network';
+import { probeNetwork } from '../../src/main/env/probes';
+import { localEnvironment, toolEnvironment } from '../../src/main/env';
 import { runCommandInRoot, type CommandContext } from '../../src/main/tools/run-command';
 import type { RuleEvent } from '../../src/main/policy/rule-event';
 import type { JobId } from '../../src/shared/agent-protocol';
@@ -187,6 +189,7 @@ describe('AC5: spec folder lock and restore, through the runner', () => {
       const before = treeOf(join(root, 'docs/specs'), 'docs/specs/');
       const { events, context } = harvest('writer');
       const result = await runCommandInRoot(
+        toolEnvironment(localEnvironment()),
         root,
         { program: process.execPath, args: [script('specs-stub.cjs')] },
         context,
@@ -213,6 +216,7 @@ describe('AC6: the .git key files', () => {
     specFixture(root);
     const { events, context } = harvest('writer');
     const result = await runCommandInRoot(
+      toolEnvironment(localEnvironment()),
       root,
       { program: process.execPath, args: [script('git-stub.cjs')] },
       context,
@@ -242,6 +246,7 @@ describe('AC7: the reviewer reverts project files, the writer keeps them', () =>
     write(root, '.gitignore', 'out.log\n');
     const { events, context } = harvest('reviewer');
     const result = await runCommandInRoot(
+      toolEnvironment(localEnvironment()),
       root,
       { program: process.execPath, args: [script('project-stub.cjs')] },
       context,
@@ -266,6 +271,7 @@ describe('AC7: the reviewer reverts project files, the writer keeps them', () =>
     write(root, 'src/gone.ts', 'to be deleted');
     const { context } = harvest('writer');
     const result = await runCommandInRoot(
+      toolEnvironment(localEnvironment()),
       root,
       { program: process.execPath, args: [script('project-stub.cjs')] },
       context,
@@ -284,6 +290,7 @@ describe('AC7: the reviewer reverts project files, the writer keeps them', () =>
     const marker = join(root, 'ran.txt');
     const { context } = harvest('reviewer');
     const result = await runCommandInRoot(
+      toolEnvironment(localEnvironment()),
       root,
       { program: process.execPath, args: [script('project-stub.cjs')] },
       context,
@@ -305,6 +312,7 @@ describe('AC7: the reviewer reverts project files, the writer keeps them', () =>
     write(root, '.gitignore', 'out.log\n');
     const { events, context } = harvest('reviewer');
     const result = await runCommandInRoot(
+      toolEnvironment(localEnvironment()),
       root,
       { program: process.execPath, args: [script('project-stub.cjs')] },
       context,
@@ -325,6 +333,7 @@ describe('AC8: the restore runs after a timeout and after a start failure', () =
       const before = treeOf(join(root, 'docs/specs'), 'docs/specs/');
       const { events, context } = harvest('writer');
       const result = await runCommandInRoot(
+        toolEnvironment(localEnvironment()),
         root,
         { program: process.execPath, args: [script('sleep-stub.cjs')] },
         context,
@@ -355,7 +364,12 @@ describe('AC8: the restore runs after a timeout and after a start failure', () =
     chmodSync(broken, 0o755);
     const before = treeOf(join(root, 'docs/specs'), 'docs/specs/');
     const { context } = harvest('writer');
-    const result = await runCommandInRoot(root, { program: broken, args: [] }, context);
+    const result = await runCommandInRoot(
+      toolEnvironment(localEnvironment()),
+      root,
+      { program: broken, args: [] },
+      context,
+    );
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.reason).toBe('the program could not be started');
@@ -373,6 +387,7 @@ describe('AC9: the writer gets the network limit and the dead proxy; the reviewe
     specFixture(root);
     const writer = harvest('writer');
     const writerRun = await runCommandInRoot(
+      toolEnvironment(localEnvironment()),
       root,
       { program: process.execPath, args: [script('env-stub.cjs')] },
       writer.context,
@@ -388,6 +403,7 @@ describe('AC9: the writer gets the network limit and the dead proxy; the reviewe
 
     const reviewer = harvest('reviewer');
     const reviewerRun = await runCommandInRoot(
+      toolEnvironment(localEnvironment()),
       root,
       { program: process.execPath, args: [script('env-stub.cjs')] },
       reviewer.context,
@@ -401,6 +417,7 @@ describe('AC9: the writer gets the network limit and the dead proxy; the reviewe
     specFixture(root);
     const writer = harvest('writer');
     await runCommandInRoot(
+      toolEnvironment(localEnvironment()),
       root,
       { program: process.execPath, args: [script('env-stub.cjs')] },
       writer.context,
@@ -443,7 +460,7 @@ describe('AC10: the router passes the job to the runner', () => {
 
 describe('AC3 host: the detected check, and deny-all with no root', () => {
   it('denies every command with no root, and allows only the detected forms with a root', async () => {
-    const none = commandPolicyFor(undefined);
+    const none = await commandPolicyFor(localEnvironment(), undefined);
     expect(none.policyContext).toBe(DEFAULT_POLICY_CONTEXT);
     expect(none.commandCheck({ job: 'writer', program: 'node', args: ['-v'] })).toEqual({
       allow: false,
@@ -452,7 +469,7 @@ describe('AC3 host: the detected check, and deny-all with no root', () => {
 
     const root = fresh();
     write(root, 'package.json', JSON.stringify({ scripts: { test: 'vitest' } }));
-    const detected = commandPolicyFor(root);
+    const detected = await commandPolicyFor(localEnvironment(), root);
     expect(detected.commandCheck({ job: 'writer', program: 'npm', args: ['test'] })).toEqual({
       allow: true,
     });
@@ -465,8 +482,8 @@ describe('AC3 host: the detected check, and deny-all with no root', () => {
   it('gives the runner the same check through makeToolRunner', async () => {
     const root = fresh();
     write(root, 'package.json', JSON.stringify({ scripts: { test: 'vitest' } }));
-    const { commandCheck } = commandPolicyFor(root);
-    const runner = makeToolRunner(root, { commandCheck });
+    const { commandCheck } = await commandPolicyFor(localEnvironment(), root);
+    const runner = makeToolRunner(localEnvironment(), root, { commandCheck });
     const denied = await runner({
       job: 'writer',
       tool: 'run_command',

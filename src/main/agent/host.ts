@@ -17,6 +17,8 @@ import {
 } from '../../shared/tools';
 import { log } from '../log';
 import { detectCommands, rootMarkerFiles } from '../commands/detect';
+import { toolEnvironment } from '../env';
+import type { Environment } from '../env/types';
 import { makeCommandCheck } from '../policy/command-allowlist';
 import {
   DEFAULT_POLICY_CONTEXT,
@@ -100,14 +102,15 @@ export function contextFor(base: PolicyContext, live?: LiveSupplier): PolicyCont
  * the gate and by the runner. With no root, the default context stays deny-all. `contextNow`
  * gives each call's context, following the live supplier (D36) when one is given.
  */
-export function commandPolicyFor(
+export async function commandPolicyFor(
+  env: Environment,
   root: string | undefined,
   live?: LiveSupplier,
-): {
+): Promise<{
   policyContext: PolicyContext;
   commandCheck: CommandCheck;
   contextNow: () => PolicyContext;
-} {
+}> {
   if (!root) {
     return {
       policyContext: DEFAULT_POLICY_CONTEXT,
@@ -115,7 +118,8 @@ export function commandPolicyFor(
       contextNow: () => contextFor(DEFAULT_POLICY_CONTEXT, live),
     };
   }
-  const commandCheck = makeCommandCheck(detectCommands(rootMarkerFiles(root)));
+  const markers = await rootMarkerFiles(toolEnvironment(env), root);
+  const commandCheck = makeCommandCheck(detectCommands(markers));
   const policyContext: PolicyContext = { ...DEFAULT_POLICY_CONTEXT, commandCheck };
   return {
     policyContext,
@@ -138,6 +142,7 @@ function refused(reason: string): Promise<ToolRunResult> {
  * decided by the gate before this runs.
  */
 export function makeToolRunner(
+  env: Environment,
   root: string | undefined,
   options: ToolRunnerOptions = {},
 ): ToolRunner {
@@ -145,6 +150,8 @@ export function makeToolRunner(
   const commandOptions = { timeoutMs: options.commandTimeoutMs };
   const commandCheck = options.commandCheck ?? denyAllCommands;
   const onRuleEvent = options.onRuleEvent ?? (() => undefined);
+  // The tools see the environment without its git part (D41).
+  const tools = toolEnvironment(env);
 
   return ({ job, tool, args }) => {
     if (!isToolName(tool)) {
@@ -153,28 +160,31 @@ export function makeToolRunner(
     switch (tool) {
       case 'read_file': {
         const checked = checkReadFileArgs(args);
-        return checked.ok ? readFileInRoot(root, checked.args.path) : refused(checked.reason);
+        return checked.ok
+          ? readFileInRoot(tools, root, checked.args.path)
+          : refused(checked.reason);
       }
       case 'list_files': {
         const checked = checkListFilesArgs(args);
-        return checked.ok ? listFilesInRoot(root, checked.args) : refused(checked.reason);
+        return checked.ok ? listFilesInRoot(tools, root, checked.args) : refused(checked.reason);
       }
       case 'search_text': {
         const checked = checkSearchTextArgs(args);
-        return checked.ok ? searchTextInRoot(root, checked.args) : refused(checked.reason);
+        return checked.ok ? searchTextInRoot(tools, root, checked.args) : refused(checked.reason);
       }
       case 'write_file': {
         const checked = checkWriteFileArgs(args);
-        return checked.ok ? writeFileInRoot(root, checked.args) : refused(checked.reason);
+        return checked.ok ? writeFileInRoot(tools, root, checked.args) : refused(checked.reason);
       }
       case 'edit_file': {
         const checked = checkEditFileArgs(args);
-        return checked.ok ? editFileInRoot(root, checked.args) : refused(checked.reason);
+        return checked.ok ? editFileInRoot(tools, root, checked.args) : refused(checked.reason);
       }
       case 'run_command': {
         const checked = checkRunCommandArgs(args);
         return checked.ok
           ? runCommandInRoot(
+              tools,
               root,
               checked.args,
               { job, check: commandCheck, onRuleEvent },
@@ -247,7 +257,12 @@ function forwardLines(stream: NodeJS.ReadableStream | null, toStderr: boolean): 
  * an unexpected exit is logged with its code and nothing else happens. `live` gives the open
  * feature and its spec state for each tool call (D36); without it the default context is used.
  */
-export function startAgentHost(live?: LiveSupplier): void {
+export async function startAgentHost(env: Environment, live?: LiveSupplier): Promise<void> {
+  // The command policy is built once from the root's markers (D31); with no root it stays deny-all.
+  // It is read before the agent is forked, so no agent message arrives before the router is ready.
+  const root = process.env[SPIKE_ROOT_VAR];
+  const { commandCheck, contextNow } = await commandPolicyFor(env, root, live);
+
   let stopping = false;
 
   const child: UtilityProcess = utilityProcess.fork(join(__dirname, 'agent.js'), [], {
@@ -259,10 +274,7 @@ export function startAgentHost(live?: LiveSupplier): void {
   forwardLines(child.stdout, false);
   forwardLines(child.stderr, true);
 
-  // The command policy is built once from the root's markers (D31); with no root it stays deny-all.
-  const root = process.env[SPIKE_ROOT_VAR];
-  const { commandCheck, contextNow } = commandPolicyFor(root, live);
-  const runTool = makeToolRunner(root, { commandCheck, onRuleEvent: logRuleEvent(log) });
+  const runTool = makeToolRunner(env, root, { commandCheck, onRuleEvent: logRuleEvent(log) });
   const routerDeps: RouterDeps = {
     checkToolCall: (request) => checkToolCall(request, contextNow()),
     runTool,

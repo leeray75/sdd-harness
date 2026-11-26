@@ -3,9 +3,9 @@
 // same temporary-file-and-rename path as write_file. Runs only in main, only after the gate
 // allows the call. Reasons are fixed strings: they never echo the path or the text.
 
-import { promises as fs } from 'node:fs';
 import type { EditFileArgs } from '../../shared/tools';
 import type { ToolRunResult } from '../agent/router';
+import type { ToolEnvironment } from '../env/types';
 import { writeFileAtomic } from './atomic-write';
 import { areaMismatch, resolveInRoot } from './paths';
 import { WRITE_MAX_BYTES } from './write-file';
@@ -25,12 +25,16 @@ function replaceFirst(text: string, oldText: string, newText: string): string {
 }
 
 /** Replaces the one occurrence of `old_text`, or every occurrence when `replace_all` is true. */
-export async function editFileInRoot(root: unknown, args: EditFileArgs): Promise<ToolRunResult> {
+export async function editFileInRoot(
+  env: ToolEnvironment,
+  root: unknown,
+  args: EditFileArgs,
+): Promise<ToolRunResult> {
   if (args.old_text.length === 0) {
     return { ok: false, reason: EMPTY_OLD };
   }
 
-  const resolved = await resolveInRoot(root, args.path, { mustExist: true });
+  const resolved = await resolveInRoot(env, root, args.path, { mustExist: true });
   if (!resolved.ok) {
     return { ok: false, reason: resolved.reason };
   }
@@ -42,7 +46,7 @@ export async function editFileInRoot(root: unknown, args: EditFileArgs): Promise
   const target = resolved.target;
 
   try {
-    if (!(await fs.stat(target)).isFile()) {
+    if (!(await env.files.stat(target)).isFile()) {
       return { ok: false, reason: NOT_REGULAR };
     }
   } catch {
@@ -51,7 +55,7 @@ export async function editFileInRoot(root: unknown, args: EditFileArgs): Promise
 
   let text: string;
   try {
-    text = (await fs.readFile(target)).toString('utf8');
+    text = (await env.files.readFile(target)).toString('utf8');
   } catch {
     return { ok: false, reason: READ_FAILED };
   }
@@ -73,7 +77,7 @@ export async function editFileInRoot(root: unknown, args: EditFileArgs): Promise
     return { ok: false, reason: TOO_LARGE };
   }
 
-  const written = await writeFileAtomic(target, bytes);
+  const written = await writeFileAtomic(env.files, target, bytes);
   if (!written.ok) {
     return { ok: false, reason: written.reason };
   }

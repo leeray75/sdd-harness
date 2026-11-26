@@ -2,6 +2,7 @@ import { mkdirSync, readdirSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { localEnvironment } from '../../src/main/env';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createHumanActionChannel,
@@ -96,6 +97,7 @@ function harness(
   const error = vi.fn<(message: string) => void>();
   const onLockChanged = vi.fn(options.onLockChanged ?? (() => undefined));
   const handlers = createSpecHandlers({
+    env: localEnvironment(),
     root,
     now: options.now ?? (() => NOW),
     onLockChanged,
@@ -167,7 +169,7 @@ describe('approve-spec success (AC1, AC4)', () => {
     expect(await call(h, 'approve-spec')).toEqual({ ok: true });
 
     expect(await readFile(specPath('p3-x'), 'utf8')).toContain('status: approved\n');
-    const read = await readSpecState(root);
+    const read = await readSpecState(localEnvironment(), root);
     expect(read.kind).toBe('ok');
     if (read.kind === 'ok') {
       expect(read.state).toEqual({
@@ -178,7 +180,7 @@ describe('approve-spec success (AC1, AC4)', () => {
         editing: false,
       });
     }
-    expect(await approvalOf(root, 'p3-x')).toBe('approved');
+    expect(await approvalOf(localEnvironment(), root, 'p3-x')).toBe('approved');
     expect(h.onLockChanged).toHaveBeenCalledTimes(1);
   });
 
@@ -197,10 +199,10 @@ describe('approve-spec success (AC1, AC4)', () => {
     await call(h, 'approve-spec');
     await call(h, 'edit-approved-spec');
     await put('p3-x/SPECS.md', `${SPEC}\nchanged\n`);
-    expect(await approvalOf(root, 'p3-x')).toBe('changed');
+    expect(await approvalOf(localEnvironment(), root, 'p3-x')).toBe('changed');
     expect(await call(h, 'approve-spec')).toEqual({ ok: true });
-    expect(await approvalOf(root, 'p3-x')).toBe('approved');
-    const read = await readSpecState(root);
+    expect(await approvalOf(localEnvironment(), root, 'p3-x')).toBe('approved');
+    const read = await readSpecState(localEnvironment(), root);
     expect(read.kind === 'ok' && read.state.editing).toBe(false);
   });
 
@@ -210,7 +212,7 @@ describe('approve-spec success (AC1, AC4)', () => {
     const h = harness();
     await call(h, 'approve-spec', 'p3-x');
     expect(await call(h, 'approve-spec', 'p3-y')).toEqual({ ok: true });
-    const read = await readSpecState(root);
+    const read = await readSpecState(localEnvironment(), root);
     expect(read.kind === 'ok' && read.state.feature).toBe('p3-y');
   });
 });
@@ -286,14 +288,14 @@ describe('edit-approved-spec (AC4)', () => {
     await put('p3-x/SPECS.md', SPEC);
     const h = harness();
     await call(h, 'approve-spec');
-    const before = await readSpecState(root);
+    const before = await readSpecState(localEnvironment(), root);
     expect(await call(h, 'edit-approved-spec')).toEqual({ ok: true });
-    const after = await readSpecState(root);
+    const after = await readSpecState(localEnvironment(), root);
     expect(after.kind === 'ok' && after.state.editing).toBe(true);
     expect(after.kind === 'ok' && before.kind === 'ok' && after.state.sha256).toBe(
       before.kind === 'ok' ? before.state.sha256 : '',
     );
-    expect(await approvalOf(root, 'p3-x')).toBe('changed');
+    expect(await approvalOf(localEnvironment(), root, 'p3-x')).toBe('changed');
     expect(h.onLockChanged).toHaveBeenCalledTimes(2);
   });
 
@@ -304,7 +306,7 @@ describe('edit-approved-spec (AC4)', () => {
     await call(h, 'approve-spec');
     expect(await call(h, 'edit-approved-spec')).toEqual({ ok: true });
     expect(hook).toHaveBeenCalledWith('p3-x');
-    const after = await readSpecState(root);
+    const after = await readSpecState(localEnvironment(), root);
     expect(after.kind === 'ok' && after.state.editing).toBe(true);
   });
 
@@ -316,17 +318,17 @@ describe('edit-approved-spec (AC4)', () => {
     }));
     const h = harness({ onEditRequested: hook });
     await call(h, 'approve-spec');
-    const before = await readSpecState(root);
+    const before = await readSpecState(localEnvironment(), root);
     expect(await call(h, 'edit-approved-spec')).toEqual({
       ok: false,
       code: 'refused',
       reason: 'the build has started, so the spec cannot be edited',
     });
     expect(hook).toHaveBeenCalledTimes(1);
-    const after = await readSpecState(root);
+    const after = await readSpecState(localEnvironment(), root);
     expect(after.kind === 'ok' && after.state.editing).toBe(false);
     expect(after).toEqual(before);
-    expect(await approvalOf(root, 'p3-x')).toBe('approved');
+    expect(await approvalOf(localEnvironment(), root, 'p3-x')).toBe('approved');
   });
 
   it('does not ask the hook when the approval checks already refuse', async () => {

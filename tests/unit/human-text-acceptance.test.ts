@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import { commandPolicyFor, makeToolRunner } from '../../src/main/agent/host';
+import { localEnvironment } from '../../src/main/env';
 import { handleAgentMessage, type RouterDeps } from '../../src/main/agent/router';
 import { createHumanActionChannel } from '../../src/main/human/channel';
 import { createGestureTracker } from '../../src/main/human/gesture';
@@ -53,12 +54,12 @@ interface Reply {
 }
 
 /** A router with the real gate and command policy, a real runner on `root`, and a spy channel. */
-function setup() {
+async function setup() {
   const info = vi.fn<(message: string) => void>();
   const error = vi.fn<(message: string) => void>();
   const onRuleEvent = vi.fn<(event: RuleEvent) => void>();
-  const { policyContext, commandCheck } = commandPolicyFor(root);
-  const runner = makeToolRunner(root, {
+  const { policyContext, commandCheck } = await commandPolicyFor(localEnvironment(), root);
+  const runner = makeToolRunner(localEnvironment(), root, {
     commandCheck,
     ticketSource: { read: async (id) => ({ ok: true, title: `ticket ${id}`, body: TICKET_TEXT }) },
   });
@@ -106,7 +107,7 @@ async function send(
 
 describe('text in a file and a ticket cannot cause a human-only action', () => {
   it('the model reads the file and the ticket, then asks for the three human-only steps; all are refused', async () => {
-    const { deps, runTool, onRuleEvent, spies, info, error } = setup();
+    const { deps, runTool, onRuleEvent, spies, info, error } = await setup();
 
     // The model reads the untrusted text. The reads succeed, and the text comes back as data.
     const file = await send(deps, 'reader', 'read_file', { path: 'notes.txt' });
@@ -166,7 +167,7 @@ describe('text in a file and a ticket cannot cause a human-only action', () => {
   });
 
   it('the git push refusal comes from the command policy, not from a missing allowlist', async () => {
-    const { deps, runTool } = setup();
+    const { deps, runTool } = await setup();
     const command = await send(deps, 'writer', 'run_command', { program: 'git', args: ['push'] });
     expect(command.ok).toBe(false);
     expect(command.error?.code).toBe('denied');

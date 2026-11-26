@@ -2,25 +2,8 @@
 // real paths are resolved (symlinks, Windows short names), and refuses git. Runs only in main.
 // Reasons are fixed strings: they never echo the path or the file's contents.
 
-import { promises as fs, realpath } from 'node:fs';
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import type { ToolEnvironment } from '../env/types';
 import { classifyPath, sameArea } from '../policy/path-areas';
-
-/**
- * Real path with the OS's native resolver. On Windows this also expands 8.3 short names
- * (for example GIT~1 to .git), so the .git check sees the name the OS would open.
- */
-function realpathNative(path: string): Promise<string> {
-  return new Promise((resolvePromise, reject) => {
-    realpath.native(path, (error, resolved) => {
-      if (error) {
-        reject(error);
-      } else {
-        resolvePromise(resolved);
-      }
-    });
-  });
-}
 
 export const NO_ROOT_REASON = 'no root is configured';
 export const ROOT_UNREADABLE_REASON = 'the root is not a readable directory';
@@ -43,12 +26,12 @@ function fail(reason: string): { ok: false; reason: string } {
 }
 
 /** True when `target` is `root` or lies below it. Both must already be real, absolute paths. */
-export function isInside(root: string, target: string): boolean {
-  const rel = relative(root, target);
-  if (isAbsolute(rel)) {
+export function isInside(env: ToolEnvironment, root: string, target: string): boolean {
+  const rel = env.path.relative(root, target);
+  if (env.path.isAbsolute(rel)) {
     return false;
   }
-  return rel !== '..' && !rel.startsWith(`..${sep}`);
+  return rel !== '..' && !rel.startsWith(`..${env.path.sep}`);
 }
 
 /**
@@ -100,23 +83,24 @@ function isMissing(error: unknown): boolean {
  * resolves it, and checks that it is a folder. Returns the real parent joined with the rest.
  */
 async function resolveMissing(
+  env: ToolEnvironment,
   lexical: string,
 ): Promise<{ ok: true; path: string } | { ok: false; reason: string }> {
   const rest: string[] = [];
   let current = lexical;
   for (;;) {
-    rest.unshift(basename(current));
-    const parent = dirname(current);
+    rest.unshift(env.path.basename(current));
+    const parent = env.path.dirname(current);
     if (parent === current) {
       return fail(RESOLVE_FAILED_REASON);
     }
     current = parent;
     try {
-      const real = await realpathNative(current);
-      if (!(await fs.stat(real)).isDirectory()) {
+      const real = await env.files.realpath(current);
+      if (!(await env.files.stat(real)).isDirectory()) {
         return fail(NOT_A_FOLDER_REASON);
       }
-      return { ok: true, path: join(real, ...rest) };
+      return { ok: true, path: env.path.join(real, ...rest) };
     } catch (error) {
       if (!isMissing(error)) {
         return fail(RESOLVE_FAILED_REASON);
@@ -133,6 +117,7 @@ async function resolveMissing(
  * deepest existing parent is resolved and checked, and the result is that parent plus the rest.
  */
 export async function resolveInRoot(
+  env: ToolEnvironment,
   root: unknown,
   path: unknown,
   options: { mustExist: boolean },
@@ -143,7 +128,7 @@ export async function resolveInRoot(
   if (typeof path !== 'string' || path.length === 0) {
     return fail(BAD_PATH_REASON);
   }
-  if (isAbsolute(path)) {
+  if (env.path.isAbsolute(path)) {
     return fail(ABSOLUTE_REASON);
   }
   if (hasGitSegment(path)) {
@@ -152,8 +137,8 @@ export async function resolveInRoot(
 
   let realRoot: string;
   try {
-    realRoot = await realpathNative(root);
-    if (!(await fs.stat(realRoot)).isDirectory()) {
+    realRoot = await env.files.realpath(root);
+    if (!(await env.files.stat(realRoot)).isDirectory()) {
       return fail(ROOT_UNREADABLE_REASON);
     }
   } catch {
@@ -161,15 +146,15 @@ export async function resolveInRoot(
   }
 
   // Refuse `..` escapes before touching the target.
-  const lexical = resolve(realRoot, path);
-  if (!isInside(realRoot, lexical)) {
+  const lexical = env.path.resolve(realRoot, path);
+  if (!isInside(env, realRoot, lexical)) {
     return fail(OUTSIDE_REASON);
   }
 
   // Resolve symlinks, then check the real location again.
   let real: string;
   try {
-    real = await realpathNative(lexical);
+    real = await env.files.realpath(lexical);
   } catch (error) {
     if (!isMissing(error)) {
       return fail(RESOLVE_FAILED_REASON);
@@ -177,17 +162,17 @@ export async function resolveInRoot(
     if (options.mustExist) {
       return fail(MISSING_REASON);
     }
-    const resolved = await resolveMissing(lexical);
+    const resolved = await resolveMissing(env, lexical);
     if (!resolved.ok) {
       return resolved;
     }
     real = resolved.path;
   }
 
-  if (!isInside(realRoot, real)) {
+  if (!isInside(env, realRoot, real)) {
     return fail(OUTSIDE_REASON);
   }
-  const realRel = relative(realRoot, real);
+  const realRel = env.path.relative(realRoot, real);
   if (hasGitSegment(realRel)) {
     return fail(GIT_REASON);
   }
@@ -195,6 +180,6 @@ export async function resolveInRoot(
     ok: true,
     root: realRoot,
     target: real,
-    rel: realRel.split(sep).join('/'),
+    rel: realRel.split(env.path.sep).join('/'),
   };
 }

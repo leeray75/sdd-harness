@@ -6,11 +6,14 @@
 
 import type { Provider } from '../../agent/provider/types';
 import { commandPolicyFor, contextFor, type LiveSupplier } from '../agent/host';
+import type { Environment } from '../env/types';
 import type { RuleLogger } from '../policy/rule-event';
 import { logRuleEvent } from '../policy/rule-event';
 import { createInProcessJobRunner, type JobRunner } from './job-runner';
 
 export interface AppJobRunnerOptions {
+  /** The project's environment (D41), from the registry. Every tool and command goes through it. */
+  env: Environment;
   /** The project root. Tools work only inside it, and its markers give the command allowlist. */
   root: string;
   provider: Provider;
@@ -28,9 +31,10 @@ export interface AppJobRunnerOptions {
  * context with the live feature and spec state, and every decision, revert and network event goes
  * to `log` through logRuleEvent.
  */
-export function createAppJobRunner(options: AppJobRunnerOptions): JobRunner {
-  const { policyContext } = commandPolicyFor(options.root);
+export async function createAppJobRunner(options: AppJobRunnerOptions): Promise<JobRunner> {
+  const { policyContext } = await commandPolicyFor(options.env, options.root);
   return createInProcessJobRunner({
+    env: options.env,
     root: options.root,
     provider: options.provider,
     model: options.model,

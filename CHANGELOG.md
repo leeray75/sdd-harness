@@ -177,6 +177,8 @@ All notable changes to SDD Harness are recorded here. The format follows [Keep a
 - The reachability test now follows the policy table under the default context, in place of "every new tool is denied for every job".
 - **CI actions on Node 24** (`chore-ci-actions-node24`): `actions/checkout`, `actions/setup-node` and `actions/upload-artifact` moved from v4 to v7, which run on the Node 24 runtime instead of the deprecated Node 20 one. The workflow is otherwise unchanged.
 
+- **Environment interface** (`p4-env-local`, D41, [`docs/environments.md`](docs/environments.md)): every file, command, git and watch call inside a project goes through one `Environment` in `src/main/env/`, with a local backend that keeps today's error codes, containment, timeouts, tree kill, network limit and git calls. The tools and the agent host take a narrower `ToolEnvironment` with no git. The project registry makes each project's environment once, and a project whose environment cannot be made is refused like an unknown one. The project store's save uses the shared atomic writer. The secret store keeps its own synchronous `0o600` save, unchanged.
+
 ### Fixed
 
 - **Linux e2e seed run** (`p1-secrets-ci`, D25): with no keyring, Electron 45 reported encryption as unavailable, so the test-only `HARNESS_ALLOW_WEAK_SECRETS=1` had no effect and the spike e2e's seed run exited 1. On Linux the override now also calls `safeStorage.setUsePlainTextEncryption(true)`, once per process and before the store's first use. Without the override nothing changes, and a weak Linux backend is still refused.

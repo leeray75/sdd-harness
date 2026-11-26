@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { localEnvironment } from '../../src/main/env';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
@@ -53,7 +54,12 @@ async function put(relative: string, text: string): Promise<void> {
 
 describe('a plugin-written folder opens as history (AC5)', () => {
   it('reads the vendored p3-state-machine folder as closed, stage Done, with approval none', async () => {
-    const folder = await readSpecFolderAt(VENDORED_FOLDER, 'p3-state-machine', 'none');
+    const folder = await readSpecFolderAt(
+      localEnvironment(),
+      VENDORED_FOLDER,
+      'p3-state-machine',
+      'none',
+    );
     expect(folder).not.toBeNull();
     expect(folder?.detection.node).toBe('closed');
     expect(folder?.detection.stage).toEqual(stageOf('closed'));
@@ -63,7 +69,12 @@ describe('a plugin-written folder opens as history (AC5)', () => {
   });
 
   it('parses the vendored folder: approved plan, done spec, all tasks ticked, done ledger', async () => {
-    const folder = await readSpecFolderAt(VENDORED_FOLDER, 'p3-state-machine', 'none');
+    const folder = await readSpecFolderAt(
+      localEnvironment(),
+      VENDORED_FOLDER,
+      'p3-state-machine',
+      'none',
+    );
     expect(folder?.parsed.plan.status).toBe('approved');
     expect(folder?.parsed.specs.status).toBe('done');
     expect(folder?.parsed.tasks.open).toBe(0);
@@ -76,7 +87,7 @@ describe('a plugin-written folder opens as history (AC5)', () => {
 
 describe('the finished folders of this repo (AC5)', () => {
   it('every folder with SUMMARY.md and a done ledger is closed, and there are at least 20', async () => {
-    const folders = await scanSpecFolders(REPO_ROOT);
+    const folders = await scanSpecFolders(localEnvironment(), REPO_ROOT);
     const finished = folders.filter(
       (folder) =>
         folder.files['SUMMARY.md'].state === 'present' && folder.parsed.ledger.state === 'done',
@@ -93,14 +104,14 @@ describe('the finished folders of this repo (AC5)', () => {
 
 describe('scanSpecFolders on temp folders (AC6)', () => {
   it('returns an empty list when docs/specs is missing', async () => {
-    expect(await scanSpecFolders(root)).toEqual([]);
+    expect(await scanSpecFolders(localEnvironment(), root)).toEqual([]);
   });
 
   it('returns the valid folders sorted by slug, each with files, detection and newest mtime', async () => {
     await put('beta/PLAN.md', 'Status: approved\n');
     await put('beta/SPECS.md', '---\nstatus: draft\nticket:\n---\n');
     await put('alpha/PLAN.md', 'Status: draft\n');
-    const folders = await scanSpecFolders(root);
+    const folders = await scanSpecFolders(localEnvironment(), root);
     expect(folders.map((folder) => folder.feature)).toEqual(['alpha', 'beta']);
     expect(folders[0]?.detection.node).toBe('planning');
     expect(folders[1]?.detection.node).toBe('spec-drafted');
@@ -122,19 +133,19 @@ describe('scanSpecFolders on temp folders (AC6)', () => {
       join(root, 'docs', 'specs', 'linked'),
       'junction',
     );
-    const folders = await scanSpecFolders(root);
+    const folders = await scanSpecFolders(localEnvironment(), root);
     expect(folders.map((folder) => folder.feature)).toEqual(['alpha', 'real-target']);
   });
 
   it('gives each folder the approval from approvalOf, and none by default', async () => {
     await put('alpha/PLAN.md', 'Status: approved\n');
     await put('alpha/tasks.md', '- [ ] one\n');
-    const approved = await scanSpecFolders(root, (feature) =>
+    const approved = await scanSpecFolders(localEnvironment(), root, (feature) =>
       feature === 'alpha' ? 'approved' : 'none',
     );
     expect(approved[0]?.detection.node).toBe('spec-approved');
     expect(approved[0]?.detection.stage).toEqual({ stage: 'build', paused: false });
-    const defaulted = await scanSpecFolders(root);
+    const defaulted = await scanSpecFolders(localEnvironment(), root);
     expect(defaulted[0]?.detection.node).toBe('plan-approved');
   });
 
@@ -142,7 +153,7 @@ describe('scanSpecFolders on temp folders (AC6)', () => {
     // A directory named PLAN.md is not a regular file, so it cannot be read as a plan.
     await mkdir(join(root, 'docs', 'specs', 'gamma', 'PLAN.md'), { recursive: true });
     await put('gamma/SPECS.md', '---\nstatus: draft\nticket:\n---\n');
-    const folders = await scanSpecFolders(root);
+    const folders = await scanSpecFolders(localEnvironment(), root);
     expect(folders.map((folder) => folder.feature)).toEqual(['gamma']);
     const gamma = folders[0];
     expect(gamma?.files['PLAN.md'].state).toBe('unreadable');
@@ -154,7 +165,7 @@ describe('scanSpecFolders on temp folders (AC6)', () => {
 
   it('reads at most MAX_SPEC_FILE_BYTES of a long file and reports the cut', async () => {
     await put('delta/PLAN.md', `Status: approved\n${'x'.repeat(MAX_SPEC_FILE_BYTES + 10)}`);
-    const folders = await scanSpecFolders(root);
+    const folders = await scanSpecFolders(localEnvironment(), root);
     const delta = folders[0];
     expect(delta?.files['PLAN.md'].truncated).toBe(true);
     expect(delta?.parsed.plan.status).toBe('approved');
@@ -170,7 +181,9 @@ describe('scanSpecFolders on temp folders (AC6)', () => {
         join(root, 'docs', 'specs', 'target-only', 'PLAN.md'),
         join(root, 'docs', 'specs', 'eps', 'PLAN.md'),
       );
-      const eps = (await scanSpecFolders(root)).find((folder) => folder.feature === 'eps');
+      const eps = (await scanSpecFolders(localEnvironment(), root)).find(
+        (folder) => folder.feature === 'eps',
+      );
       expect(eps?.files['PLAN.md'].state).toBe('unreadable');
       expect(eps?.files['PLAN.md'].reason).toBe('a symbolic link is not followed');
       expect(eps?.detection.node).toBe('spec-drafted');
@@ -182,13 +195,15 @@ describe('readSpecFolder (AC6)', () => {
   it('returns null for an invalid slug, a missing folder, or a folder with no known file', async () => {
     await put('alpha/PLAN.md', 'Status: draft\n');
     await put('notes-only/notes.txt', 'x\n');
-    expect(await readSpecFolder(root, '../alpha')).toBeNull();
-    expect(await readSpecFolder(root, 'missing')).toBeNull();
-    expect(await readSpecFolder(root, 'notes-only')).toBeNull();
-    expect((await readSpecFolder(root, 'alpha'))?.detection.node).toBe('planning');
+    expect(await readSpecFolder(localEnvironment(), root, '../alpha')).toBeNull();
+    expect(await readSpecFolder(localEnvironment(), root, 'missing')).toBeNull();
+    expect(await readSpecFolder(localEnvironment(), root, 'notes-only')).toBeNull();
+    expect((await readSpecFolder(localEnvironment(), root, 'alpha'))?.detection.node).toBe(
+      'planning',
+    );
   });
 
   it('returns null when the project has no docs/specs at all', async () => {
-    expect(await readSpecFolder(root, 'alpha')).toBeNull();
+    expect(await readSpecFolder(localEnvironment(), root, 'alpha')).toBeNull();
   });
 });

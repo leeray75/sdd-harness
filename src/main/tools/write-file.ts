@@ -3,10 +3,9 @@
 // Runs only in main, only after the gate allows the call. Reasons are fixed strings: they
 // never echo the path or the content.
 
-import { promises as fs, type Stats } from 'node:fs';
-import { dirname } from 'node:path';
 import { MAX_CONTENT_LENGTH, type WriteFileArgs } from '../../shared/tools';
 import type { ToolRunResult } from '../agent/router';
+import type { FileStat, ToolEnvironment } from '../env/types';
 import { writeFileAtomic } from './atomic-write';
 import { areaMismatch, resolveInRoot } from './paths';
 
@@ -23,9 +22,9 @@ const MAKE_FOLDERS_FAILED = 'the parent folders could not be created; nothing wa
  * What is at `target` without following a symlink: null when nothing is there, the stats
  * otherwise. Throws for any error other than "does not exist".
  */
-async function existingEntry(target: string): Promise<Stats | null> {
+async function existingEntry(env: ToolEnvironment, target: string): Promise<FileStat | null> {
   try {
-    return await fs.lstat(target);
+    return await env.files.lstat(target);
   } catch (error) {
     if (typeof error === 'object' && error !== null && 'code' in error) {
       const code = (error as { code: unknown }).code;
@@ -38,13 +37,17 @@ async function existingEntry(target: string): Promise<Stats | null> {
 }
 
 /** Creates or overwrites one regular file under the root with `args.content`. */
-export async function writeFileInRoot(root: unknown, args: WriteFileArgs): Promise<ToolRunResult> {
+export async function writeFileInRoot(
+  env: ToolEnvironment,
+  root: unknown,
+  args: WriteFileArgs,
+): Promise<ToolRunResult> {
   const bytes = Buffer.from(args.content, 'utf8');
   if (bytes.length > WRITE_MAX_BYTES || args.content.length > MAX_CONTENT_LENGTH) {
     return { ok: false, reason: TOO_LARGE };
   }
 
-  const resolved = await resolveInRoot(root, args.path, { mustExist: false });
+  const resolved = await resolveInRoot(env, root, args.path, { mustExist: false });
   if (!resolved.ok) {
     return { ok: false, reason: resolved.reason };
   }
@@ -55,9 +58,9 @@ export async function writeFileInRoot(root: unknown, args: WriteFileArgs): Promi
   }
   const target = resolved.target;
 
-  let existing: Stats | null;
+  let existing: FileStat | null;
   try {
-    existing = await existingEntry(target);
+    existing = await existingEntry(env, target);
   } catch {
     return { ok: false, reason: CHECK_FAILED };
   }
@@ -71,12 +74,12 @@ export async function writeFileInRoot(root: unknown, args: WriteFileArgs): Promi
   }
 
   try {
-    await fs.mkdir(dirname(target), { recursive: true });
+    await env.files.mkdir(env.path.dirname(target), { recursive: true });
   } catch {
     return { ok: false, reason: MAKE_FOLDERS_FAILED };
   }
 
-  const written = await writeFileAtomic(target, bytes);
+  const written = await writeFileAtomic(env.files, target, bytes);
   if (!written.ok) {
     return { ok: false, reason: written.reason };
   }

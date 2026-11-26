@@ -3,10 +3,10 @@
 // main, only after the gate allows the call. Reasons are fixed strings: they never echo the
 // pattern, the path or the file's contents.
 
-import { promises as fs } from 'node:fs';
 import { MAX_TOOL_OUTPUT_LENGTH } from '../../shared/agent-protocol';
 import type { SearchTextArgs } from '../../shared/tools';
 import type { ToolRunResult } from '../agent/router';
+import type { ToolEnvironment } from '../env/types';
 import { collectMatchingFiles } from './list-files';
 
 /** Most matches returned. A later match stops the search and says so. */
@@ -36,6 +36,7 @@ function isBinary(bytes: Buffer): boolean {
  * files over SEARCH_MAX_FILE_BYTES.
  */
 export async function searchTextInRoot(
+  env: ToolEnvironment,
   root: unknown,
   args: SearchTextArgs,
 ): Promise<ToolRunResult> {
@@ -46,7 +47,7 @@ export async function searchTextInRoot(
     return { ok: false, reason: BAD_PATTERN };
   }
 
-  const matched = await collectMatchingFiles(root, args.path, args.glob);
+  const matched = await collectMatchingFiles(env, root, args.path, args.glob);
   if (!matched.ok) {
     return { ok: false, reason: matched.reason };
   }
@@ -59,11 +60,11 @@ export async function searchTextInRoot(
   search: for (const file of matched.files) {
     let bytes: Buffer;
     try {
-      const info = await fs.stat(file.abs);
+      const info = await env.files.stat(file.abs);
       if (!info.isFile() || info.size > SEARCH_MAX_FILE_BYTES) {
         continue;
       }
-      bytes = await fs.readFile(file.abs);
+      bytes = await env.files.readFile(file.abs);
     } catch {
       continue;
     }

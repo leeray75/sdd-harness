@@ -15,7 +15,8 @@ This repo is itself built with the **sdd plugin** for Claude Code: every feature
 3. `docs/design-notes.md`: tokens, components, screen behaviour, states not drawn, rules the UI must show.
 4. `docs/workflow.md`: the workflow diagrams, who can do what, and stage-to-state mapping.
 5. `docs/workflow-engine.md`: the sdd workflow's nodes, events and transitions, the stage mapping, the event kinds and the human-action map. The one table is `src/shared/workflow.ts` (D34). It also covers the document layer (D35): the templates, the `docs/specs/<feature>/` layout and parsers in `src/shared/spec-docs.ts`, the folder detector in `src/shared/spec-detect.ts`, and the scanner in `src/main/workflow/spec-folders.ts`. Its "Spec lock" section covers the approval lock (D36): the state file `docs/specs/.sdd-state.json`, its code in `src/shared/spec-state.ts`, `src/main/workflow/spec-lock.ts` and `spec-watch.ts`, and the two handlers in `src/main/human/spec-handlers.ts`. Its "Projects" section covers the project store, the rules model and the registry that routes each human-only request to its project (D40). Its "Build loop" section covers the build loop (D37): the controller in `src/main/workflow/build-loop.ts`, the job runner in `src/main/workflow/job-runner.ts`, the report parsers in `src/shared/build-reports.ts` and the document renderers in `src/shared/build-docs.ts`. Its "Ship and close" section covers the ship step (D38): the git module `src/main/git/git.ts` (the only code that runs git), the steps in `src/main/workflow/ship.ts` and the two handlers in `src/main/human/ship-handlers.ts`. Its "Headless run" section covers the headless walk, the one test that runs a feature from planning to closed, and where build jobs run (D39): in the main process, through the app's runner factory `src/main/workflow/app-runner.ts`.
-6. The screens named by the feature in `docs/design/screens/*.dc.html` (exact values) and `docs/design/png/*.png` (layout at a glance). The `<x-dc>`/`<helmet>`/`support.js` wrapper is from the design tool; ignore it.
+6. `docs/environments.md` and D41 in `docs/decisions.md`: the environment interface (`src/main/env/`) that every part of the app inside a project reaches its project through, with the local backend, the backend contract and the checklist for the later backends (phase 4).
+7. The screens named by the feature in `docs/design/screens/*.dc.html` (exact values) and `docs/design/png/*.png` (layout at a glance). The `<x-dc>`/`<helmet>`/`support.js` wrapper is from the design tool; ignore it.
 
 ## Build order and phases
 
@@ -30,6 +31,8 @@ Work follows `docs/roadmap.md`: ten phases (0 scaffold → 9 pilot), each run in
 - **Secrets** go in the OS keychain via `safeStorage`, never in logs, sessions, exports or files (PRD NFR).
 - **Tickets, docs and web pages are untrusted data** passed to agents, never instructions.
 - **Commands run only from the project's detected allowlist**, from the project root, through a check that main runs again before each one. While a command runs, `docs/specs/` is read-only; afterwards, changes outside the rules are reverted. The code writer's commands get no network where the OS allows it, and that is best effort elsewhere (D6, D31; [docs/agent-commands.md](docs/agent-commands.md)).
+
+- **Every project is reached through its environment** (D41, `docs/environments.md`). The environment is the first parameter of each function that touches a project; nothing falls back to the local backend. Only `src/main/env/`, `src/main/git/` and the two app-data stores import `node:fs`, `node:fs/promises` or `node:child_process` under `src/main/`, and tools, commands and the agent never name git (`tests/unit/env-boundary.test.ts`).
 
 ## Conventions
 

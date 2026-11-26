@@ -226,6 +226,8 @@ Format: **Decision** · **Outcome** · **Why** · **Date**.
 - **Open:** Settled by D31 (how `run_command` runs `.cmd`/`.bat` commands such as `pnpm test` on Windows).
 - **Date:** 2026-11-20
 
+- **Note (p4-env-local, D41):** the file tools (`read_file`, `write_file`, `edit_file`, `list_files`, `search_text`) and `run_command` take the tool environment as their first parameter, and reach the project only through its `files` and `process` parts (`src/main/env/`). Their limits, refusals and error text are unchanged. `read_ticket` is not a file tool and is unchanged. The secret store is not a tool path: it keeps its own synchronous save, with mode `0o600`, unchanged, and only the project store uses the shared atomic writer (D41).
+
 ## D30 · Agent tool policy: per-job table, path areas, tightening and Rule events
 
 - **Outcome:** Every agent tool call is decided in main by a pure gate, `checkToolCall(request, context)` in `src/main/policy/`.
@@ -285,6 +287,8 @@ Format: **Decision** · **Outcome** · **Why** · **Date**.
     - a network block for the reviewer;
     - a restore that trusts the snapshot's ignore set only.
 - **Date:** 2026-11-20
+
+- **Note (p4-env-local, D41):** the spawn, the timeout and the whole-tree kill now live in the local backend's `process.spawn` (`src/main/env/local.ts`). The network limit's probes are in `src/main/env/probes.ts`, so `src/main/commands/network.ts` is pure again. The writer's command gets the same wrappers and proxies, and the backend reports the level it got, so the rule event is unchanged. `protect.ts` works through the environment's `files` part and its `ignoredEntries`, and no longer imports the git module.
 
 ## D32 · Agent jobs: definitions, prompts and advertised tools
 
@@ -471,6 +475,8 @@ Format: **Decision** · **Outcome** · **Why** · **Date**.
 - **Not in this decision:** the headless end-to-end test (`p3-headless-e2e`), a git-host API or a pull request, and the commit format from project settings. The workflow table (D34) is unchanged.
 - **Date:** 2026-11-24
 
+- **Note (p4-env-local, D41):** the git functions of `src/main/git/git.ts` are the local backend's git part. `ship.ts` reaches git only through the environment's `git` part, and `git.ts` is still the only code that runs git (`execFile('git', …)`), so this boundary is unchanged.
+
 ## D39 · Where build jobs run: the main process for v1, and the app's runner factory
 
 - **Outcome:** build jobs run in the main process through `createInProcessJobRunner` (`src/main/workflow/job-runner.ts`), for v1. The agent utility process keeps the spike loop, and no new IPC message or protocol is added. The app builds its runners only through `createAppJobRunner` (`src/main/workflow/app-runner.ts`), which gives each runner the root's command context, read live for each call (D31, D36), and sends every rule event to `logRuleEvent(log)` (D30). Nothing in `index.ts` builds a runner yet; the build start must use the factory.
@@ -505,4 +511,27 @@ Format: **Decision** · **Outcome** · **Why** · **Date**.
   - a free-form rules object: a typo would silently change a gate, so unknown keys are refused;
   - letting the renderer name a folder path: the request would then carry a path the main process has to trust.
 - **Not in this decision:** the environment backends (`p4-env-*`), automatic checks on a folder (`p4-project-checks`), the UI and IPC for projects (`p4-projects-screen`, `p4-add-project-wizard`), and model routing (phase 8).
+- **Date:** 2026-11-25
+
+## D41 · Environments: one interface for everything inside a project, with a local backend
+
+- **Outcome:** every part of the app that works inside a project reaches it through one environment object (`p4-env-local`). The interface is `Environment` in `src/main/env/types.ts`, with five parts: `path`, `files`, `process`, `watch` and `git`. `ToolEnvironment` is the narrower view the tools, the command runner and the agent host take: `path`, `files`, `process` and `ignoredEntries`, with no `git` and no `watch`. `toolEnvironment(env)` builds it.
+  - **Backends:** `src/main/env/local.ts` is the local backend (node:path, node:fs, a child process started without a shell, and the git module). `environmentFor(descriptor)` in `src/main/env/index.ts` picks it for `{ kind: 'local' }` and refuses any other kind with a fixed reason. `localEnvironment()` is the same object, and tests use it.
+  - **Process:** `process.spawn` takes an argument array, runs with the timeout and the whole-tree kill of D31, and applies `network: 'none'` through the network module, reporting the level it got (`os` or `proxy-only`). The probes that decide the level (`unshare`, and whether `sandbox-exec` exists) are in `src/main/env/probes.ts`, so `src/main/commands/network.ts` is pure again.
+  - **Git:** the git part is bound to the functions in `src/main/git/git.ts`, which stays the only code that runs git (D38). A backend keeps its git calls in that folder, and no other module names a git member of an environment.
+  - **Async only:** every method is async except the path helpers and the platform value, so a remote backend can answer every call. The synchronous helpers of D31 and D35 are now async (`rootMarkerFiles`, `resolveProgram`, `commandPolicyFor`, `createAppJobRunner`, `startAgentHost`).
+  - **Path flavour:** `path` is the environment's own flavour: `node:path` locally, `path.posix` on a remote backend. Modules join and split paths only through it.
+  - **Required parameter:** the environment is the first parameter of every function that touches a project. Nothing falls back to the local backend. Tests pass `localEnvironment()` or `toolEnvironment(...)` explicitly.
+  - **One atomic writer:** `writeFileAtomic(files, path, bytes)` in `src/main/tools/atomic-write.ts` is the only atomic write. The project store's save uses it through `localEnvironment().files`. The secret store keeps its own synchronous save, with mode `0o600`, unchanged (revision 1 of `p4-env-local`): the helper is asynchronous and has no mode option, so the store is not moved onto it. Only the project store uses the helper.
+  - **Errors:** a backend's `files` part passes Node-style codes through (`ENOENT`, `ENOTDIR`, `EISDIR`, `EACCES`, `EPERM`, `EBUSY`, `ELOOP`, `EEXIST` and so on), so the modules' reasons do not change. The one addition is `EFBIG`, which the file read with a byte cap raises for a file over the cap.
+- **Why:**
+  - F3 needs projects in WSL, over SSH and in dev containers. Adding each backend to every module would change every module three times, and some calls (`detect`, `lookup`, the tree kill) are synchronous, which a remote backend cannot answer.
+  - One interface with a required parameter keeps the boundary scannable: `tests/unit/env-boundary.test.ts` fails if a module outside the environment imports `node:fs`, `node:fs/promises`, `node:child_process` or the network module, or if a tool, command or agent names git.
+  - The local backend is a move, not a rewrite, so the behaviour (every reason, code, rule event and timeout) is the same and the existing tests hold.
+- **Alternatives not taken:**
+  - a dependency-injection container or a module-level "current environment": it would let a call fall back to local without the caller knowing;
+  - a synchronous interface for the local backend only: a remote backend could not implement it, so every caller would have to change again later;
+  - one interface with git inside the tool view: a tool would then be able to reach git, which D4 forbids.
+- **Notes for the parts of the interface:** a recording backend for tests is in `tests/support/recording-env.ts`. The full contract a backend keeps, and the checklist for the WSL, SSH and container backends, are in [docs/environments.md](environments.md).
+- **Not in this decision:** the WSL, SSH and container backends (`p4-env-wsl`, `p4-env-ssh`, `p4-env-container`), environment detection, the unreachable and read-only project state (`p4-env-ssh`), and the project checks (`p4-project-checks`).
 - **Date:** 2026-11-25

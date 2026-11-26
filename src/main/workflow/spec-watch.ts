@@ -6,9 +6,7 @@
 // current() is the last value, synchronously. It is `unchecked` until the first refresh finishes.
 // onChange fires only when the value differs from the last one, and never after close().
 
-import { watch, type FSWatcher } from 'node:fs';
-import { lstat } from 'node:fs/promises';
-import { join } from 'node:path';
+import type { Environment, WatchHandle } from '../env/types';
 import { SPECS_DIR } from '../../shared/spec-docs';
 import type { Approval } from '../../shared/spec-detect';
 import { approvalOf, scanSpecFoldersWithLock } from './spec-lock';
@@ -20,6 +18,8 @@ export interface SpecLockValue {
 }
 
 export interface SpecLockWatcherOptions {
+  /** The project's environment (D41): its files are read and its folders watched through it. */
+  env: Environment;
   /** The project root: docs/specs/ is read under it. */
   root: string;
   /** How long events are collected before a refresh, in milliseconds. Defaults to 150. */
@@ -37,9 +37,9 @@ export interface SpecLockWatcher {
   close(): void;
 }
 
-async function isRealDir(path: string): Promise<boolean> {
+async function isRealDir(env: Environment, path: string): Promise<boolean> {
   try {
-    const stats = await lstat(path);
+    const stats = await env.files.lstat(path);
     return stats.isDirectory() && !stats.isSymbolicLink();
   } catch {
     return false;
@@ -47,7 +47,7 @@ async function isRealDir(path: string): Promise<boolean> {
 }
 
 export function createSpecLockWatcher(options: SpecLockWatcherOptions): SpecLockWatcher {
-  const { root, onChange } = options;
+  const { env, root, onChange } = options;
   const debounceMs = options.debounceMs ?? 150;
 
   let value: SpecLockValue = { feature: null, approval: 'unchecked' };
@@ -56,7 +56,7 @@ export function createSpecLockWatcher(options: SpecLockWatcherOptions): SpecLock
   // Refreshes run one after another, so an older read can never finish after a newer one.
   let queue: Promise<unknown> = Promise.resolve();
   // The watched folders, by path. A watcher that errors is removed, and the next refresh re-arms it.
-  const watchers = new Map<string, FSWatcher>();
+  const watchers = new Map<string, WatchHandle>();
 
   function schedule(): void {
     if (closed) return;
@@ -84,11 +84,15 @@ export function createSpecLockWatcher(options: SpecLockWatcherOptions): SpecLock
     for (const dir of dirs) {
       if (watchers.has(dir)) continue;
       try {
-        const watcher = watch(dir, () => schedule());
-        watcher.on('error', () => {
-          if (watchers.get(dir) === watcher) closeWatcher(dir);
-        });
-        watchers.set(dir, watcher);
+        // An error closes the watch, so the next refresh arms it again (D36).
+        const handle: WatchHandle = env.watch.watchDir(
+          dir,
+          () => schedule(),
+          () => {
+            if (watchers.get(dir) === handle) closeWatcher(dir);
+          },
+        );
+        watchers.set(dir, handle);
       } catch {
         // Not watchable right now (for example docs/specs is missing). The next refresh tries again.
       }
@@ -97,11 +101,11 @@ export function createSpecLockWatcher(options: SpecLockWatcherOptions): SpecLock
 
   async function watchedDirs(feature: string | null): Promise<string[]> {
     const dirs: string[] = [];
-    const specsDir = join(root, SPECS_DIR);
-    if (await isRealDir(specsDir)) dirs.push(specsDir);
+    const specsDir = env.path.join(root, SPECS_DIR);
+    if (await isRealDir(env, specsDir)) dirs.push(specsDir);
     if (feature !== null) {
-      const folder = join(specsDir, feature);
-      if (await isRealDir(folder)) dirs.push(folder);
+      const folder = env.path.join(specsDir, feature);
+      if (await isRealDir(env, folder)) dirs.push(folder);
     }
     return dirs;
   }
@@ -109,8 +113,8 @@ export function createSpecLockWatcher(options: SpecLockWatcherOptions): SpecLock
   async function compute(): Promise<SpecLockValue> {
     let next: SpecLockValue;
     try {
-      const scan = await scanSpecFoldersWithLock(root);
-      next = { feature: scan.current, approval: await approvalOf(root, scan.current) };
+      const scan = await scanSpecFoldersWithLock(env, root);
+      next = { feature: scan.current, approval: await approvalOf(env, root, scan.current) };
     } catch {
       next = { feature: value.feature, approval: 'unchecked' };
     }

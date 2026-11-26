@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { localEnvironment } from '../../src/main/env';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createSpecLockWatcher,
@@ -34,7 +35,7 @@ async function put(relative: string, text: string): Promise<void> {
 
 /** Locks `feature` to the current hash of its SPECS.md. */
 async function lock(feature: string): Promise<void> {
-  const sha256 = await hashSpec(root, feature);
+  const sha256 = await hashSpec(localEnvironment(), root, feature);
   if (sha256 === null) throw new Error('no spec to lock');
   const state: SpecStateFile = {
     version: 1,
@@ -43,7 +44,7 @@ async function lock(feature: string): Promise<void> {
     approvedAt: '2026-11-22T10:00:00.000Z',
     editing: false,
   };
-  expect((await writeSpecState(root, state)).ok).toBe(true);
+  expect((await writeSpecState(localEnvironment(), root, state)).ok).toBe(true);
 }
 
 /** Resolves with the first matching value, or rejects after `ms`. */
@@ -77,7 +78,11 @@ async function seedApprovedFeature(): Promise<void> {
 
 describe('createSpecLockWatcher (AC3)', () => {
   it('reads unchecked before the first refresh finishes', () => {
-    const watcher = createSpecLockWatcher({ root, onChange: () => undefined });
+    const watcher = createSpecLockWatcher({
+      env: localEnvironment(),
+      root,
+      onChange: () => undefined,
+    });
     watchers.push(watcher);
     expect(watcher.current()).toEqual({ feature: null, approval: 'unchecked' });
   });
@@ -85,7 +90,12 @@ describe('createSpecLockWatcher (AC3)', () => {
   it('reports changed through onChange within 2 s after an approved SPECS.md is edited', async () => {
     await seedApprovedFeature();
     const onChange = vi.fn<(value: SpecLockValue) => void>();
-    const watcher = createSpecLockWatcher({ root, debounceMs: 50, onChange });
+    const watcher = createSpecLockWatcher({
+      env: localEnvironment(),
+      root,
+      debounceMs: 50,
+      onChange,
+    });
     watchers.push(watcher);
     expect(await watcher.refresh()).toEqual({ feature: 'p3-x', approval: 'approved' });
     expect(watcher.current()).toEqual({ feature: 'p3-x', approval: 'approved' });
@@ -99,7 +109,12 @@ describe('createSpecLockWatcher (AC3)', () => {
   it('reports changed from refresh() when the watcher was closed and no event arrived', async () => {
     await seedApprovedFeature();
     const onChange = vi.fn<(value: SpecLockValue) => void>();
-    const watcher = createSpecLockWatcher({ root, debounceMs: 50, onChange });
+    const watcher = createSpecLockWatcher({
+      env: localEnvironment(),
+      root,
+      debounceMs: 50,
+      onChange,
+    });
     watchers.push(watcher);
     expect((await watcher.refresh()).approval).toBe('approved');
     watcher.close();
@@ -114,7 +129,12 @@ describe('createSpecLockWatcher (AC3)', () => {
   it('fires no callback after close(), even when the file changes', async () => {
     await seedApprovedFeature();
     const onChange = vi.fn<(value: SpecLockValue) => void>();
-    const watcher = createSpecLockWatcher({ root, debounceMs: 50, onChange });
+    const watcher = createSpecLockWatcher({
+      env: localEnvironment(),
+      root,
+      debounceMs: 50,
+      onChange,
+    });
     watchers.push(watcher);
     await watcher.refresh();
     const callsAtClose = onChange.mock.calls.length;
@@ -128,7 +148,12 @@ describe('createSpecLockWatcher (AC3)', () => {
   it('calls onChange only when the value differs from the last one', async () => {
     await seedApprovedFeature();
     const onChange = vi.fn<(value: SpecLockValue) => void>();
-    const watcher = createSpecLockWatcher({ root, debounceMs: 50, onChange });
+    const watcher = createSpecLockWatcher({
+      env: localEnvironment(),
+      root,
+      debounceMs: 50,
+      onChange,
+    });
     watchers.push(watcher);
     await watcher.refresh();
     const calls = onChange.mock.calls.length;
@@ -139,7 +164,12 @@ describe('createSpecLockWatcher (AC3)', () => {
 
   it('keeps working when docs/specs does not exist yet, and reports none', async () => {
     const onChange = vi.fn<(value: SpecLockValue) => void>();
-    const watcher = createSpecLockWatcher({ root, debounceMs: 50, onChange });
+    const watcher = createSpecLockWatcher({
+      env: localEnvironment(),
+      root,
+      debounceMs: 50,
+      onChange,
+    });
     watchers.push(watcher);
     expect(await watcher.refresh()).toEqual({ feature: null, approval: 'none' });
     expect(onChange).toHaveBeenCalledWith({ feature: null, approval: 'none' });
@@ -148,6 +178,7 @@ describe('createSpecLockWatcher (AC3)', () => {
   it('a throwing listener does not stop the watcher from returning values', async () => {
     await seedApprovedFeature();
     const watcher = createSpecLockWatcher({
+      env: localEnvironment(),
       root,
       onChange: () => {
         throw new Error('listener failed');

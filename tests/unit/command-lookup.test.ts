@@ -10,92 +10,130 @@ import {
   resolveProgram,
   UNSAFE_CMD_LINE,
 } from '../../src/main/commands/lookup';
+import { localEnvironment, toolEnvironment } from '../../src/main/env';
+import type { ToolEnvironment } from '../../src/main/env/types';
 import { runCommandInRoot } from '../../src/main/tools/run-command';
 
-/** A probe that says a file exists when it is in the set. The lookup never touches the disk then. */
-function filesOf(...paths: string[]): (file: string) => boolean {
+/**
+ * The environment whose files are the given paths: stat and access answer for those paths only,
+ * so the lookup never touches the disk. It is the files part the lookup reads (D41).
+ */
+function filesOf(...paths: string[]): ToolEnvironment {
   const set = new Set(paths);
-  return (file) => set.has(file);
+  const base = toolEnvironment(localEnvironment());
+  return {
+    ...base,
+    files: {
+      ...base.files,
+      stat: async (file: string) => {
+        if (!set.has(file)) throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+        return {
+          isFile: () => true,
+          isDirectory: () => false,
+          isSymbolicLink: () => false,
+          size: 0,
+          mtimeMs: 0,
+          mode: 0o755,
+        };
+      },
+      access: async (file: string) => {
+        if (!set.has(file)) throw Object.assign(new Error('missing'), { code: 'EACCES' });
+      },
+    },
+  };
 }
 
-describe('resolveProgram: PATH order on win32 (probe as a parameter)', () => {
-  it('finds a program in the second folder of PATH, with a PATHEXT extension', () => {
+describe('resolveProgram: PATH order on win32 (files as a parameter)', () => {
+  it('finds a program in the second folder of PATH, with a PATHEXT extension', async () => {
     const env = { PATH: 'C:\\a;C:\\b' };
-    expect(resolveProgram('pnpm', env, 'win32', filesOf('C:\\b\\pnpm.CMD'))).toEqual({
+    expect(await resolveProgram(filesOf('C:\\b\\pnpm.CMD'), 'pnpm', env, 'win32')).toEqual({
       ok: true,
       file: 'C:\\b\\pnpm.CMD',
     });
   });
 
-  it('tries each PATHEXT extension in a folder before the name as given', () => {
+  it('tries each PATHEXT extension in a folder before the name as given', async () => {
     const env = { PATH: 'C:\\a' };
-    const found = resolveProgram('pnpm', env, 'win32', filesOf('C:\\a\\pnpm', 'C:\\a\\pnpm.CMD'));
+    const found = await resolveProgram(
+      filesOf('C:\\a\\pnpm', 'C:\\a\\pnpm.CMD'),
+      'pnpm',
+      env,
+      'win32',
+    );
     expect(found).toEqual({ ok: true, file: 'C:\\a\\pnpm.CMD' });
   });
 
-  it('uses the default PATHEXT when PATHEXT is not set', () => {
-    expect(resolveProgram('node', { PATH: 'C:\\n' }, 'win32', filesOf('C:\\n\\node.EXE'))).toEqual({
+  it('uses the default PATHEXT when PATHEXT is not set', async () => {
+    expect(
+      await resolveProgram(filesOf('C:\\n\\node.EXE'), 'node', { PATH: 'C:\\n' }, 'win32'),
+    ).toEqual({
       ok: true,
       file: 'C:\\n\\node.EXE',
     });
   });
 
-  it('uses the PATHEXT it is given, and not the default', () => {
+  it('uses the PATHEXT it is given, and not the default', async () => {
     const env = { PATH: 'C:\\a', PATHEXT: '.PS1' };
-    expect(resolveProgram('tool', env, 'win32', filesOf('C:\\a\\tool.CMD'))).toEqual({
+    expect(await resolveProgram(filesOf('C:\\a\\tool.CMD'), 'tool', env, 'win32')).toEqual({
       ok: false,
       reason: NOT_ON_PATH,
     });
-    expect(resolveProgram('tool', env, 'win32', filesOf('C:\\a\\tool.PS1'))).toEqual({
+    expect(await resolveProgram(filesOf('C:\\a\\tool.PS1'), 'tool', env, 'win32')).toEqual({
       ok: true,
       file: 'C:\\a\\tool.PS1',
     });
   });
 
-  it('matches the PATH variable whatever the case of its name', () => {
-    expect(resolveProgram('tool', { Path: 'C:\\a' }, 'win32', filesOf('C:\\a\\tool.EXE'))).toEqual({
+  it('matches the PATH variable whatever the case of its name', async () => {
+    expect(
+      await resolveProgram(filesOf('C:\\a\\tool.EXE'), 'tool', { Path: 'C:\\a' }, 'win32'),
+    ).toEqual({
       ok: true,
       file: 'C:\\a\\tool.EXE',
     });
   });
 
-  it('refuses a program that is not on PATH, with the fixed reason and no name', () => {
-    const result = resolveProgram('missing-7731', { PATH: 'C:\\a' }, 'win32', filesOf());
+  it('refuses a program that is not on PATH, with the fixed reason and no name', async () => {
+    const result = await resolveProgram(filesOf(), 'missing-7731', { PATH: 'C:\\a' }, 'win32');
     expect(result).toEqual({ ok: false, reason: NOT_ON_PATH });
     expect(JSON.stringify(result)).not.toContain('7731');
   });
 
-  it('refuses when PATH is empty or not set', () => {
-    expect(resolveProgram('tool', {}, 'win32', filesOf('tool.EXE')).ok).toBe(false);
-    expect(resolveProgram('tool', { PATH: '' }, 'win32', filesOf('tool.EXE')).ok).toBe(false);
+  it('refuses when PATH is empty or not set', async () => {
+    expect((await resolveProgram(filesOf('tool.EXE'), 'tool', {}, 'win32')).ok).toBe(false);
+    expect((await resolveProgram(filesOf('tool.EXE'), 'tool', { PATH: '' }, 'win32')).ok).toBe(
+      false,
+    );
   });
 });
 
-describe('resolveProgram: PATH on POSIX (probe as a parameter)', () => {
-  it('finds a bare name in PATH folders, in order, with no extension added', () => {
+describe('resolveProgram: PATH on POSIX (files as a parameter)', () => {
+  it('finds a bare name in PATH folders, in order, with no extension added', async () => {
     const env = { PATH: '/x:/y' };
-    expect(resolveProgram('tool', env, 'linux', filesOf('/y/tool'))).toEqual({
+    expect(await resolveProgram(filesOf('/y/tool'), 'tool', env, 'linux')).toEqual({
       ok: true,
       file: '/y/tool',
     });
-    expect(resolveProgram('tool', env, 'linux', filesOf('/x/tool.cmd'))).toEqual({
+    expect(await resolveProgram(filesOf('/x/tool.cmd'), 'tool', env, 'linux')).toEqual({
       ok: false,
       reason: NOT_ON_PATH,
     });
   });
 
-  it('checks a program that has a separator as a path, without searching PATH', () => {
+  it('checks a program that has a separator as a path, without searching PATH', async () => {
     expect(
-      resolveProgram('/opt/bin/tool', { PATH: '/x' }, 'linux', filesOf('/opt/bin/tool')),
+      await resolveProgram(filesOf('/opt/bin/tool'), '/opt/bin/tool', { PATH: '/x' }, 'linux'),
     ).toEqual({ ok: true, file: '/opt/bin/tool' });
-    expect(resolveProgram('/opt/bin/tool', { PATH: '/x' }, 'linux', filesOf('/x/tool'))).toEqual({
+    expect(
+      await resolveProgram(filesOf('/x/tool'), '/opt/bin/tool', { PATH: '/x' }, 'linux'),
+    ).toEqual({
       ok: false,
       reason: NOT_ON_PATH,
     });
   });
 
-  it('refuses an empty program', () => {
-    expect(resolveProgram('', { PATH: '/x' }, 'linux', filesOf('/x/'))).toEqual({
+  it('refuses an empty program', async () => {
+    expect(await resolveProgram(filesOf('/x/'), '', { PATH: '/x' }, 'linux')).toEqual({
       ok: false,
       reason: NOT_ON_PATH,
     });
@@ -118,14 +156,24 @@ describe('resolveProgram: the real file check on POSIX', () => {
     rmSync(base, { recursive: true, force: true });
   });
 
-  it.skipIf(process.platform === 'win32')('finds an executable file and not a plain one', () => {
-    const env = { PATH: join(base, 'bin') };
-    expect(resolveProgram('tool', env, 'linux')).toEqual({
-      ok: true,
-      file: join(base, 'bin', 'tool'),
-    });
-    expect(resolveProgram('plain', env, 'linux')).toEqual({ ok: false, reason: NOT_ON_PATH });
-  });
+  it.skipIf(process.platform === 'win32')(
+    'finds an executable file and not a plain one',
+    async () => {
+      const env = { PATH: join(base, 'bin') };
+      expect(
+        await resolveProgram(toolEnvironment(localEnvironment()), 'tool', env, 'linux'),
+      ).toEqual({
+        ok: true,
+        file: join(base, 'bin', 'tool'),
+      });
+      expect(
+        await resolveProgram(toolEnvironment(localEnvironment()), 'plain', env, 'linux'),
+      ).toEqual({
+        ok: false,
+        reason: NOT_ON_PATH,
+      });
+    },
+  );
 });
 
 describe('cmdLineFor: the cmd.exe line', () => {
@@ -242,6 +290,7 @@ describe('runCommandInRoot on Windows: a .cmd stub through cmd.exe', () => {
     'runs an allowlisted stub that resolves to a .cmd and returns its output',
     async () => {
       const result = await runCommandInRoot(
+        toolEnvironment(localEnvironment()),
         root,
         { program: 'stub', args: ['alpha', 'beta-1'] },
         allow,
@@ -261,9 +310,15 @@ describe('runCommandInRoot on Windows: a .cmd stub through cmd.exe', () => {
       const env: NodeJS.ProcessEnv = { ...process.env };
       const key = Object.keys(env).find((name) => name.toUpperCase() === 'PATH') ?? 'PATH';
       env[key] = `${spaced};${env[key] ?? ''}`;
-      const result = await runCommandInRoot(root, { program: 'spaced', args: ['gamma'] }, allow, {
-        parentEnv: env,
-      });
+      const result = await runCommandInRoot(
+        toolEnvironment(localEnvironment()),
+        root,
+        { program: 'spaced', args: ['gamma'] },
+        allow,
+        {
+          parentEnv: env,
+        },
+      );
       expect(result.ok).toBe(true);
       if (result.ok) expect(result.output).toContain('spaced-ran gamma');
     },
@@ -272,9 +327,15 @@ describe('runCommandInRoot on Windows: a .cmd stub through cmd.exe', () => {
   it.skipIf(process.platform !== 'win32')(
     'refuses an unsafe argument for the .cmd stub before anything starts',
     async () => {
-      const result = await runCommandInRoot(root, { program: 'stub', args: ['a&calc'] }, allow, {
-        parentEnv: envWithStubFirst(),
-      });
+      const result = await runCommandInRoot(
+        toolEnvironment(localEnvironment()),
+        root,
+        { program: 'stub', args: ['a&calc'] },
+        allow,
+        {
+          parentEnv: envWithStubFirst(),
+        },
+      );
       expect(result).toEqual({ ok: false, reason: UNSAFE_CMD_LINE });
     },
   );

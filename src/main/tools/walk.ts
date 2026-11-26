@@ -3,8 +3,7 @@
 // is neither a file nor a folder to it, so it is skipped. Matching uses root-relative paths
 // with '/' separators.
 
-import { promises as fs, type Dirent } from 'node:fs';
-import { join, relative, sep } from 'node:path';
+import type { DirEntryInfo, ToolEnvironment } from '../env/types';
 
 /** One regular file found by the walk: its root-relative path (with '/') and absolute path. */
 export interface FoundFile {
@@ -59,14 +58,18 @@ export function globToRegExp(glob: string): RegExp {
  * Every regular file under `start` (a real folder inside `realRoot`), sorted by root-relative
  * path. Unreadable folders are skipped rather than failing the walk.
  */
-export async function walkFiles(realRoot: string, start: string): Promise<FoundFile[]> {
+export async function walkFiles(
+  env: ToolEnvironment,
+  realRoot: string,
+  start: string,
+): Promise<FoundFile[]> {
   const found: FoundFile[] = [];
   const folders: string[] = [start];
   while (folders.length > 0) {
     const folder = folders.pop() as string;
-    let entries: Dirent[];
+    let entries: DirEntryInfo[];
     try {
-      entries = await fs.readdir(folder, { withFileTypes: true });
+      entries = await env.files.readdir(folder);
     } catch {
       continue;
     }
@@ -74,11 +77,14 @@ export async function walkFiles(realRoot: string, start: string): Promise<FoundF
       if (isSkipped(entry.name)) {
         continue;
       }
-      const abs = join(folder, entry.name);
+      const abs = env.path.join(folder, entry.name);
       if (entry.isDirectory()) {
         folders.push(abs);
       } else if (entry.isFile()) {
-        found.push({ rel: relative(realRoot, abs).split(sep).join('/'), abs });
+        found.push({
+          rel: env.path.relative(realRoot, abs).split(env.path.sep).join('/'),
+          abs,
+        });
       }
     }
   }

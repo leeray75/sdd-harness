@@ -11,6 +11,7 @@ import { JOB_IDS, validateAgentToMainMessage, type JobId } from '../../src/share
 import { TOOL_NAMES, type ToolName } from '../../src/shared/tools';
 import { handleAgentMessage, type RouterDeps } from '../../src/main/agent/router';
 import { makeToolRunner } from '../../src/main/agent/host';
+import { localEnvironment } from '../../src/main/env';
 import {
   DEFAULT_POLICY_CONTEXT,
   denyAllCommands,
@@ -88,7 +89,7 @@ function harness(ctx: PolicyContext) {
   const info = vi.fn<(message: string) => void>();
   const error = vi.fn<(message: string) => void>();
   const onRuleEvent = vi.fn<RouterDeps['onRuleEvent']>();
-  const runner = makeToolRunner(root, {
+  const runner = makeToolRunner(localEnvironment(), root, {
     ticketSource: {
       read: async (id) => ({ ok: true, title: `ticket ${id}`, body: TICKET_TEXT }),
     },

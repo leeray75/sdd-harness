@@ -41,6 +41,8 @@ Users add repo folders on this computer, in WSL, on an SSH server or in a dev co
 
 A starting point. Claude adjusts it in step 2 and you confirm.
 
+The split the user chose has eight subtasks, listed in the progress file. Row 2 is `p4-env-local`, which is not the WSL backend: it adds the environment interface (D41, [`environments.md`](../environments.md)) with the local backend and moves the tools, the command runner, the git module and the spec lock onto it with no change in behaviour. The WSL, SSH and container backends are then separate subtasks (rows 3 to 5), each on that interface.
+
 | #   | Feature                    | Delivers                                                                   |
 | --- | -------------------------- | -------------------------------------------------------------------------- |
 | 1   | `p4-project-store`         | Persisted projects and per-project rules                                   |

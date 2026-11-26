@@ -28,6 +28,7 @@ import {
   type RevertRecord,
   type Snapshot,
 } from '../../src/main/commands/protect';
+import { localEnvironment, toolEnvironment } from '../../src/main/env';
 
 const HAS_GIT = spawnSync('git', ['--version']).status === 0;
 const HAS_SYMLINK = (() => {
@@ -165,7 +166,13 @@ describe('snapshotForRun: the writer set', () => {
   it('holds docs/specs and the .git key files, and not the project files or .git/index', async () => {
     const root = freshRoot();
     build(root, 'manual');
-    const snapshot = mustSnapshot(await snapshotForRun({ root, job: 'writer', env: process.env }));
+    const snapshot = mustSnapshot(
+      await snapshotForRun(toolEnvironment(localEnvironment()), {
+        root,
+        job: 'writer',
+        env: process.env,
+      }),
+    );
     const keys = [...snapshot.saved.keys()];
     expect(keys).toEqual(
       expect.arrayContaining([
@@ -190,7 +197,11 @@ describe.skipIf(!HAS_GIT)('snapshotForRun: the reviewer set with git', () => {
     write(root, 'build/app.js', 'ignored build');
     write(root, 'node_modules/pkg/index.js', 'module');
     const snapshot = mustSnapshot(
-      await snapshotForRun({ root, job: 'reviewer', env: process.env }),
+      await snapshotForRun(toolEnvironment(localEnvironment()), {
+        root,
+        job: 'reviewer',
+        env: process.env,
+      }),
     );
     const keys = [...snapshot.saved.keys()];
     expect(keys).toEqual(expect.arrayContaining(['src/app.ts', 'src/gone.ts', '.gitignore']));
@@ -205,7 +216,7 @@ describe.skipIf(!HAS_GIT)('snapshotForRun: the reviewer set with git', () => {
     build(root, 'git');
     write(root, 'out.log', 'x');
     write(root, 'build/app.js', 'ignored build');
-    const ignored = await gitIgnoredEntries(root, process.env);
+    const ignored = await gitIgnoredEntries(toolEnvironment(localEnvironment()), root, process.env);
     expect(ignored).not.toBeNull();
     expect(ignored?.has('out.log')).toBe(true);
     expect(ignored?.has('build/')).toBe(true);
@@ -218,9 +229,15 @@ describe('snapshotForRun: the reviewer set without git', () => {
     build(root, 'plain');
     write(root, 'out.log', 'not ignored without git');
     write(root, 'node_modules/pkg/index.js', 'module');
-    expect(await gitIgnoredEntries(root, process.env)).toBeNull();
+    expect(
+      await gitIgnoredEntries(toolEnvironment(localEnvironment()), root, process.env),
+    ).toBeNull();
     const snapshot = mustSnapshot(
-      await snapshotForRun({ root, job: 'reviewer', env: process.env }),
+      await snapshotForRun(toolEnvironment(localEnvironment()), {
+        root,
+        job: 'reviewer',
+        env: process.env,
+      }),
     );
     const keys = [...snapshot.saved.keys()];
     expect(keys).toEqual(expect.arrayContaining(['src/app.ts', 'out.log', '.gitignore']));
@@ -233,7 +250,12 @@ describe('snapshotForRun: the cap', () => {
     const root = freshRoot();
     build(root, 'manual');
     for (const job of ['writer', 'reviewer'] as const) {
-      const result = await snapshotForRun({ root, job, env: process.env, maxBytes: 10 });
+      const result = await snapshotForRun(toolEnvironment(localEnvironment()), {
+        root,
+        job,
+        env: process.env,
+        maxBytes: 10,
+      });
       expect(result).toEqual({ ok: false, reason: TOO_LARGE_REASON });
     }
   });
@@ -241,15 +263,26 @@ describe('snapshotForRun: the cap', () => {
   it('accepts a snapshot exactly at the cap and refuses one byte less, and the default cap is 256 MiB', async () => {
     const root = freshRoot();
     build(root, 'manual');
-    const whole = mustSnapshot(await snapshotForRun({ root, job: 'writer', env: process.env }));
+    const whole = mustSnapshot(
+      await snapshotForRun(toolEnvironment(localEnvironment()), {
+        root,
+        job: 'writer',
+        env: process.env,
+      }),
+    );
     let total = 0;
     for (const saved of whole.saved.values()) {
       if (saved.kind === 'file') total += saved.bytes.length;
     }
     expect(total).toBeGreaterThan(0);
-    const atCap = await snapshotForRun({ root, job: 'writer', env: process.env, maxBytes: total });
+    const atCap = await snapshotForRun(toolEnvironment(localEnvironment()), {
+      root,
+      job: 'writer',
+      env: process.env,
+      maxBytes: total,
+    });
     expect(atCap.ok).toBe(true);
-    const underCap = await snapshotForRun({
+    const underCap = await snapshotForRun(toolEnvironment(localEnvironment()), {
       root,
       job: 'writer',
       env: process.env,
@@ -264,13 +297,19 @@ describe('lockSpecFolder', () => {
   it('makes every docs/specs file read-only, and leaves the .git files alone', async () => {
     const root = freshRoot();
     build(root, 'manual');
-    const snapshot = mustSnapshot(await snapshotForRun({ root, job: 'writer', env: process.env }));
-    await lockSpecFolder(snapshot);
+    const snapshot = mustSnapshot(
+      await snapshotForRun(toolEnvironment(localEnvironment()), {
+        root,
+        job: 'writer',
+        env: process.env,
+      }),
+    );
+    await lockSpecFolder(toolEnvironment(localEnvironment()), snapshot);
     expect(modeOf(join(root, 'docs/specs/feature/SPECS.md')) & 0o200).toBe(0);
     expect(modeOf(join(root, 'docs/specs/feature/tasks.md')) & 0o200).toBe(0);
     expect(modeOf(join(root, '.git/HEAD')) & 0o200).not.toBe(0);
     expect(() => writeFileSync(join(root, 'docs/specs/feature/SPECS.md'), 'tampered')).toThrow();
-    await restoreAfterRun(snapshot);
+    await restoreAfterRun(toolEnvironment(localEnvironment()), snapshot);
   });
 });
 
@@ -279,8 +318,14 @@ describe('restoreAfterRun: the writer', () => {
     const root = freshRoot();
     build(root, 'manual');
     const specsMode = modeOf(join(root, 'docs/specs/feature/SPECS.md'));
-    const snapshot = mustSnapshot(await snapshotForRun({ root, job: 'writer', env: process.env }));
-    await lockSpecFolder(snapshot);
+    const snapshot = mustSnapshot(
+      await snapshotForRun(toolEnvironment(localEnvironment()), {
+        root,
+        job: 'writer',
+        env: process.env,
+      }),
+    );
+    await lockSpecFolder(toolEnvironment(localEnvironment()), snapshot);
 
     // The command clears the read-only state first, then edits, creates and deletes.
     unlockTree(join(root, 'docs/specs'));
@@ -297,7 +342,7 @@ describe('restoreAfterRun: the writer', () => {
     writeFileSync(join(root, '.git/index'), 'index changed');
     writeFileSync(join(root, 'src/app.ts'), 'writer edit kept');
 
-    const result = await restoreAfterRun(snapshot);
+    const result = await restoreAfterRun(toolEnvironment(localEnvironment()), snapshot);
     expect(result.incomplete).toBe(false);
     expect(readFileSync(join(root, 'docs/specs/feature/SPECS.md'), 'utf8')).toBe('spec v1');
     expect(readFileSync(join(root, 'docs/specs/feature/tasks.md'), 'utf8')).toBe('tasks v1');
@@ -331,9 +376,15 @@ describe('restoreAfterRun: the writer', () => {
     build(root, 'manual');
     const fileBefore = modeOf(join(root, 'docs/specs/feature/SPECS.md'));
     const folderBefore = modeOf(join(root, 'docs/specs/feature'));
-    const snapshot = mustSnapshot(await snapshotForRun({ root, job: 'writer', env: process.env }));
-    await lockSpecFolder(snapshot);
-    const result = await restoreAfterRun(snapshot);
+    const snapshot = mustSnapshot(
+      await snapshotForRun(toolEnvironment(localEnvironment()), {
+        root,
+        job: 'writer',
+        env: process.env,
+      }),
+    );
+    await lockSpecFolder(toolEnvironment(localEnvironment()), snapshot);
+    const result = await restoreAfterRun(toolEnvironment(localEnvironment()), snapshot);
     expect(result.records).toEqual([]);
     expect(modeOf(join(root, 'docs/specs/feature/SPECS.md'))).toBe(fileBefore);
     expect(modeOf(join(root, 'docs/specs/feature'))).toBe(folderBefore);
@@ -342,11 +393,17 @@ describe('restoreAfterRun: the writer', () => {
   it.skipIf(!HAS_SYMLINK)('deletes a symlink the command created in docs/specs', async () => {
     const root = freshRoot();
     build(root, 'manual');
-    const snapshot = mustSnapshot(await snapshotForRun({ root, job: 'writer', env: process.env }));
-    await lockSpecFolder(snapshot);
+    const snapshot = mustSnapshot(
+      await snapshotForRun(toolEnvironment(localEnvironment()), {
+        root,
+        job: 'writer',
+        env: process.env,
+      }),
+    );
+    await lockSpecFolder(toolEnvironment(localEnvironment()), snapshot);
     unlockTree(join(root, 'docs/specs'));
     symlinkSync(join(root, 'src/app.ts'), join(root, 'docs/specs/link.ts'));
-    const result = await restoreAfterRun(snapshot);
+    const result = await restoreAfterRun(toolEnvironment(localEnvironment()), snapshot);
     expect(existsSync(join(root, 'docs/specs/link.ts'))).toBe(false);
     expect(recordsOf(result.records)).toEqual(['docs/specs/link.ts=deleted']);
   });
@@ -358,9 +415,13 @@ describe.skipIf(!HAS_GIT)('restoreAfterRun: the reviewer with git', () => {
     build(root, 'git');
     write(root, 'node_modules/pkg/index.js', 'module');
     const snapshot = mustSnapshot(
-      await snapshotForRun({ root, job: 'reviewer', env: process.env }),
+      await snapshotForRun(toolEnvironment(localEnvironment()), {
+        root,
+        job: 'reviewer',
+        env: process.env,
+      }),
     );
-    await lockSpecFolder(snapshot);
+    await lockSpecFolder(toolEnvironment(localEnvironment()), snapshot);
 
     writeFileSync(join(root, 'src/app.ts'), 'edited by reviewer');
     writeFileSync(join(root, 'src/new.ts'), 'new file');
@@ -370,7 +431,7 @@ describe.skipIf(!HAS_GIT)('restoreAfterRun: the reviewer with git', () => {
     writeFileSync(join(root, 'build/app.js'), 'ignored build output');
     writeFileSync(join(root, 'node_modules/pkg/index.js'), 'changed module');
 
-    const result = await restoreAfterRun(snapshot);
+    const result = await restoreAfterRun(toolEnvironment(localEnvironment()), snapshot);
     expect(result.incomplete).toBe(false);
     expect(readFileSync(join(root, 'src/app.ts'), 'utf8')).toBe('export const a = 1;');
     expect(existsSync(join(root, 'src/new.ts'))).toBe(false);
@@ -392,12 +453,16 @@ describe('restoreAfterRun: the reviewer without git', () => {
     const root = freshRoot();
     build(root, 'plain');
     const snapshot = mustSnapshot(
-      await snapshotForRun({ root, job: 'reviewer', env: process.env }),
+      await snapshotForRun(toolEnvironment(localEnvironment()), {
+        root,
+        job: 'reviewer',
+        env: process.env,
+      }),
     );
     writeFileSync(join(root, 'out.log'), 'created log');
     mkdirSync(join(root, 'node_modules'), { recursive: true });
     writeFileSync(join(root, 'node_modules/kept.js'), 'kept');
-    const result = await restoreAfterRun(snapshot);
+    const result = await restoreAfterRun(toolEnvironment(localEnvironment()), snapshot);
     expect(existsSync(join(root, 'out.log'))).toBe(false);
     expect(readFileSync(join(root, 'node_modules/kept.js'), 'utf8')).toBe('kept');
     expect(recordsOf(result.records)).toEqual(['out.log=deleted']);

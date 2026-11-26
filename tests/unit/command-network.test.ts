@@ -8,13 +8,14 @@ import {
   DEAD_PROXY,
   LOOPBACK_THEN_EXEC,
   MACOS_SANDBOX_PROFILE,
-  probeNetwork,
   SANDBOX_EXEC_PATH,
   wrapCommand,
   writerNetworkEnv,
   type NetworkChoice,
   type NetworkProbes,
 } from '../../src/main/commands/network';
+// The probes moved to the environment with the other system calls (D41); the assertions are unchanged.
+import { probeNetwork } from '../../src/main/env/probes';
 
 const PLATFORMS: NodeJS.Platform[] = ['linux', 'darwin', 'win32', 'freebsd'];
 const PROBE_SETS: NetworkProbes[] = [

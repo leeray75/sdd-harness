@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { commandPolicyFor, contextFor, type LiveSupplier } from '../../src/main/agent/host';
+import { localEnvironment } from '../../src/main/env';
 import { checkToolCall } from '../../src/main/policy/gate';
 import {
   DEFAULT_POLICY_CONTEXT,
@@ -39,9 +40,9 @@ describe('contextFor', () => {
 });
 
 describe('the host context follows the supplier (AC6)', () => {
-  it('uses the supplier values at each call, not the values at start', () => {
+  it('uses the supplier values at each call, not the values at start', async () => {
     const live = movingSupplier({ feature: 'f', spec: 'draft' });
-    const { contextNow } = commandPolicyFor(undefined, live.supplier);
+    const { contextNow } = await commandPolicyFor(localEnvironment(), undefined, live.supplier);
     const writeSource = {
       job: 'writer' as const,
       tool: 'write_file',
@@ -57,16 +58,20 @@ describe('the host context follows the supplier (AC6)', () => {
     expect(checkToolCall(writeSource, contextNow()).allow).toBe(false);
   });
 
-  it('gives the default context, with no feature and no spec, when no supplier is given', () => {
-    const { contextNow } = commandPolicyFor(undefined);
+  it('gives the default context, with no feature and no spec, when no supplier is given', async () => {
+    const { contextNow } = await commandPolicyFor(localEnvironment(), undefined);
     expect(contextNow()).toEqual(DEFAULT_POLICY_CONTEXT);
   });
 
-  it('keeps the command check deny-all with no root, whatever the supplier says', () => {
-    const { contextNow, commandCheck } = commandPolicyFor(undefined, () => ({
-      feature: 'f',
-      spec: 'approved',
-    }));
+  it('keeps the command check deny-all with no root, whatever the supplier says', async () => {
+    const { contextNow, commandCheck } = await commandPolicyFor(
+      localEnvironment(),
+      undefined,
+      () => ({
+        feature: 'f',
+        spec: 'approved',
+      }),
+    );
     expect(commandCheck({ job: 'writer', program: 'node', args: ['-v'] }).allow).toBe(false);
     expect(contextNow().commandCheck).toBe(commandCheck);
   });

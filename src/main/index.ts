@@ -7,6 +7,7 @@ import { DEV_PROJECT_ID } from '../shared/human-actions';
 import { DEFAULT_RULES } from '../shared/project-rules';
 import { tokens } from '../shared/tokens';
 import { startAgentHost, type LiveSupplier } from './agent/host';
+import { environmentFor } from './env';
 import { createHumanActionChannel } from './human/channel';
 import { createGestureTracker } from './human/gesture';
 import { createShipHandlers } from './human/ship-handlers';
@@ -218,8 +219,10 @@ async function setUpProjects(): Promise<void> {
   const createdRegistry = createProjectRegistry({
     store,
     ...(devProject === undefined ? {} : { devProject }),
-    startLock: (root) => {
+    environmentFor,
+    startLock: (env, root) => {
       const lock = createSpecLockWatcher({
+        env,
         root,
         onChange: (value) => {
           const feature = value.feature === null ? '' : ` feature=${value.feature}`;
@@ -232,8 +235,9 @@ async function setUpProjects(): Promise<void> {
       }
       return lock;
     },
-    makeSpecHandlers: ({ project, refresh }) =>
+    makeSpecHandlers: ({ project, env, refresh }) =>
       createSpecHandlers({
+        env,
         root: project.root,
         now: () => new Date(),
         onLockChanged: refresh,
@@ -244,8 +248,9 @@ async function setUpProjects(): Promise<void> {
           return controller ? controller.requestEdit() : { ok: true };
         },
       }),
-    makeShipHandlers: ({ project, refresh, controllerNode }) =>
+    makeShipHandlers: ({ project, env, refresh, controllerNode }) =>
       createShipHandlers({
+        env,
         root: project.root,
         onLockChanged: refresh,
         controllerNode,
@@ -323,7 +328,14 @@ if (secretsCommand) {
         return { feature: value.feature, spec: specStateOf(value.approval) };
       };
     }
-    startAgentHost(live);
+    // The agent's tools run in the dev project's environment (D41): the local one, as the dev
+    // project's descriptor says.
+    const devEnvironment = environmentFor({ kind: 'local' });
+    if (devEnvironment.ok) {
+      startAgentHost(devEnvironment.env, live).catch(() => {
+        log.error('the agent host could not be started');
+      });
+    }
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {
