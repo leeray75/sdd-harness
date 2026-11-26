@@ -7,9 +7,12 @@ last category.
 
 - Branch: `feature/p4-macos-ci-fix` → `main`
 - Pull request: https://github.com/leeray75/sdd-harness/pull/33
-- Head commit: `1f053d9`
-- Green CI run: https://github.com/leeray75/sdd-harness/actions/runs/45895593885
-- Scope: **11 files, +302/−46. No change under `src/`.** Tests and docs only.
+- Head commit: whatever the tip of `feature/p4-macos-ci-fix` is. Read it with
+  `gh pr view 33 --json headRefOid --jq .headRefOid` — this file deliberately does **not** pin a SHA,
+  because editing this file is itself a commit and would instantly stale whatever it quoted.
+- Latest green CI run: see the ledger in §6, and `gh pr checks 33` for the live answer.
+- Scope: **tests and docs only — nothing under `src/`.** Check with §4, which is the assertion that
+  actually matters; the file count moves whenever this file is edited.
 
 ## 1. What it does
 
@@ -20,12 +23,16 @@ test harness. One case is skipped where the OS network wrapper makes its result 
 
 ## 2. Commits
 
+Any commit after `f213cb7` changes this file only.
+
 | Commit    | What                                                                               |
 | --------- | ---------------------------------------------------------------------------------- |
 | `b32ddc8` | macOS unit-test fix (resolve the stand-in temp root), CHANGELOG, stale-doc refresh |
 | `30b828a` | the CI change, and the wrapper-gated skip of the AC8 case                          |
 | `642ba2e` | resolve the stand-in root with `realpathSync.native` (the Windows fix)             |
 | `19ced5c` | record Windows green, record the flaky watch pair                                  |
+| `1f053d9` | this file, and the pointer to it from the phase 4 follow-ups                       |
+| `f213cb7` | keep these notes current with the branch                                           |
 
 ## 3. Files
 
@@ -38,7 +45,8 @@ test harness. One case is skipped where the OS network wrapper makes its result 
 | `CLAUDE.md`                                                              | CI section rewritten; "on this machine = Windows" de-scoped |
 | `README.md`                                                              | platform claim and Corepack prerequisite corrected          |
 | `docs/environments.md`                                                   | backend checklist gains the resolved-root rule              |
-| `docs/phases/phase-04-progress.md`                                       | `p4-macos-ci-fix` follow-up block                           |
+| `docs/phases/phase-04-progress.md`                                       | `p4-macos-ci-fix` follow-up block, and a pointer here       |
+| `docs/merge-notes-p4-macos-ci-fix.md`                                    | this file                                                   |
 
 ## 4. Verify the scope (do this first)
 
@@ -51,7 +59,7 @@ Expected: **no output.** The change touches no product code, no shared test supp
 tests, and no sdd spec folder. If any file appears, stop and re-review.
 
 ```sh
-git diff --stat origin/main...HEAD          # expect 11 files, +302/−46
+git diff --stat origin/main...HEAD          # the only test/doc files listed in §3; the count grows if this file is edited
 ```
 
 ## 5. Verify each claim
