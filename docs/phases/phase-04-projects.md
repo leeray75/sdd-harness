@@ -35,7 +35,7 @@ Users add repo folders on this computer, in WSL, on an SSH server or in a dev co
 ## Decide during planning
 
 - SSH library and how credentials are handled: decided in `p4-env-ssh`, recorded as D43 (`ssh2`; credentials from the secret store at connect time; pinned host keys).
-- How dev containers are attached (docker exec vs devcontainer CLI)
+- How dev containers are attached: decided in `p4-env-container`, recorded as D44 (the docker CLI runs `docker exec` through the setsid launcher, and the container is found by its `devcontainer.local_folder` label on each connect; not the devcontainer CLI, and the app never builds a container).
 
 ## Suggested subtasks
 

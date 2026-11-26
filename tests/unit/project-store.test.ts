@@ -21,8 +21,14 @@ import {
 import type { Environment } from '../../src/main/env/types';
 import { createWslEnvironment } from '../../src/main/env/wsl';
 import { createSshEnvironment } from '../../src/main/env/ssh';
+import { createContainerEnvironment } from '../../src/main/env/container';
 import { fakeWslTransport } from '../support/fake-wsl-transport';
 import { fakeSshTransport } from '../support/fake-ssh-transport';
+import {
+  fakeDocker,
+  type FakeContainer,
+  type FakeDocker,
+} from '../support/fake-container-transport';
 import type { Logger } from '../../src/main/log';
 import { DEFAULT_RULES, RULE_REASONS } from '../../src/shared/project-rules';
 
@@ -764,6 +770,160 @@ describe('SSH projects through the store (AC11, D43)', () => {
     expect(store.list()).toEqual([]);
     expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('(reason: invalid-project)'));
     expect(logger.error.mock.calls.flat().join(' ')).not.toContain('not-a-server');
+  });
+});
+
+/** The container environment of a test: a fake docker holding one labelled container, connected. */
+async function containerEnvFor(
+  folder: string,
+  options: {
+    engineDown?: boolean;
+    docker?: { kind: 'host' } | { kind: 'wsl'; distribution: string };
+  } = {},
+): Promise<{ env: Environment; docker: FakeDocker }> {
+  const mount = join(base, 'container');
+  mkdirSync(join(mount, 'work'), { recursive: true });
+  mkdirSync(join(mount, 'docs'), { recursive: true });
+  const item: FakeContainer = {
+    id: 'store1',
+    folder,
+    metadata: null,
+    running: true,
+    created: '2026-11-20 10:00:00 +0000 UTC',
+    mount,
+  };
+  const docker = fakeDocker([item], options.engineDown === true ? { engineDown: true } : {});
+  const env = createContainerEnvironment({
+    descriptor: { folder, docker: options.docker ?? { kind: 'host' } },
+    transport: docker,
+  });
+  if (options.engineDown !== true) await env.connection.reconnect();
+  return { env, docker };
+}
+
+const FOLDER = '/home/dev/project';
+const CONTAINER = { kind: 'container' as const, folder: FOLDER, docker: { kind: 'host' as const } };
+const CONTAINER_ID = '44444444-4444-4444-8444-444444444444';
+
+describe('dev container projects: add, refusals, duplicates and load (AC1, D44)', () => {
+  it('adds a container project, with its root checked through the environment, and reloads it', async () => {
+    const { env, docker } = await containerEnvFor(FOLDER);
+    const store = makeStore();
+    await store.load();
+    const result = await store.add({ name: 'Dev', environment: CONTAINER, root: '/work' }, env);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.project).toMatchObject({ environment: CONTAINER, root: '/work' });
+    const reloaded = makeStore();
+    await reloaded.load();
+    expect(reloaded.list()[0]).toMatchObject({ environment: CONTAINER, root: '/work' });
+    // Loading starts no process: the only calls were the connect's own.
+    const before = docker.calls.length;
+    await makeStore().load();
+    expect(docker.calls.length).toBe(before);
+  });
+
+  it('refuses each bad folder, docker host and key set, and a bad root, with the environment reason or the root reason', async () => {
+    const { env } = await containerEnvFor(FOLDER);
+    const store = makeStore();
+    await store.load();
+    const bad: unknown[] = [
+      { kind: 'container', folder: FOLDER },
+      { kind: 'container', folder: FOLDER, docker: { kind: 'host' }, extra: 1 },
+      { kind: 'container', folder: '', docker: { kind: 'host' } },
+      { kind: 'container', folder: '-dash', docker: { kind: 'host' } },
+      { kind: 'container', folder: '/a"b', docker: { kind: 'host' } },
+      { kind: 'container', folder: "/a'b", docker: { kind: 'host' } },
+      { kind: 'container', folder: '/a\u0001b', docker: { kind: 'host' } },
+      { kind: 'container', folder: 'x'.repeat(1025), docker: { kind: 'host' } },
+      { kind: 'container', folder: FOLDER, docker: { kind: 'wsl', distribution: '-bad' } },
+      { kind: 'container', folder: FOLDER, docker: { kind: 'wsl' } },
+      { kind: 'container', folder: FOLDER, docker: { kind: 'podman' } },
+    ];
+    for (const environment of bad) {
+      const result = await store.add(
+        { name: 'Bad', environment: environment as never, root: '/work' },
+        env,
+      );
+      expect(result).toEqual({ ok: false, reason: STORE_REASONS.environment });
+    }
+    for (const root of ['relative', '/work/../etc', '/work/', '/missing']) {
+      expect(await store.add({ name: 'Root', environment: CONTAINER, root }, env)).toEqual({
+        ok: false,
+        reason: STORE_REASONS.root,
+      });
+    }
+    expect(await store.add({ name: 'Nothing', environment: CONTAINER, root: '/work' })).toEqual({
+      ok: false,
+      reason: STORE_REASONS.root,
+    });
+    expect(store.list()).toEqual([]);
+  });
+
+  it('refuses a root in an unreachable container with the store root reason, and stores nothing', async () => {
+    const { env } = await containerEnvFor(FOLDER, { engineDown: true });
+    const store = makeStore();
+    await store.load();
+    expect(await store.add({ name: 'Down', environment: CONTAINER, root: '/work' }, env)).toEqual({
+      ok: false,
+      reason: STORE_REASONS.root,
+    });
+    expect(store.list()).toEqual([]);
+  });
+
+  it('compares the Docker host, folder and root for duplicates', async () => {
+    const { env } = await containerEnvFor(FOLDER);
+    const store = makeStore();
+    await store.load();
+    expect((await store.add({ name: 'One', environment: CONTAINER, root: '/work' }, env)).ok).toBe(
+      true,
+    );
+    expect(await store.add({ name: 'Same', environment: CONTAINER, root: '/work' }, env)).toEqual({
+      ok: false,
+      reason: STORE_REASONS.duplicate,
+    });
+    const otherFolder = { ...CONTAINER, folder: '/home/dev/other' };
+    const otherRoot = await containerEnvFor('/home/dev/other');
+    expect(
+      (
+        await store.add(
+          { name: 'Other folder', environment: otherFolder, root: '/work' },
+          otherRoot.env,
+        )
+      ).ok,
+    ).toBe(true);
+    const otherWsl = { ...CONTAINER, docker: { kind: 'wsl' as const, distribution: 'Ubuntu' } };
+    expect(
+      (await store.add({ name: 'WSL host', environment: otherWsl, root: '/work' }, env)).ok,
+    ).toBe(true);
+    expect(store.list().map((project) => project.environment)).toEqual([
+      CONTAINER,
+      otherFolder,
+      otherWsl,
+    ]);
+  });
+
+  it('a stored container entry with a bad folder is set aside on load, with a code-only log line', async () => {
+    mkdirSync(join(base, 'data'), { recursive: true });
+    writeFileSync(
+      filePath,
+      JSON.stringify({
+        version: 1,
+        projects: [
+          {
+            id: CONTAINER_ID,
+            name: 'Bad',
+            environment: { kind: 'container', folder: '-x', docker: { kind: 'host' } },
+            root: '/work',
+            rules: DEFAULT_RULES,
+          },
+        ],
+      }),
+    );
+    const store = makeStore();
+    await store.load();
+    expect(store.list()).toEqual([]);
+    expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('(reason: invalid-project)'));
   });
 });
 

@@ -11,6 +11,11 @@ All notable changes to SDD Harness are recorded here. The format follows [Keep a
   - The project store and the registry accept `{ kind: 'ssh', server }`. A project whose environment was made but cannot be reached is listed, removable and read-only (`PROJECT_UNREACHABLE`), and `reconnect(id)` brings it back. A project whose environment cannot be made is listed as unreachable too.
   - A stopped or missing WSL distribution is unreachable in the same way, and reconnect starts it.
   - The headless walk runs on an SSH project in an opt-in live test (`pnpm test:live`, `HARNESS_SSH_*` variables).
+- **Dev container projects** (`p4-env-container`, D44): a project can live in a dev container that the user already started. The container backend implements the whole environment interface (files through fixed scripts, programs and git through `docker exec` with the setsid launcher, polling watch, the connection part), with the same contract as the local, WSL and SSH backends.
+  - The container is found by its `devcontainer.local_folder` label on each connect. Programs run as its `remoteUser` (from `devcontainer.metadata`). Docker is the docker CLI on this machine's PATH, or the one in a WSL distribution on Windows. The app never builds a container.
+  - The project store and the registry accept `{ kind: 'container', folder, docker }`. A stopped or missing container, or a stopped engine, lists the project as unreachable, read-only and removable, and `reconnect(id)` starts the container and brings it back.
+  - `detectDocker` reports the docker CLI, its engine and the dev containers. Nothing calls it at start; the add wizard will.
+  - The headless walk runs on a container project in `pnpm test` (over a fake docker) and in an opt-in live test (`pnpm test:live`, `HARNESS_CONTAINER_FOLDER`, `HARNESS_CONTAINER_ROOT` and optionally `HARNESS_CONTAINER_WSL_DISTRO`), never in CI.
 - **Frameless window** (`p0-window-chrome`, PR #3): `frame: false` on Windows and Linux, `titleBarStyle: 'hiddenInset'` with the native traffic lights on macOS. Default size 1280×800, minimum 1024×680.
 - **Custom 40px title bar** (`src/renderer/TitleBar.tsx`):
   - it shows the app mark and an empty Location slot, and drags the window;

@@ -8,6 +8,14 @@
 import type { SshServer } from '../projects/servers';
 import type { SecretStore } from '../secrets/store';
 import type { Logger } from '../log';
+import {
+  appContainerTransport,
+  parseDockerHost,
+  isContainerFolder,
+  type ContainerTransport,
+  type DockerHost,
+} from './container-transport';
+import { createContainerEnvironment } from './container';
 import { localEnvironment } from './local';
 import { createSshEnvironment } from './ssh';
 import { appSshTransport, type SshTransport } from './ssh-transport';
@@ -28,11 +36,16 @@ export const WSL_UNAVAILABLE = 'WSL projects are available only on Windows';
 /** The outcome of choosing a backend. */
 export type EnvironmentResult = { ok: true; env: Environment } | { ok: false; reason: string };
 
-/** The descriptor of a project's environment: the kind, the WSL distribution, or the SSH server id. */
+/**
+ * The descriptor of a project's environment: the kind, the WSL distribution, the SSH server id, or the dev
+ * container's folder and Docker host (D44).
+ */
 export interface EnvironmentDescriptor {
   readonly kind: string;
   readonly distribution?: unknown;
   readonly server?: unknown;
+  readonly folder?: unknown;
+  readonly docker?: unknown;
 }
 
 /** What the SSH kind needs (D43): the saved servers, the secrets and the log, and the transport maker for tests. */
@@ -45,11 +58,13 @@ export interface SshDeps {
   transportFor?: (server: SshServer) => SshTransport;
 }
 
-/** What environmentFor may be given: the platform and the transport maker for WSL, and the SSH deps. */
+/** What environmentFor may be given: the platform and the transport maker for WSL, the SSH deps, and the docker maker (D44). */
 export interface EnvironmentDeps {
   platform?: NodeJS.Platform;
   transportFor?: (distribution: string) => WslTransport;
   ssh?: SshDeps;
+  /** Makes the docker transport of a Docker host. Default: the app's transport. Tests inject a fake. */
+  containerTransportFor?: (host: DockerHost) => ContainerTransport;
 }
 
 /** A saved server id: a lowercase UUID (D43). */
@@ -79,8 +94,9 @@ function sshTransportFor(server: SshServer, ssh: SshDeps): SshTransport {
 /**
  * The backend for a project's environment descriptor. The local kind is the local backend. The WSL kind is
  * built on Windows for a valid distribution name. The name is checked first (UNSUPPORTED_ENVIRONMENT for a
- * bad or missing name, on any platform), then the platform (WSL_UNAVAILABLE off Windows). Any other kind is
- * refused with UNSUPPORTED_ENVIRONMENT.
+ * bad or missing name, on any platform), then the platform (WSL_UNAVAILABLE off Windows). The container kind is built
+ * for a valid folder and Docker host (D44), with the same checks for a WSL Docker host. Any other kind is refused
+ * with UNSUPPORTED_ENVIRONMENT.
  * No reason echoes a value from the descriptor.
  */
 export function environmentFor(
@@ -108,6 +124,24 @@ export function environmentFor(
     if (server === null) return { ok: false, reason: UNSUPPORTED_ENVIRONMENT };
     const transport = sshTransportFor(server, deps.ssh);
     return { ok: true, env: createSshEnvironment({ server, transport }) };
+  }
+  if (descriptor.kind === 'container') {
+    // A malformed folder or Docker host is refused before anything is made (D44). Making the backend starts nothing.
+    const folder = descriptor.folder;
+    const docker = parseDockerHost(descriptor.docker);
+    if (!isContainerFolder(folder) || docker === null)
+      return { ok: false, reason: UNSUPPORTED_ENVIRONMENT };
+    if (docker.kind === 'wsl') {
+      if (!isDistributionName(docker.distribution))
+        return { ok: false, reason: UNSUPPORTED_ENVIRONMENT };
+      const platform = deps.platform ?? process.platform;
+      if (platform !== 'win32') return { ok: false, reason: WSL_UNAVAILABLE };
+    }
+    const transport = (deps.containerTransportFor ?? appContainerTransport)(docker);
+    return {
+      ok: true,
+      env: createContainerEnvironment({ descriptor: { folder, docker }, transport }),
+    };
   }
   return { ok: false, reason: UNSUPPORTED_ENVIRONMENT };
 }

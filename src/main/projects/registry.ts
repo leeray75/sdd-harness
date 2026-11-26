@@ -329,6 +329,10 @@ export function createProjectRegistry(deps: ProjectRegistryDeps): ProjectRegistr
         const connected = await made.env.connection.reconnect();
         if (!connected.ok) return { ok: false, reason: connected.reason };
       }
+      // A dev container connects first too (D44). When it cannot be reached, the store's own root check refuses the add.
+      if (input.environment.kind === 'container') {
+        await made.env.connection.reconnect();
+      }
       // The store checks a WSL or SSH root through this same environment (D42, D43).
       const result = await store.add(input, made.env);
       if (result.ok) register(result.project, made.env, false);
