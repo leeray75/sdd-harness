@@ -94,3 +94,14 @@ describe('tools, commands, the agent host and the agent side never name git (AC2
     }
   });
 });
+
+describe('only the WSL backend and its detection name wsl.exe (AC10, D42)', () => {
+  it('no file under src outside src/main/env/wsl.ts and wsl-detect.ts names wsl.exe', () => {
+    const files = tsFiles('src');
+    expect(files.length).toBeGreaterThan(40);
+    for (const file of files) {
+      if (file === 'src/main/env/wsl.ts' || file === 'src/main/env/wsl-detect.ts') continue;
+      expect(textOf(file), file).not.toMatch(/wsl\.exe/i);
+    }
+  });
+});

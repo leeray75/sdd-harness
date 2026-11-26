@@ -1,6 +1,7 @@
-// A recording test backend for the environment interface (D41, p4-env-local, AC6). It wraps the
-// local backend and records every call by part and method, so a test can show that a step reached its
-// result only through the interface. Each call still runs on the local backend, on a temp folder.
+// A recording test backend for the environment interface (D41, p4-env-local, AC6; p4-env-wsl, AC9). It
+// wraps a backend (the local one by default) and records every call by part and method, so a test can
+// show that a step reached its result only through the interface. Each call still runs on the wrapped
+// backend, on a temp folder or a fake transport.
 
 import { localEnvironment } from '../../src/main/env';
 import type { Environment } from '../../src/main/env/types';
@@ -43,9 +44,11 @@ function recordPart<T extends object>(part: EnvPart, target: T, calls: EnvCall[]
   return copy as T;
 }
 
-/** A recording environment over the local backend. Each test makes its own. */
-export function recordingEnvironment(): RecordingEnv {
-  const base = localEnvironment();
+/**
+ * A recording environment over a backend: the local one by default, or any other backend (the WSL
+ * backend in the AC9 cases). Each test makes its own.
+ */
+export function recordingEnvironment(base: Environment = localEnvironment()): RecordingEnv {
   const calls: EnvCall[] = [];
   const env: Environment = {
     path: recordPart('path', base.path, calls),

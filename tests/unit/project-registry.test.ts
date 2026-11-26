@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, posix } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHumanActionChannel } from '../../src/main/human/channel';
 import { createShipHandlers } from '../../src/main/human/ship-handlers';
@@ -13,7 +13,10 @@ import {
   type ProjectRegistry,
   type ProjectRegistryDeps,
 } from '../../src/main/projects/registry';
-import { environmentFor, localEnvironment } from '../../src/main/env';
+import { environmentFor, localEnvironment, WSL_UNAVAILABLE } from '../../src/main/env';
+import type { EnvironmentDescriptor } from '../../src/main/env';
+import { fakeWslTransport } from '../support/fake-wsl-transport';
+import { DEFAULT_RULES } from '../../src/shared/project-rules';
 import type { Environment } from '../../src/main/env/types';
 import { createProjectStore, type Project } from '../../src/main/projects/store';
 import type { ToolRunner } from '../../src/main/agent/router';
@@ -481,5 +484,68 @@ describe('environments (AC8, D41)', () => {
       code: 'refused',
       reason: 'no project with this id',
     });
+  });
+});
+
+describe('WSL projects through the registry (AC8, D42)', () => {
+  const WSL = { kind: 'wsl' as const, distribution: 'Ubuntu' };
+
+  /** environmentFor on win32, with a fake transport over a temp share that holds the Linux folders. */
+  function wslMaker(folders: string[]) {
+    const share = join(base, 'share');
+    for (const folder of folders) mkdirSync(join(share, folder), { recursive: true });
+    const transport = fakeWslTransport(share);
+    const made: EnvironmentDescriptor[] = [];
+    const maker: ProjectRegistryDeps['environmentFor'] = (descriptor) => {
+      made.push({ ...descriptor });
+      return environmentFor(descriptor, { platform: 'win32', transportFor: () => transport });
+    };
+    return { maker, made };
+  }
+
+  it('builds the environment once through environmentFor, and the store checks the root through it', async () => {
+    const { maker, made } = wslMaker(['/home/u/project']);
+    const { registry, startLock } = await makeRegistry({ environmentFor: maker });
+    const added = await registry.addProject({
+      name: 'Linux',
+      environment: WSL,
+      root: '/home/u/project',
+    });
+    expect(added.ok).toBe(true);
+    if (!added.ok) return;
+    expect(made).toEqual([WSL]);
+    const env = registry.environmentOf(added.project.id);
+    expect(env?.path).toBe(posix);
+    expect(startLock).toHaveBeenCalledWith(env, '/home/u/project');
+  });
+
+  it('refuses a WSL project off Windows with the fixed reason, and stores nothing', async () => {
+    const { registry, startLock } = await makeRegistry({
+      environmentFor: (descriptor) => environmentFor(descriptor, { platform: 'linux' }),
+    });
+    expect(
+      await registry.addProject({ name: 'Linux', environment: WSL, root: '/home/u/project' }),
+    ).toEqual({ ok: false, reason: WSL_UNAVAILABLE });
+    expect(startLock).not.toHaveBeenCalled();
+    expect(registry.projects()).toEqual([]);
+  });
+
+  it('builds a stored WSL project at start, through environmentFor', async () => {
+    const { maker, made } = wslMaker(['/home/u/project']);
+    const id = randomUUID();
+    mkdirSync(join(base, 'data'), { recursive: true });
+    writeFileSync(
+      storePath,
+      JSON.stringify({
+        version: 1,
+        projects: [
+          { id, name: 'Linux', environment: WSL, root: '/home/u/project', rules: DEFAULT_RULES },
+        ],
+      }),
+    );
+    const { registry } = await makeRegistry({ environmentFor: maker });
+    expect(made).toEqual([WSL]);
+    expect(registry.environmentOf(id)?.path).toBe(posix);
+    expect(registry.projects().map((project) => project.environment)).toEqual([WSL]);
   });
 });

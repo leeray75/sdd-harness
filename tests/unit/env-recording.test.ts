@@ -1,8 +1,11 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { toolEnvironment } from '../../src/main/env';
+import { createWslEnvironment } from '../../src/main/env/wsl';
+import { approveResult, SHIP_REASONS } from '../../src/main/workflow/ship';
+import { fakeWslTransport, type FakeTransport } from '../support/fake-wsl-transport';
 import { readFileInRoot } from '../../src/main/tools/read-file';
 import { writeFileInRoot } from '../../src/main/tools/write-file';
 import { listFilesInRoot } from '../../src/main/tools/list-files';
@@ -123,5 +126,103 @@ describe('the spec lock reads, hashes and writes through files, and watches thro
     } finally {
       watcher.close();
     }
+  });
+});
+
+// The same steps over the WSL backend (D42, p4-env-wsl, AC9). The Linux project lives on a fake share, a
+// temp folder, and the fake transport answers the program and git. Every result comes through the
+// interface, and the recording wrapper shows which parts each step used.
+const WSL_ROOT = '/home/u/project';
+let share: string;
+let transport: FakeTransport;
+
+beforeAll(() => {
+  share = join(base, 'wsl-share');
+  const onShare = join(share, 'home', 'u', 'project');
+  mkdirSync(join(onShare, 'docs', 'specs', FEATURE), { recursive: true });
+  writeFileSync(join(onShare, 'a.txt'), 'needle in a file');
+  writeFileSync(join(onShare, 'docs', 'specs', FEATURE, 'SPECS.md'), '# Spec\n\nGoals\n');
+  mkdirSync(join(share, 'usr', 'bin'), { recursive: true });
+  writeFileSync(join(share, 'usr', 'bin', 'tool'), '#!/bin/sh\n');
+});
+
+/** A recording WSL environment: a fresh fake transport, and a call list of its own. */
+function wslRecorder(): RecordingEnv {
+  transport = fakeWslTransport(share, {
+    program: () => ({ code: 0, chunks: ['ran'] }),
+    git: () => ({ code: 128, stderr: 'fatal: not a git repository\n' }),
+  });
+  return recordingEnvironment(createWslEnvironment({ distribution: 'Ubuntu', transport }));
+}
+
+describe('over the WSL backend, each step reaches its result through the interface (AC9)', () => {
+  it('a file tool reads through files on the share', async () => {
+    const rec = wslRecorder();
+    const result = await readFileInRoot(toolEnvironment(rec.env), WSL_ROOT, 'a.txt');
+    expect(result).toEqual({ ok: true, output: 'needle in a file' });
+    expect(rec.methodsOf('files')).toEqual(
+      expect.arrayContaining(['realpath', 'stat', 'readFile']),
+    );
+  });
+
+  it('a write tool writes through files, atomically, on the share', async () => {
+    const rec = wslRecorder();
+    const result = await writeFileInRoot(toolEnvironment(rec.env), WSL_ROOT, {
+      path: 'new.txt',
+      content: 'from wsl',
+    });
+    expect(result.ok).toBe(true);
+    expect(rec.methodsOf('files')).toEqual(expect.arrayContaining(['writeFile', 'rename']));
+    expect(readFileSync(join(share, 'home', 'u', 'project', 'new.txt'), 'utf8')).toBe('from wsl');
+  });
+
+  it('run_command starts the program through process.spawn, through wsl.exe', async () => {
+    const rec = wslRecorder();
+    const result = await runCommandInRoot(
+      toolEnvironment(rec.env),
+      WSL_ROOT,
+      { program: '/usr/bin/tool', args: ['x'] },
+      { job: 'reviewer', check: () => ({ allow: true }) },
+      { parentEnv: { PATH: '/usr/bin' }, platform: 'linux' },
+    );
+    expect(result.ok && result.output).toContain('ran');
+    expect(rec.methodsOf('process')).toEqual(['spawn']);
+    expect(transport.calls.some((call) => call.argv.includes('sh'))).toBe(true);
+  });
+
+  it('the spec lock hashes, writes, reads and watches on the share', async () => {
+    const rec = wslRecorder();
+    const hash = await hashSpec(rec.env, WSL_ROOT, FEATURE);
+    expect(hash).toMatch(/^[0-9a-f]{64}$/);
+    expect(rec.methodsOf('files')).toEqual(expect.arrayContaining(['lstat', 'open']));
+
+    const saved = await writeSpecState(rec.env, WSL_ROOT, {
+      version: SPEC_STATE_VERSION,
+      feature: FEATURE,
+      sha256: hash ?? '',
+      approvedAt: '2026-11-25T10:00:00.000Z',
+      editing: false,
+    });
+    expect(saved).toEqual({ ok: true });
+    expect((await readSpecState(rec.env, WSL_ROOT)).kind).toBe('ok');
+
+    const watcher = createSpecLockWatcher({
+      env: rec.env,
+      root: WSL_ROOT,
+      onChange: () => undefined,
+    });
+    try {
+      await watcher.refresh();
+      expect(rec.methodsOf('watch')).toContain('watchDir');
+    } finally {
+      watcher.close();
+    }
+  });
+
+  it('approve-result reaches its refusal through the gate, with the lock and spec read on the share', async () => {
+    const rec = wslRecorder();
+    const result = await approveResult(rec.env, WSL_ROOT, FEATURE, {});
+    expect(result).toEqual({ ok: false, reason: SHIP_REASONS.notBuildDone });
+    expect(rec.methodsOf('files').length).toBeGreaterThan(0);
   });
 });

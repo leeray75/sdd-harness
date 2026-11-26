@@ -15,8 +15,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createProjectStore,
   STORE_REASONS,
+  type AddProjectInput,
   type ProjectStore,
 } from '../../src/main/projects/store';
+import type { Environment } from '../../src/main/env/types';
+import { createWslEnvironment } from '../../src/main/env/wsl';
+import { fakeWslTransport } from '../support/fake-wsl-transport';
 import type { Logger } from '../../src/main/log';
 import { DEFAULT_RULES, RULE_REASONS } from '../../src/shared/project-rules';
 
@@ -469,3 +473,173 @@ describe('a failed save leaves the list unchanged (AC1)', () => {
     expect(store.get(kept.project.id)?.name).toBe('First');
   }, 20000);
 });
+
+// WSL projects (D42, p4-env-wsl, AC8). The Linux folders exist only on a fake share, so a passing add
+// shows that the root was checked through the environment, not through local fs.
+
+const WSL = { kind: 'wsl' as const, distribution: 'Ubuntu' };
+const WSL_ID = '22222222-2222-4222-8222-222222222222';
+
+/** A WSL environment over a fake transport whose share holds the given Linux folders. */
+function wslEnvFor(folders: string[], distribution = 'Ubuntu'): Environment {
+  const share = join(base, 'share');
+  for (const folder of folders) mkdirSync(join(share, folder), { recursive: true });
+  return createWslEnvironment({ distribution, transport: fakeWslTransport(share) });
+}
+
+describe('WSL projects: add, refusals, duplicates and load (AC8)', () => {
+  it('adds a WSL project, with its root checked through the environment', async () => {
+    const env = wslEnvFor(['/home/u/project']);
+    const store = makeStore();
+    await store.load();
+    const result = await store.add(
+      { name: 'Linux', environment: WSL, root: '/home/u/project' },
+      env,
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.project).toMatchObject({ environment: WSL, root: '/home/u/project' });
+    expect(store.get(result.project.id)?.environment).toEqual(WSL);
+  });
+
+  it('refuses a missing root, a relative root, an unnormalized root, a bad name, extra keys, and a WSL add without an environment', async () => {
+    const env = wslEnvFor(['/home/u/project']);
+    const store = makeStore();
+    await store.load();
+    const add = (
+      environment: unknown,
+      root: unknown,
+      options: { name?: string; withEnv?: boolean } = {},
+    ) =>
+      store.add(
+        { name: options.name ?? 'Linux', environment, root } as unknown as AddProjectInput,
+        options.withEnv === false ? undefined : env,
+      );
+    expect(await add(WSL, '/home/u/missing')).toEqual({ ok: false, reason: STORE_REASONS.root });
+    expect(await add(WSL, 'home/u/project')).toEqual({ ok: false, reason: STORE_REASONS.root });
+    expect(await add(WSL, '/home/u/../u/project')).toEqual({
+      ok: false,
+      reason: STORE_REASONS.root,
+    });
+    expect(await add(WSL, '/home/u/project/')).toEqual({ ok: false, reason: STORE_REASONS.root });
+    expect(await add({ kind: 'wsl', distribution: '-bad' }, '/home/u/project')).toEqual({
+      ok: false,
+      reason: STORE_REASONS.environment,
+    });
+    expect(await add({ kind: 'wsl', distribution: 'Ubuntu', extra: 1 }, '/home/u/project')).toEqual(
+      { ok: false, reason: STORE_REASONS.environment },
+    );
+    expect(await add(WSL, '/home/u/project', { withEnv: false })).toEqual({
+      ok: false,
+      reason: STORE_REASONS.root,
+    });
+    expect(store.list()).toEqual([]);
+  });
+
+  it('compares kind, distribution and root for duplicates', async () => {
+    const env = wslEnvFor(['/home/u/project', '/home/u/other']);
+    const store = makeStore();
+    await store.load();
+    expect(
+      (await store.add({ name: 'A', environment: WSL, root: '/home/u/project' }, env)).ok,
+    ).toBe(true);
+    expect(await store.add({ name: 'B', environment: WSL, root: '/home/u/project' }, env)).toEqual({
+      ok: false,
+      reason: STORE_REASONS.duplicate,
+    });
+    // The same root in another distribution is another project.
+    const debian = wslEnvFor(['/home/u/project'], 'Debian');
+    expect(
+      (
+        await store.add(
+          {
+            name: 'C',
+            environment: { kind: 'wsl', distribution: 'Debian' },
+            root: '/home/u/project',
+          },
+          debian,
+        )
+      ).ok,
+    ).toBe(true);
+    expect(store.list().map((project) => project.environment)).toEqual([
+      WSL,
+      { kind: 'wsl', distribution: 'Debian' },
+    ]);
+  });
+
+  it('loads a valid WSL entry without touching WSL, and sets aside a file with an invalid one', async () => {
+    mkdirSync(join(base, 'data'), { recursive: true });
+    const entry = {
+      id: WSL_ID,
+      name: 'Linux',
+      environment: WSL,
+      root: '/home/u/project',
+      rules: DEFAULT_RULES,
+    };
+    writeFileSync(filePath, JSON.stringify({ version: 1, projects: [entry] }));
+    const store = makeStore();
+    await store.load();
+    expect(store.list()).toEqual([{ ...entry, rules: { ...DEFAULT_RULES } }]);
+    expect(logger.error).not.toHaveBeenCalled();
+
+    writeFileSync(
+      filePath,
+      JSON.stringify({
+        version: 1,
+        projects: [{ ...entry, environment: { kind: 'wsl', distribution: '-bad' } }],
+      }),
+    );
+    const broken = makeStore();
+    await broken.load();
+    expect(broken.list()).toEqual([]);
+    expect(logger.error).toHaveBeenCalled();
+    expect(
+      readdirSync(join(base, 'data')).some((name) => name.startsWith('projects.json.corrupt-')),
+    ).toBe(true);
+  });
+
+  it('refuses a stored WSL root that is not normalized, and keeps roots that differ only by case', async () => {
+    mkdirSync(join(base, 'data'), { recursive: true });
+    const entry = (id: string, root: string) => ({
+      id,
+      name: 'Linux',
+      environment: WSL,
+      root,
+      rules: DEFAULT_RULES,
+    });
+    writeFileSync(
+      filePath,
+      JSON.stringify({
+        version: 1,
+        projects: [entry(WSL_ID, '/home/u/a/b'), entry(UPPER_ID, '/home/u/a/B')],
+      }),
+    );
+    const store = makeStore();
+    await store.load();
+    expect(store.list().map((project) => project.root)).toEqual(['/home/u/a/b', '/home/u/a/B']);
+
+    writeFileSync(
+      filePath,
+      JSON.stringify({ version: 1, projects: [entry(WSL_ID, '/home/u/../u/a')] }),
+    );
+    const unnormalized = makeStore();
+    await unnormalized.load();
+    expect(unnormalized.list()).toEqual([]);
+  });
+
+  it('returns a copy of a WSL project, so the caller cannot change the stored descriptor', async () => {
+    const env = wslEnvFor(['/home/u/project']);
+    const store = makeStore();
+    await store.load();
+    const added = await store.add(
+      { name: 'Linux', environment: { ...WSL }, root: '/home/u/project' },
+      env,
+    );
+    if (!added.ok) throw new Error('the add should work');
+    const copy = store.get(added.project.id);
+    if (copy?.environment.kind === 'wsl') copy.environment.distribution = 'Changed';
+    expect(store.get(added.project.id)?.environment).toEqual(WSL);
+  });
+});
+
+const UPPER_ID = '33333333-3333-4333-8333-333333333333';

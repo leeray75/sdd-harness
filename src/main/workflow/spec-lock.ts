@@ -5,7 +5,7 @@
 // non-file or an oversized file is never followed or read whole. Every file call goes through the
 // environment's files part (D41), so the lock works the same on any backend.
 
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { SPEC_FILES, SPECS_DIR, specFilePath, type SpecFileName } from '../../shared/spec-docs';
 import type { Approval } from '../../shared/spec-detect';
 import type { FileHandleLike, Environment } from '../env/types';
@@ -18,6 +18,7 @@ import {
   serializeSpecState,
   type SpecStateFile,
 } from '../../shared/spec-state';
+import { writeFileAtomic } from '../tools/atomic-write';
 import { MAX_SPEC_FILE_BYTES, scanSpecFolders, type SpecFolder } from './spec-folders';
 
 /** What the state file holds right now, as read from disk. */
@@ -126,7 +127,7 @@ export function lockForApproval(read: SpecStateRead): LockForApproval {
 }
 
 /**
- * Writes the state file: the text goes to `<file>.<random>.tmp` in docs/specs/, which is then
+ * Writes the state file: the text goes to a temporary file beside it in docs/specs/ (`.<file>.<random>.tmp`), which is then
  * renamed over the file, so a reader sees the old file or the new one. The temp file is removed
  * when anything fails. Never throws.
  */
@@ -141,23 +142,19 @@ export async function writeSpecState(
 }
 
 /**
- * Writes `text` to `path` by a temp file in the same folder and a rename. The temp file is removed
- * when anything fails. Never throws.
+ * Writes `text` to `path` through the shared atomic writer (D41, revision 1): a temp file in the same
+ * folder, a rename with the shared retry, and the temp file removed when anything fails. The reason is
+ * the Node code of the last error, a failed first write included. Never throws.
  */
 export async function writeAtomic(
   env: Environment,
   path: string,
   text: string,
 ): Promise<WriteResult> {
-  const temp = `${path}.${randomBytes(6).toString('hex')}.tmp`;
-  try {
-    await env.files.writeFile(temp, text, { flag: 'wx' });
-    await env.files.rename(temp, path);
-    return { ok: true };
-  } catch (error) {
-    await env.files.rm(temp, { force: true }).catch(() => undefined);
-    return { ok: false, reason: errorCode(error) };
-  }
+  const written = await writeFileAtomic(env.files, path, Buffer.from(text, 'utf8'), {
+    codeReason: true,
+  });
+  return written.ok ? { ok: true } : { ok: false, reason: written.reason };
 }
 
 /** The SHA-256 (hex) of a text after normalizeSpecText: the one hash input of the lock (D36). */

@@ -1,9 +1,13 @@
-// Picks the environment backend for a project (D41, p4-env-local). `environmentFor` takes the
-// project's environment descriptor (D40) and returns the backend, or a fixed refusal for a kind this
-// version does not support. `localEnvironment` is the same object for the local kind; tests use it.
-// `toolEnvironment` gives the narrower view the tools, commands and agent host take (no git).
+// Picks the environment backend for a project (D41, p4-env-local; D42, p4-env-wsl). `environmentFor` takes
+// the project's environment descriptor (D40) and returns the backend, or a fixed refusal for a kind or a
+// case this version does not support. `localEnvironment` is the same object for the local kind; tests use
+// it. `toolEnvironment` gives the narrower view the tools, commands and the agent host take (no git).
+// The WSL kind is built on Windows only, and the platform and the transport maker can be injected for
+// the tests.
 
 import { localEnvironment } from './local';
+import { appWslTransport, createWslEnvironment, type WslTransport } from './wsl';
+import { isDistributionName } from './wsl-detect';
 import type { Environment, ToolEnvironment } from './types';
 
 export { localEnvironment } from './local';
@@ -13,16 +17,44 @@ export type * from './types';
 export const UNSUPPORTED_ENVIRONMENT =
   "this project's environment is not supported in this version";
 
+/** The refusal for a WSL project off Windows. Fixed. */
+export const WSL_UNAVAILABLE = 'WSL projects are available only on Windows';
+
 /** The outcome of choosing a backend. */
 export type EnvironmentResult = { ok: true; env: Environment } | { ok: false; reason: string };
 
+/** The descriptor of a project's environment: the kind, and for WSL the distribution. */
+export interface EnvironmentDescriptor {
+  readonly kind: string;
+  readonly distribution?: unknown;
+}
+
+/** What environmentFor may be given in tests: the platform and the transport maker. */
+export interface EnvironmentDeps {
+  platform?: NodeJS.Platform;
+  transportFor?: (distribution: string) => WslTransport;
+}
+
 /**
- * The backend for a project's environment descriptor. Only the local kind exists in this version;
- * any other kind is refused with UNSUPPORTED_ENVIRONMENT, and the registry refuses the project.
+ * The backend for a project's environment descriptor. The local kind is the local backend. The WSL kind is
+ * built on Windows for a valid distribution name, and refused with WSL_UNAVAILABLE elsewhere and with
+ * UNSUPPORTED_ENVIRONMENT for a bad or missing name. Any other kind is refused with UNSUPPORTED_ENVIRONMENT.
+ * No reason echoes a value from the descriptor.
  */
-export function environmentFor(descriptor: { readonly kind: string }): EnvironmentResult {
+export function environmentFor(
+  descriptor: EnvironmentDescriptor,
+  deps: EnvironmentDeps = {},
+): EnvironmentResult {
   if (descriptor.kind === 'local') {
     return { ok: true, env: localEnvironment() };
+  }
+  if (descriptor.kind === 'wsl') {
+    const platform = deps.platform ?? process.platform;
+    if (platform !== 'win32') return { ok: false, reason: WSL_UNAVAILABLE };
+    const distribution = descriptor.distribution;
+    if (!isDistributionName(distribution)) return { ok: false, reason: UNSUPPORTED_ENVIRONMENT };
+    const transport = (deps.transportFor ?? appWslTransport)(distribution);
+    return { ok: true, env: createWslEnvironment({ distribution, transport }) };
   }
   return { ok: false, reason: UNSUPPORTED_ENVIRONMENT };
 }
