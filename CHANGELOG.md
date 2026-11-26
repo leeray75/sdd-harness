@@ -144,6 +144,10 @@ All notable changes to SDD Harness are recorded here. The format follows [Keep a
 - **Dev project** (D40): in an unpackaged run, `HARNESS_SPIKE_ROOT` is the `dev` project. It is never saved, and a packaged app ignores the variable.
 - **Tests:** `tests/unit/project-rules.test.ts`, `project-store.test.ts` and `project-registry.test.ts`, covering every AC3 refusal, the folder hash around remove, the set-aside cases, per-project approval and the round limit of a project's build.
 
+- **WSL backend** (`p4-env-wsl`, D42, [`docs/environments.md`](docs/environments.md)): `createWslEnvironment` runs one WSL distribution and one Linux root behind the environment interface. Files use `node:fs` on `\\wsl.localhost\<distro>` (or `\\wsl$\<distro>`); programs and git run through `wsl.exe` with an argument array; a fixed launcher gives each program its own process group, killed on timeout or abort; watching polls one folder. Environment variables cross through `WSLENV`, never the Windows `PATH`. `detectWsl` lists the installed distributions and the default one, and runs only when called.
+- **WSL projects** in the project store and registry: `{ kind: 'wsl', distribution }`, with a Linux root checked through the project's environment. `environmentFor` builds the WSL backend on Windows and refuses it elsewhere with a fixed reason.
+- **Live WSL walk** (`tests/live/wsl-walk.live.test.ts`, `pnpm test:live`): the headless walk on a temp repo inside the default distribution (or `HARNESS_WSL_DISTRO`). It is skipped off Windows, without WSL, or without git in the distribution, and never runs in CI.
+
 ### Changed
 
 - **Human-only request shape** (D33, amended by D40): a request is `{ action, project, feature }`, where `project` is `dev` or a project id. The decision line adds `project=<id>`. The e2e test sends `project`, and with no projects its handler checks refuse the request as an unknown project.
@@ -181,6 +185,7 @@ All notable changes to SDD Harness are recorded here. The format follows [Keep a
 
 ### Fixed
 
+- **Spec lock atomic write retries a rename** (`p4-env-wsl`, revision 1, D41): `writeAtomic` in `src/main/workflow/spec-lock.ts` uses the shared `writeFileAtomic` and its rename retry. A rename over an existing file fails with `EPERM` now and then on a Windows share and under parallel load, and one attempt used to fail a build step or refuse an approval. The result and the reasons are unchanged: the Node code of the last error.
 - **Linux e2e seed run** (`p1-secrets-ci`, D25): with no keyring, Electron 45 reported encryption as unavailable, so the test-only `HARNESS_ALLOW_WEAK_SECRETS=1` had no effect and the spike e2e's seed run exited 1. On Linux the override now also calls `safeStorage.setUsePlainTextEncryption(true)`, once per process and before the store's first use. Without the override nothing changes, and a weak Linux backend is still refused.
 - **Spike e2e seed run on macOS and Linux** (`p1-secrets-ci`, AC5): the seed run now passes Playwright's `--use-mock-keychain` and `--password-store=basic`, the same switches the app run gets, so the stored key can be read back. The app run also sets `HARNESS_ALLOW_WEAK_SECRETS=1`, so both runs set up encryption the same way on Linux. The e2e therefore uses Playwright's mock keychain; the real macOS keychain is a runtime check.
 - **Spike e2e failure output** (`p1-secrets-ci`): every seed and app-run assertion in `tests/e2e/spike-agent.spec.ts` now prints that run's captured output on failure (withheld if the sentinel appears in it), and the chat `Authorization` headers are reported as classes only, never as values.

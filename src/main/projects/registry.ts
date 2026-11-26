@@ -19,7 +19,7 @@ import {
 } from '../../shared/human-actions';
 import type { ProjectRules, RoundLimit } from '../../shared/project-rules';
 import type { NodeId } from '../../shared/workflow';
-import type { EnvironmentResult } from '../env';
+import type { EnvironmentDescriptor, EnvironmentResult } from '../env';
 import type { Environment } from '../env/types';
 import type { HumanActionHandler } from '../human/channel';
 import type { ShipHandlers } from '../human/ship-handlers';
@@ -48,8 +48,8 @@ export interface ProjectRegistryDeps {
   store: ProjectStore;
   /** The dev project (id `dev`). Not saved in the store; absent when there is no spike root. */
   devProject?: Project;
-  /** Makes a project's environment from its descriptor (environmentFor in the app, D41). */
-  environmentFor: (descriptor: { readonly kind: string }) => EnvironmentResult;
+  /** Makes a project's environment from its descriptor (environmentFor in the app, D41, D42). */
+  environmentFor: (descriptor: EnvironmentDescriptor) => EnvironmentResult;
   /** Starts the spec-lock watcher for one root in an environment (createSpecLockWatcher in the app). */
   startLock: (env: Environment, root: string) => SpecLockWatcher;
   /** Builds a project's spec handlers from its root, rules and environment. */
@@ -142,10 +142,13 @@ export function createProjectRegistry(deps: ProjectRegistryDeps): ProjectRegistr
    * Makes a project's environment, starts its watcher, builds its handlers and refreshes the watcher
    * once. Null when the environment cannot be made: the project then has no entry at all.
    */
-  function start(project: Project): Entry | null {
-    const made = deps.environmentFor(project.environment);
-    if (!made.ok) return null;
-    const env = made.env;
+  function start(project: Project, known?: Environment): Entry | null {
+    let env = known;
+    if (env === undefined) {
+      const made = deps.environmentFor(project.environment);
+      if (!made.ok) return null;
+      env = made.env;
+    }
     const watcher = startLock(env, project.root);
     const handlers = build(project, env, watcher);
     refreshOnce(watcher);
@@ -211,9 +214,10 @@ export function createProjectRegistry(deps: ProjectRegistryDeps): ProjectRegistr
       // A project whose environment cannot be made is refused before anything is stored.
       const made = deps.environmentFor(input.environment);
       if (!made.ok) return { ok: false, reason: made.reason };
-      const result = await store.add(input);
+      // The store checks a WSL root through this same environment (D42).
+      const result = await store.add(input, made.env);
       if (result.ok) {
-        const entry = start(result.project);
+        const entry = start(result.project, made.env);
         if (entry !== null) entries.set(result.project.id, entry);
       }
       return result;

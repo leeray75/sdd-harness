@@ -65,6 +65,8 @@ The writer's commands get the network limit. The reviewer's do not.
 
 **Where the limit is applied (D41).** The local environment backend applies it (`src/main/env/local.ts`), and its two probes are in `src/main/env/probes.ts`. Commands run from the project root through the environment's process part, which kills the whole process tree on timeout. The protected files are read and reverted through the environment's files part. A remote backend (WSL, SSH, a dev container) applies the limit as far as its own system allows and reports the level it got, in the same two values; see [environments.md](environments.md).
 
+**On WSL (D42).** A command in a WSL project runs inside its distribution. The same `unshare` probe runs there, once per backend: when unprivileged user namespaces work in the distribution, the command gets the `os` level with its own network namespace and only loopback, as on Linux. When they do not (for example on WSL 1, or with the feature disabled), the level is `proxy-only`, and the log says so. The dead proxies and the offline flags are passed to the distribution through `WSLENV`.
+
 Every writer command logs one `rule network:` line with its level. An `os` level is logged as info, and `proxy-only` as a warning.
 
 On every OS the writer's command also gets:

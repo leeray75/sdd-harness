@@ -1,15 +1,26 @@
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { localEnvironment } from '../../src/main/env';
+import type { Environment } from '../../src/main/env/types';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { RENAME_ATTEMPTS } from '../../src/main/tools/atomic-write';
 import {
   approvalOf,
   currentFeature,
   hashSpec,
   readSpecState,
   scanSpecFoldersWithLock,
+  writeAtomic,
   writeSpecState,
   type SpecStateRead,
 } from '../../src/main/workflow/spec-lock';
@@ -294,5 +305,76 @@ describe('scanSpecFolders with a throwing approvalOf (AC5)', () => {
     // approved with no ledger.
     expect(folders[0]?.detection.node).toBe('spec-approved');
     expect(folders[1]?.detection.node).toBe('spec-drafted');
+  });
+});
+
+// The spec lock's atomic write goes through the shared writer and its rename retry (revision 1, AC14).
+// The files part is the local one, except that its rename fails with EPERM a set number of times, or its
+// first write fails with a code.
+describe('the spec lock atomic write retries a rename and reports the last code (AC14)', () => {
+  /** A local environment whose rename fails `failures` times (EPERM) and whose writeFile may fail with a code. */
+  function flakyEnv(options: { renameFailures: number; writeCode?: string }): {
+    env: Environment;
+    renames: () => number;
+  } {
+    const local = localEnvironment();
+    let renames = 0;
+    const files = {
+      ...local.files,
+      writeFile: async (path: string, data: Buffer | string, opts?: { flag?: 'w' | 'wx' }) => {
+        if (options.writeCode !== undefined) {
+          throw Object.assign(new Error('write failed'), { code: options.writeCode });
+        }
+        return local.files.writeFile(path, data, opts);
+      },
+      rename: async (from: string, to: string) => {
+        renames += 1;
+        if (renames <= options.renameFailures) {
+          throw Object.assign(new Error('rename failed'), { code: 'EPERM' });
+        }
+        return local.files.rename(from, to);
+      },
+    };
+    return { env: { ...local, files }, renames: () => renames };
+  }
+
+  let folder: string;
+  let target: string;
+
+  beforeEach(() => {
+    folder = mkdtempSync(join(tmpdir(), 'sdd-atomic-'));
+    target = join(folder, 'SPECS.md');
+    writeFileSync(target, 'before\n');
+  });
+
+  afterEach(() => {
+    rmSync(folder, { recursive: true, force: true });
+  });
+
+  it('succeeds when the rename fails fewer times than RENAME_ATTEMPTS', async () => {
+    const flaky = flakyEnv({ renameFailures: RENAME_ATTEMPTS - 1 });
+    expect(await writeAtomic(flaky.env, target, 'after\n')).toEqual({ ok: true });
+    expect(readFileSync(target, 'utf8')).toBe('after\n');
+    expect(flaky.renames()).toBe(RENAME_ATTEMPTS);
+  });
+
+  it('returns the rename code when every attempt fails, and leaves no temporary file', async () => {
+    const flaky = flakyEnv({ renameFailures: RENAME_ATTEMPTS + 10 });
+    expect(await writeAtomic(flaky.env, target, 'after\n')).toEqual({
+      ok: false,
+      reason: 'EPERM',
+    });
+    expect(flaky.renames()).toBe(RENAME_ATTEMPTS);
+    expect(readFileSync(target, 'utf8')).toBe('before\n');
+    expect(readdirSync(folder).sort()).toEqual(['SPECS.md']);
+  });
+
+  it('returns its own code when the first write fails', async () => {
+    const flaky = flakyEnv({ renameFailures: 0, writeCode: 'EACCES' });
+    expect(await writeAtomic(flaky.env, target, 'after\n')).toEqual({
+      ok: false,
+      reason: 'EACCES',
+    });
+    expect(readdirSync(folder).sort()).toEqual(['SPECS.md']);
   });
 });

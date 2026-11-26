@@ -12,7 +12,7 @@
 // list as it was before the call. Refusals are fixed text and never echo the input.
 
 import { promises as fs } from 'node:fs';
-import { isAbsolute, dirname, resolve } from 'node:path';
+import { isAbsolute, dirname, posix, resolve } from 'node:path';
 import {
   DEFAULT_RULES,
   hasLineBreak,
@@ -21,10 +21,15 @@ import {
 } from '../../shared/project-rules';
 import type { Logger } from '../log';
 import { localEnvironment } from '../env';
+import type { Environment } from '../env/types';
+import { isDistributionName } from '../env/wsl-detect';
 import { writeFileAtomic } from '../tools/atomic-write';
 
-/** Where a project's folder is. Only `local` exists now; later subtasks add wsl, ssh and container. */
-export type ProjectEnvironment = { kind: 'local' };
+/**
+ * Where a project's folder is (D40, D42): the local folder, or a folder inside a WSL distribution. The
+ * WSL root is a Linux path, and the distribution is the one name the environment factory accepts.
+ */
+export type ProjectEnvironment = { kind: 'local' } | { kind: 'wsl'; distribution: string };
 
 /** One project: a repo folder with its own rules (D40). */
 export interface Project {
@@ -64,7 +69,11 @@ export interface ProjectStore {
   list(): Project[];
   /** The project with this id, or null. */
   get(id: string): Project | null;
-  add(input: AddProjectInput): Promise<ProjectResult>;
+  /**
+   * Adds a project. A WSL root is checked through `env`, the environment the registry made for it; a
+   * local root is checked with local fs. A WSL add without `env` is refused.
+   */
+  add(input: AddProjectInput, env?: Environment): Promise<ProjectResult>;
   rename(id: string, name: unknown): Promise<ProjectResult>;
   setRules(id: string, rules: unknown): Promise<ProjectResult>;
   /** Drops the project from the store. Never touches its folder. */
@@ -77,7 +86,7 @@ export const STORE_REASONS = {
   root: 'the root must be an absolute path to an existing folder',
   duplicate: 'a project already uses this folder',
   name: 'the name must be 1 to 80 characters with no line break',
-  environment: 'only local projects are supported',
+  environment: 'the environment must be local or a WSL distribution',
   save: 'the projects could not be saved, so nothing changed',
   failed: 'the action failed',
 } as const;
@@ -124,11 +133,29 @@ function cleanName(value: unknown): string | null {
   return trimmed;
 }
 
-/** True only for the local environment, and only with its one key. */
-function isLocal(value: unknown): value is ProjectEnvironment {
-  if (!isRecord(value)) return false;
-  const keys = Object.keys(value);
-  return keys.length === 1 && value['kind'] === 'local';
+/**
+ * The environment a descriptor names, with exactly its keys: `{ kind: 'local' }`, or `{ kind: 'wsl',
+ * distribution }` with a valid distribution name. Anything else is null.
+ */
+function parseEnvironment(value: unknown): ProjectEnvironment | null {
+  if (!isRecord(value)) return null;
+  const keys = Object.keys(value).sort();
+  if (value['kind'] === 'local') {
+    return keys.length === 1 ? { kind: 'local' } : null;
+  }
+  if (value['kind'] === 'wsl') {
+    if (keys.length !== 2 || keys[0] !== 'distribution' || keys[1] !== 'kind') return null;
+    const distribution = value['distribution'];
+    return isDistributionName(distribution) ? { kind: 'wsl', distribution } : null;
+  }
+  return null;
+}
+
+/** A copy of an environment descriptor, so a caller cannot change the stored one. */
+function copyEnvironment(environment: ProjectEnvironment): ProjectEnvironment {
+  return environment.kind === 'local'
+    ? { kind: 'local' }
+    : { kind: 'wsl', distribution: environment.distribution };
 }
 
 /** A copy that the caller can keep without changing the store. */
@@ -136,10 +163,42 @@ function copyOf(project: Project): Project {
   return {
     id: project.id,
     name: project.name,
-    environment: { kind: 'local' },
+    environment: copyEnvironment(project.environment),
     root: project.root,
     rules: { ...project.rules },
   };
+}
+
+/**
+ * True when two projects are the same folder (D42): the same kind, the same distribution (exact) and
+ * the same root. Local roots compare as the platform does; WSL roots compare exactly.
+ */
+function sameProject(
+  a: ProjectEnvironment,
+  rootA: string,
+  b: ProjectEnvironment,
+  rootB: string,
+  platform: NodeJS.Platform,
+): boolean {
+  if (a.kind !== b.kind) return false;
+  if (a.kind === 'wsl' && b.kind === 'wsl') {
+    return a.distribution === b.distribution && rootA === rootB;
+  }
+  return sameRoot(rootA, rootB, platform);
+}
+
+/** A WSL root: a string, absolute in POSIX, and already normalized (equal to path.posix.resolve of itself). */
+function isWslRoot(root: unknown): root is string {
+  return typeof root === 'string' && posix.isAbsolute(root) && posix.resolve(root) === root;
+}
+
+/** True when the environment's stat says the path is a folder. Any failure is false (a fixed refusal). */
+async function isFolderThrough(env: Environment, path: string): Promise<boolean> {
+  try {
+    return (await env.files.stat(path)).isDirectory();
+  } catch {
+    return false;
+  }
 }
 
 /** The checks a stored project must pass on load. Returns the project, or null when it fails. */
@@ -149,12 +208,17 @@ function storedProject(value: unknown): Project | null {
   if (typeof id !== 'string' || !UUID_PATTERN.test(id)) return null;
   const name = cleanName(value['name']);
   if (name === null || name !== value['name']) return null;
-  if (!isLocal(value['environment'])) return null;
+  const environment = parseEnvironment(value['environment']);
+  if (environment === null) return null;
   const root = value['root'];
-  if (typeof root !== 'string' || !isAbsolute(root) || resolve(root) !== root) return null;
+  const rootOk =
+    environment.kind === 'wsl'
+      ? isWslRoot(root)
+      : typeof root === 'string' && isAbsolute(root) && resolve(root) === root;
+  if (typeof root !== 'string' || !rootOk) return null;
   const parsed = parseRules(value['rules']);
   if (!parsed.ok) return null;
-  return { id, name, environment: { kind: 'local' }, root, rules: parsed.rules };
+  return { id, name, environment, root, rules: parsed.rules };
 }
 
 /** The stored projects, or null when one fails a check or two share an id or a folder. */
@@ -164,7 +228,9 @@ function storedProjects(values: unknown[], platform: NodeJS.Platform): Project[]
     const project = storedProject(value);
     if (project === null) return null;
     const clash = out.some(
-      (other) => other.id === project.id || sameRoot(other.root, project.root, platform),
+      (other) =>
+        other.id === project.id ||
+        sameProject(other.environment, other.root, project.environment, project.root, platform),
     );
     if (clash) return null;
     out.push(project);
@@ -284,34 +350,47 @@ export function createProjectStore(options: ProjectStoreOptions): ProjectStore {
       return project === undefined ? null : copyOf(project);
     },
 
-    add: (input) =>
+    add: (input, env) =>
       enqueue(async (): Promise<ProjectResult> => {
         try {
           const name = cleanName(input.name);
           if (name === null) return fail(STORE_REASONS.name);
-          if (!isLocal(input.environment)) return fail(STORE_REASONS.environment);
+          const environment = parseEnvironment(input.environment);
+          if (environment === null) return fail(STORE_REASONS.environment);
           const rules =
             input.rules === undefined
               ? { ok: true as const, rules: DEFAULT_RULES }
               : parseRules(input.rules);
           if (!rules.ok) return fail(rules.reason);
-          if (typeof input.root !== 'string' || !isAbsolute(input.root)) {
-            return fail(STORE_REASONS.root);
+          let root: string;
+          if (environment.kind === 'wsl') {
+            // A WSL root is checked through the environment the registry made, never local fs (D42).
+            if (env === undefined || !isWslRoot(input.root)) return fail(STORE_REASONS.root);
+            root = input.root;
+            if (!(await isFolderThrough(env, root))) return fail(STORE_REASONS.root);
+          } else {
+            if (typeof input.root !== 'string' || !isAbsolute(input.root)) {
+              return fail(STORE_REASONS.root);
+            }
+            root = resolve(input.root);
+            try {
+              const info = await fs.stat(root);
+              if (!info.isDirectory()) return fail(STORE_REASONS.root);
+            } catch {
+              return fail(STORE_REASONS.root);
+            }
           }
-          const root = resolve(input.root);
-          try {
-            const info = await fs.stat(root);
-            if (!info.isDirectory()) return fail(STORE_REASONS.root);
-          } catch {
-            return fail(STORE_REASONS.root);
-          }
-          if (projects.some((other) => sameRoot(other.root, root, platform))) {
+          if (
+            projects.some((other) =>
+              sameProject(other.environment, other.root, environment, root, platform),
+            )
+          ) {
             return fail(STORE_REASONS.duplicate);
           }
           const project: Project = {
             id: newId(),
             name,
-            environment: { kind: 'local' },
+            environment,
             root,
             rules: rules.rules,
           };

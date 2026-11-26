@@ -23,6 +23,20 @@ export interface AtomicWriteOptions {
   rename?: (from: string, to: string) => Promise<void>;
   attempts?: number;
   retryMs?: number;
+  /**
+   * Reports the Node code of the last error as the reason (a failed first write included), instead of
+   * the fixed text. Off by default, so the tools and the store keep their fixed reasons (revision 1, the
+   * spec lock's atomic write).
+   */
+  codeReason?: boolean;
+}
+
+/** The Node code of an error, or `error` when it has none. The same rule the spec lock always used. */
+function codeOf(error: unknown): string {
+  if (typeof error === 'object' && error !== null && 'code' in error) {
+    return String((error as { code: unknown }).code);
+  }
+  return 'error';
 }
 
 async function removeQuietly(files: FilesPart, path: string): Promise<void> {
@@ -65,19 +79,20 @@ export async function writeFileAtomic(
 
   try {
     await files.writeFile(temp, data, { flag: 'wx' });
-  } catch {
+  } catch (error) {
     await removeQuietly(files, temp);
-    return { ok: false, reason: WRITE_FAILED };
+    return { ok: false, reason: options.codeReason === true ? codeOf(error) : WRITE_FAILED };
   }
 
   for (let attempt = 1; ; attempt++) {
     try {
       await rename(temp, target);
       return { ok: true };
-    } catch {
+    } catch (error) {
       if (attempt >= attempts) {
         await removeQuietly(files, temp);
-        return { ok: false, reason: RENAME_FAILED };
+        const reason = options.codeReason === true ? codeOf(error) : RENAME_FAILED;
+        return { ok: false, reason };
       }
       await delay(retryMs * attempt);
     }

@@ -1,11 +1,13 @@
 # Environments
 
-An environment is where a project's files, programs, file watching and git live. Every part of the app that works inside a project reaches it through an environment object (D41). The local backend is the only one in this version. The WSL, SSH and dev container backends (phase 4, `p4-env-wsl`, `p4-env-ssh`, `p4-env-container`) plug in behind the same interface.
+An environment is where a project's files, programs, file watching and git live. Every part of the app that works inside a project reaches it through an environment object (D41). The local backend (D41) and the WSL backend (D42) are in this version. The SSH and dev container backends (phase 4, `p4-env-ssh`, `p4-env-container`) plug in behind the same interface.
 
 The code is in `src/main/env/`:
 
 - `types.ts`: the interface (`Environment`, `ToolEnvironment` and their parts). No Electron import.
 - `local.ts`: the local backend.
+- `wsl.ts`: the WSL backend, its transport, the Linux-to-share mapping and the app transport (`appWslTransport`). The only code, with `wsl-detect.ts`, that names `wsl.exe`.
+- `wsl-detect.ts`: `detectWsl` and `isDistributionName`.
 - `probes.ts`: the network probes of the local backend (`unshare`, `sandbox-exec`).
 - `index.ts`: `environmentFor`, `localEnvironment` and `toolEnvironment`.
 
@@ -47,7 +49,29 @@ A backend must keep these rules, which the local backend and the test suite rely
 - A project whose environment cannot be made gets no watcher and no handlers. Its requests are refused the same way as an unknown project (`no project with this id`), and adding it is refused before anything is stored.
 - The app starts the agent host with the dev project's environment (`src/main/index.ts`).
 
+## The WSL backend (D42)
+
+A WSL project lives inside one distribution, at one Linux root. Its backend is `createWslEnvironment({ distribution, transport })` in `src/main/env/wsl.ts`, built by `environmentFor({ kind: 'wsl', distribution })` on Windows. The tests use a fake transport (`tests/support/fake-wsl-transport.ts`) over a temp folder, so no `wsl.exe` starts in `pnpm test`.
+
+- **Transport.** `WslTransport` has a `shareRoot` (the folder that stands for the distribution's `/`) and `run(argv, options)`. `run` starts `wsl.exe` with an argument array and no shell, and resolves `{ started: false }` or the exit code, the signal, `timedOut`, `aborted` and, when asked to capture, stdout and stderr. It never rejects. `appWslTransport(distribution)` is the app's transport. It is the only code that starts `wsl.exe`, apart from detection.
+- **Share.** The share root is `\\wsl.localhost\<distro>`, or `\\wsl$\<distro>` when the first is missing, found once when the transport is made. `files` calls `node:fs` on the mapped path. Each Linux path must be absolute POSIX. A segment containing `\` or `:` is refused with `ENOENT`, so a name cannot leave the share. `realpath` and `readlink` map the result back to a Linux path, and a result outside the share is `ENOENT`. `readFile` with a cap stats the file before it reads. `symlink` runs `ln -s -- <target> <path>` and `chmod` runs `chmod <octal> -- <path>` through the transport. A failed `symlink` is `EEXIST` when the path exists, `ENOENT` when its folder does not, and `EIO` otherwise. A failed `chmod` is `ENOENT` when the path is missing, and `EIO` otherwise.
+- **Path flavour.** `path` is `path.posix`, with `sep` `/`.
+- **Launcher.** A program runs as `wsl.exe -d <distro> --cd <cwd> --exec sh -c <launcher> sh <file> <args…>`. The launcher is a constant, `setsid --wait sh -c 'printf "%s%s\n" "$0" "$$"; exec "$@"' SDD-GROUP- "$@"`. It prints one marker line with the process group id, then replaces itself with the program, so every argument reaches the program unchanged and no shell parses it. The marker line is removed from the output. On timeout or abort, the backend runs `kill -KILL -- -<pgid>` through the transport before the result resolves, then stops `wsl.exe`. Output that arrives after the stop is not passed on. When the group id never arrived, only `wsl.exe` is stopped.
+- **WSLENV.** Only the variables the caller set or changed relative to the app's own environment cross, named in `WSLENV` with no path flags. `PATH` never crosses, and no value appears in an argument array.
+- **Network.** `network: 'none'` probes `unshare --user --map-root-user --net true` inside the distribution, once per backend. When it works the level is `os`, and the program is wrapped with the same `unshare` wrapper as Linux (`src/main/commands/network.ts`). When it does not, the level is `proxy-only`. The dead proxy variables and the offline flags cross through `WSLENV`. `networkLevel()` gives the same answer.
+- **Watching.** `watchDir` polls one folder about every second through `files`, and reports added and removed names as `rename` and changed size or mtime as `change`. Subfolders are compared by name only, so a change inside them is not reported. A failing listing calls `onError` once per run of failures, with no events, and the polling goes on. `close()` stops it.
+- **Git.** The git part is `createGit(wslLauncher)` from `src/main/git/git.ts`, with the same argument lists, environment, timeouts, parsing and codes as the local instance. The WSL launcher runs `wsl.exe -d <distro> --cd <root> --exec git <args…>`. Git missing in the distribution is `git-missing`. wsl.exe reports it as `execvpe(git) failed: No such file or directory` on stderr with exit code 1 (checked live against Ubuntu, with a program that does not exist, since git is installed there). A timeout is `timeout`, and any other failure is `failed` or `not-a-repo`. A timed-out git call stops `wsl.exe`, but the Linux git process may keep running, because git is not started through the group launcher.
+- **Detection.** `detectWsl()` in `src/main/env/wsl-detect.ts` runs `wsl.exe --list --verbose` with an argument array and a timeout, decodes its UTF-16LE output, and reads the `*` as the default distribution. It returns `{ installed: false }` off Windows, when `wsl.exe` is missing, or when the call fails or times out, and it never throws. A name that fails `isDistributionName` is left out. Nothing calls it at import time or at app start; the add wizard (`p4-add-project-wizard`) will.
+- **Failures.** A missing distribution or a stopped transport gives a result for each call: a Node code, `{ started: false }` or a git code. Nothing falls back to the local backend.
+- **Rename over an existing file.** On the share, a rename over an existing file can fail with `EPERM` now and then (22 of 300 in a probe), and locally it failed under parallel test load. The shared atomic writer retries the rename, and the spec lock's `writeAtomic` uses it (see below). The WSL files part's own `rename` makes one attempt and passes the Node code through.
+
+### The atomic write and the rename retry (revision 1)
+
+`writeFileAtomic(files, path, bytes)` in `src/main/tools/atomic-write.ts` is the one atomic writer (D41). It writes a temporary file in the same folder, renames it over the target, and retries a failed rename `RENAME_ATTEMPTS` times, waiting `RENAME_RETRY_MS` times the attempt between them. A failed attempt removes the temporary file. The tools and the project store keep its fixed reasons. The spec lock's `writeAtomic` (`src/main/workflow/spec-lock.ts`) calls it with `codeReason`, so its reason is the Node code of the last error, a failed first write included. Its signature and result are unchanged. The writes of the build loop, the spec handlers and the ship step go through it, so the retry covers both the share and the local parallel runs.
+
 ## Checklist for the WSL, SSH and container backends
+
+Status: the WSL backend meets every item below (`p4-env-wsl`, D42). The SSH and container backends are later subtasks.
 
 Each backend is its own subtask, and each one runs the phase 3 headless walk (`tests/unit/headless-e2e.test.ts`) on its backend before it is done.
 

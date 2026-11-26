@@ -105,7 +105,7 @@ Acceptance:
 
 Design: `Projects.dc.html`, `Projects2Env.dc.html`, `Projects3Setup.dc.html`.
 
-Built so far: the project store and the per-project rules (`p4-project-store`, D40), and the environment interface with the local backend, which every project's files, commands, git and watching go through (`p4-env-local`, D41; [`environments.md`](environments.md)). The WSL, SSH and container backends are the later subtasks.
+Built so far: the project store and the per-project rules (`p4-project-store`, D40), and the environment interface with the local backend, which every project's files, commands, git and watching go through (`p4-env-local`, D41; [`environments.md`](environments.md)). The WSL backend and WSL projects (`p4-env-wsl`, D42; detection runs only when called, and the add wizard that uses it is `p4-add-project-wizard`). The SSH and container backends are the later subtasks.
 
 - Project cards with the stage and one action; a "Needs you" queue across projects.
 - Add a project in three steps: where (this computer, WSL, SSH server, dev container), folder and automatic checks (git, code host, tracker, test command, earlier specs), rules and models.
