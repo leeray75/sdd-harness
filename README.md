@@ -8,9 +8,9 @@ Status: Phases 0–3 are done; **Phase 4 (projects and environments)** is in pro
 
 ### Prerequisites
 
-- **Node 24** (see `.nvmrc`).
-- **pnpm 12.21.0**, pinned in `package.json` and provided by Corepack. Run `corepack enable` once per machine, or prefix commands with `corepack` (`corepack pnpm install`).
-- **Windows, macOS or Linux, natively.** So far the app has only been built and tested on Windows. Checks on macOS and Linux arrive with CI in Phase 0.
+- **Node 24** (see `.nvmrc`, and `engines` `>=24 <25` in `package.json`). Newer Node releases do not bundle Corepack (seen on Node 26), so a machine whose default Node is newer has no `pnpm` and no `corepack` on `PATH`.
+- **pnpm 12.21.0**, pinned in `package.json` and provided by Corepack. Run `corepack enable` once per machine, or prefix commands with `corepack` (`corepack pnpm install`). Where `corepack` is missing, use the Node in `.nvmrc`, which still bundles it.
+- **Windows, macOS or Linux, natively.** The app was built on Windows. macOS has since been checked end to end on Apple Silicon: the unit tests, `pnpm e2e`, `pnpm package` and a launch of the packaged app all pass there. Linux is checked by CI.
 
 ### Install and run
 
@@ -71,7 +71,7 @@ WSL is fine for tools that don't touch `node_modules`, such as `git` and `gh`. T
 
 ### Troubleshooting
 
-**`Error: Electron uninstall` from `pnpm dev`.** The Electron binary is missing: `node_modules/electron/` has no `dist/` folder or `path.txt`. This usually happens after an install from another OS (see above) or an interrupted download. Reinstall from the OS you run the app on:
+**`Error: Electron uninstall` from `pnpm dev`.** The Electron binary is missing: `node_modules/electron/` has no `dist/` folder or `path.txt`. This usually happens after an install from another OS (see above) or an interrupted download. A first install can also leave `dist/` absent when the package's install script did not run; the binary then downloads on the first `require('electron')`, which prints `Downloading Electron binary...` (seen on macOS, where it arrives as a native `arm64` build). Reinstall from the OS you run the app on:
 
 ```sh
 rm -rf node_modules            # PowerShell: Remove-Item -Recurse -Force node_modules

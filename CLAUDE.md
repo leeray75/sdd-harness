@@ -93,7 +93,7 @@ xvfb-run -a bash -c 'fluxbox >/dev/null 2>&1 & for _ in $(seq 1 20); do xprop -r
 CI=1 pnpm e2e                                                  # CI retry, trace and HTML report behaviour
 ```
 
-On this machine, run pnpm from Windows (PowerShell or Git Bash), not from WSL. In PowerShell, set the variable with `$env:CI = 1` before `pnpm e2e`.
+On Windows, run pnpm from PowerShell or Git Bash, not from WSL, and set the variable with `$env:CI = 1` before `pnpm e2e`. On macOS and Linux, run the commands above as they are written, from the checkout's own folder, so `node_modules` holds that OS's native binaries.
 
 The suggested sdd test command is `SDD_TEST_CMD="pnpm test"`. `pnpm e2e` is left to CI and the build.
 

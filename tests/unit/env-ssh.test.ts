@@ -1,5 +1,13 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, posix } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -38,7 +46,7 @@ let transport: FakeSsh;
 let env: Environment;
 
 beforeEach(async () => {
-  base = mkdtempSync(join(tmpdir(), 'env-ssh-'));
+  base = mkdtempSync(join(realpathSync(tmpdir()), 'env-ssh-'));
   remote = join(base, 'remote');
   mkdirSync(remote, { recursive: true });
   transport = fakeSshTransport(remote);
