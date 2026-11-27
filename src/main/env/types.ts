@@ -176,4 +176,6 @@ export interface GitPart {
     root: string,
   ): Promise<GitResult<{ upstream: false } | { upstream: true; ahead: number }>>;
   ignoredEntries(root: string, env?: NodeJS.ProcessEnv): Promise<Set<string> | null>;
+  /** The origin remote's URL, or null when unset. Raw: main reads it, never logs it (p4-project-checks). */
+  originUrl(root: string): Promise<GitResult<string | null>>;
 }

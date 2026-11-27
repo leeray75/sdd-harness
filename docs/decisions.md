@@ -611,3 +611,19 @@ Format: **Decision** · **Outcome** · **Why** · **Date**.
   - the image's default user always: programs would run as root where the dev container runs them as its remote user.
 - **Not in this decision:** building or creating containers, `docker compose`, plain containers without the label, remote Docker hosts beyond the docker CLI's own environment, Windows containers, the projects screen, the Reconnect button and the read-only look (`p4-projects-screen`), the add wizard and its call to `detectDocker` (`p4-add-project-wizard`), IPC for containers, detection and Reconnect, and automatic reconnect.
 - **Date:** 2026-11-26
+
+## D45 · Project checks: five checks, the origin's host only, a tracker inferred and never connected, results not stored
+
+- **Outcome:** `runProjectChecks(env, root)` in `src/main/projects/checks.ts` returns the five checks of the add wizard and the projects screen, in this order: Git repository, Code host, Tracker, Test command and Earlier specs (`p4-project-checks`). Each check is `{ id, status, title, detail, fix? }`, with one of five statuses: `ok`, `warn`, `info`, `fail` and `not-checked`. The shared type and helpers are in `src/shared/project-checks.ts`, with no Node import. The runner reaches the project only through its environment (D41). It never rejects, and a check whose call throws becomes a fixed `fail`.
+  - **Git and the origin:** `originUrl(root)` is added to every backend's git part and reads `remote.origin.url` from the local config. The raw URL goes to main-side callers only. It is never logged, stored or shown.
+  - **Credentials:** `parseOrigin` keeps the host name only, lower-cased, with no user, password, token, port or path. A local path, a `file://` URL or any text that is not a remote gives "not a code host". No check result contains the URL, a user name or a token, and the tests assert it for every URL with one.
+  - **Tracker:** inferred from the spec tickets (Jira for an id such as `PROJ-12`), then from the code host (GitHub Issues or GitLab Issues). It is always `warn` with "Not connected", and nothing connects a tracker (D8).
+  - **No network and no sign-in:** the checks run no `git ls-remote`, no fetch and no code host API. Git is read only through the git part, and the test command is detected, never run.
+  - **Unreachable (D43):** when the environment is unreachable, every check is `not-checked` with `PROJECT_UNREACHABLE`, and no call runs. A state change during a run leaves the remaining checks `not-checked`. Nothing reconnects.
+  - **Results are not stored:** the runner returns them. Neither the project store nor any file keeps them.
+- **Alternatives not taken:**
+  - a `git ls-remote` probe of the origin, to tell a working remote from a broken one: it contacts a host the check was not asked to reach, with the user's credentials, and the design has no sign-in;
+  - the full origin URL in the result for display: a token in an https URL would then reach the screen;
+  - storing the last result in the project store: it would go stale with every change in the folder.
+- **Not in this decision:** IPC and the UI (the projects screen and the add wizard), connecting a tracker, sign-in, running the test command, reconnecting an unreachable environment, and any change to the command detector or the spec scanner.
+- **Date:** 2026-11-27

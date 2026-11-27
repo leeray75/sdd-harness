@@ -1,0 +1,10 @@
+# Tasks: p4-project-checks
+
+Work in order. After each task, run its check, then tick the box.
+
+- [x] **T1 — originUrl in the git part.** Add `originUrl(root)` to `createGit` and the `Git` interface (`src/main/git/git.ts`), widen `NOT_A_REPO` for the `--local` message, add it to `GitPart` (`src/main/env/types.ts`) and the local mapping (`src/main/env/local.ts`), update every `GitPart` fake in `tests/`, and add launcher tests to `tests/unit/git.test.ts` (origin set, unset → null, outside a repo → not-a-repo). **Check:** `pnpm typecheck` passes and `pnpm exec vitest run tests/unit/git.test.ts` passes.
+- [x] **T2 — Shared types and helpers.** Create `src/shared/project-checks.ts` with the ids, statuses, `ProjectCheck`, `ProjectChecks`, `parseOrigin`, `codeHostOf` and `inferTracker` as in the spec's Design. **Check:** `pnpm typecheck` passes and the file has no `node:` import.
+- [x] **T3 — The runner.** Create `src/main/projects/checks.ts` with `runProjectChecks(env, root)`: the unreachable short-cut, the per-check `try/catch` and mid-run state reads, and the five checks with the exact titles, details and fixes from the spec. **Check:** `pnpm typecheck` passes and `pnpm exec vitest run tests/unit/env-boundary.test.ts` passes.
+- [x] **T4 — Unit tests.** Add `tests/unit/project-checks.test.ts` covering AC1 and AC3 to AC8 on a fake environment that records its calls, including the credential-absence assertions for every URL with a user or token. **Check:** `pnpm exec vitest run tests/unit/project-checks.test.ts` passes.
+- [x] **T5 — Docs.** Add D45 to `docs/decisions.md`; add the "Project checks" section and `originUrl` to `docs/environments.md`; add the `CHANGELOG.md` `[Unreleased]` entry; update PRD F3 "Built so far", the `CLAUDE.md` reading list (D41–D45 and the checks) and the follow-ups in `docs/phases/phase-04-progress.md`; check the phase doc and `docs/workflow.md` for stale text. **Check:** `pnpm format:check` passes and `grep -n "D45" docs/decisions.md CLAUDE.md docs/environments.md` finds each.
+- [x] **T6 — Full checks.** Run the full local suite. **Check:** `pnpm typecheck && pnpm lint && pnpm format:check && pnpm test` all pass.

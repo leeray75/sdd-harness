@@ -34,7 +34,8 @@ const MAX_BUFFER_BYTES = 16 * 1024 * 1024;
 const GIT_ENV = { GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' } as const;
 
 /** The stderr text of a folder that is not a repository. Read here only to pick the code. */
-const NOT_A_REPO = /not a git repository/i;
+// git's `config --local` refuses outside a repository with its own text, so that text is read too.
+const NOT_A_REPO = /not a git repository|--local can only be used inside a git repository/i;
 
 /** The prefix of the remote's default branch ref, as origin/HEAD points to it. */
 const ORIGIN_PREFIX = 'refs/remotes/origin/';
@@ -88,6 +89,11 @@ export interface Git {
     root: string,
   ): Promise<GitResult<{ upstream: false } | { upstream: true; ahead: number }>>;
   ignoredEntries(root: string, env?: NodeJS.ProcessEnv): Promise<Set<string> | null>;
+  /**
+   * The URL of the origin remote, read from the local config (p4-project-checks). Null when no origin
+   * is set. The raw URL may carry a user or token: callers in main read it and never log or show it.
+   */
+  originUrl(root: string): Promise<GitResult<string | null>>;
 }
 
 type ExecError = NodeJS.ErrnoException & { killed?: boolean };
@@ -316,6 +322,24 @@ export function createGit(launcher: GitLauncher): Git {
     return new Set(entries);
   }
 
+  /**
+   * The origin remote's URL from the local config (`config --local --default '' --get`). An unset
+   * origin is null. Never logged by this module.
+   */
+  async function originUrl(root: string): Promise<GitResult<string | null>> {
+    const run = await runGit(root, [
+      'config',
+      '--local',
+      '--default',
+      '',
+      '--get',
+      'remote.origin.url',
+    ]);
+    if (!run.ok) return run;
+    const url = run.stdout.trim().split('\n')[0]?.trim() ?? '';
+    return { ok: true, value: url === '' ? null : url };
+  }
+
   return {
     currentBranch,
     defaultBranch,
@@ -325,6 +349,7 @@ export function createGit(launcher: GitLauncher): Git {
     push,
     aheadOfUpstream,
     ignoredEntries,
+    originUrl,
   };
 }
 
@@ -339,3 +364,4 @@ export const commit = local.commit;
 export const push = local.push;
 export const aheadOfUpstream = local.aheadOfUpstream;
 export const ignoredEntries = local.ignoredEntries;
+export const originUrl = local.originUrl;
