@@ -11,6 +11,7 @@ import {
   defaultBranch,
   ignoredEntries,
   isRepoPath,
+  originUrl,
   push,
   stage,
 } from '../../src/main/git/git';
@@ -357,6 +358,37 @@ describe('aheadOfUpstream', () => {
         ok: true,
         value: { upstream: true, ahead: 1 },
       });
+    },
+    SLOW,
+  );
+});
+
+describe('originUrl (p4-project-checks)', () => {
+  it(
+    'gives the URL of the origin remote',
+    async () => {
+      setupRepo();
+      expect(await originUrl(work)).toEqual({ ok: true, value: remote });
+    },
+    SLOW,
+  );
+
+  it(
+    'gives null when no origin is set',
+    async () => {
+      setupRepo();
+      sh(work, ['remote', 'remove', 'origin']);
+      expect(await originUrl(work)).toEqual({ ok: true, value: null });
+    },
+    SLOW,
+  );
+
+  it(
+    'gives not-a-repo outside a repository',
+    async () => {
+      const plain = join(scratch, 'plain');
+      mkdirSync(plain);
+      expect(await originUrl(plain)).toEqual({ ok: false, code: 'not-a-repo' });
     },
     SLOW,
   );

@@ -29,7 +29,7 @@ Only `src/main/env/`, `src/main/git/` and the two app-data stores (`src/main/pro
 | `files`   | `stat`, `lstat`, `realpath`, `access` (`exists` or `execute`), `readFile` (with an optional byte cap), `open` (for reads by byte range), `writeFile`, `mkdir`, `readdir` (with file types), `rm`, `rmdir`, `rename`, `chmod`, `readlink` and `symlink`. Failures carry Node-style `code`s.                                                                                                               |
 | `process` | `platform`, `spawn(file, argv, options)` and `networkLevel()`. `spawn` takes an argument array and never a shell, streams output to `onOutput`, kills the whole process tree on timeout or abort, and resolves with the exit code, the signal, `timedOut`, `aborted` and, for `network: 'none'`, the level it got. It resolves `{ started: false }` when the program cannot start, and it never rejects. |
 | `watch`   | `watchDir(path, onEvent, onError)`: one folder, not recursive, returning a handle with `close()`.                                                                                                                                                                                                                                                                                                        |
-| `git`     | `currentBranch`, `defaultBranch`, `changedPaths`, `stage`, `commit`, `push`, `aheadOfUpstream` and `ignoredEntries`. Each takes the project root and returns the same `GitResult`/`GitStatus` values and the same four failure codes (`git-missing`, `timeout`, `not-a-repo`, `failed`) as `src/main/git/git.ts`.                                                                                        |
+| `git`     | `currentBranch`, `defaultBranch`, `changedPaths`, `stage`, `commit`, `push`, `aheadOfUpstream`, `ignoredEntries` and `originUrl` (the origin remote's URL, or null when unset; `p4-project-checks`). Each takes the project root and returns the same `GitResult`/`GitStatus` values and the same four failure codes (`git-missing`, `timeout`, `not-a-repo`, `failed`) as `src/main/git/git.ts`.        |
 
 `ToolEnvironment` is `{ path, files, process, ignoredEntries }`. It has no `git` and no `watch`. The tools, the command runner and the agent host take only this type, so a tool cannot reach git (D4). `toolEnvironment(env)` builds it, and its `ignoredEntries` calls the git part.
 
@@ -104,6 +104,16 @@ A project that lives in a dev container (`p4-env-container`) is reached through 
 - **Network.** `network: 'none'` probes `unshare --user --map-root-user --net true` inside the container once per connection: the level is `os` when it works and `proxy-only` otherwise. `networkLevel()` agrees.
 - **Git and watching.** Git runs through the same group launcher and `createGit`, so its argument lists, codes and timeouts match the local instance; exit 127 is `git-missing`. Watching is the shared polling watcher (`poll-watch.ts`).
 - **Variables.** A variable's value is passed only in the docker process's environment, and its name in the argument array. On the WSL docker host the names also go through `WSLENV`, with no path flags.
+
+## Project checks (D45)
+
+The add wizard and the projects screen show five checks for a project folder (`p4-project-checks`). `runProjectChecks(env, root)` in `src/main/projects/checks.ts` computes them through the project's environment, and the shared type and helpers are in `src/shared/project-checks.ts`.
+
+- **Calls:** the git part (`currentBranch`, `changedPaths` and `originUrl`), the spec folder scan (`scanSpecFolders`, through the environment's files part) and the root's marker files (`rootMarkerFiles`, through `toolEnvironment`). The runner starts no program, and it makes no network call and no sign-in. It never calls `reconnect`.
+- **Unreachable:** when `connection.state()` is `unreachable`, every check is `not-checked` with `PROJECT_UNREACHABLE` and no call runs. The state is read again before each check, so a change during a run leaves the rest `not-checked` (D43).
+- **Failures:** each check runs in its own `try/catch`. A check whose call throws is `fail` with the fixed detail `The check could not run`, and the error text is never used. The other checks still return, and the runner never rejects.
+- **Credentials:** `originUrl` returns the raw URL to main only. `parseOrigin` keeps the host name alone, so no field of a result holds a user, a password, a token or the URL.
+- **Results are not stored.** The runner returns them; nothing writes them to the project store or to disk.
 
 ## Checklist for the WSL, SSH and container backends
 

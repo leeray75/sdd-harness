@@ -27,6 +27,7 @@ The phase doc suggested five subtasks; the user chose a split into eight. Today 
   - **Saved servers:** kept in `ssh-servers.json`, with no secret in it. Passwords and passphrases are in `safeStorage`, read only at connect. Host keys are pinned per server and confirmed, and a changed key always refuses.
   - **Connection part:** a `connection` part on every environment. The registry keeps an unreachable project listed, removable and read-only, and Reconnect restores it. A stopped WSL distribution is unreachable, and Reconnect starts it (`p4-env-ssh`).
 - D44: dev containers (`p4-env-container`). The docker CLI runs `docker exec` through the setsid launcher, with argument arrays and no shell. The container is found by its `devcontainer.local_folder` label on each connect and programs run as its `remoteUser`; the app never builds a container. Docker is the host's PATH or the WSL distribution's docker. Docker's own gone messages (line-start only) make the project unreachable; a program's own output never does. The group kill is `kill -s KILL`, because dash refuses `kill -KILL -- -pgid`.
+- D45: project checks (`p4-project-checks`). `runProjectChecks(env, root)` returns the five checks (git repository, code host, tracker, test command, earlier specs) with the statuses `ok`, `warn`, `info`, `fail` and `not-checked`. `originUrl` is on every git part, and a code host keeps the host only, never the URL or a credential. The tracker is inferred from the tickets and the host and never connected (D8). No network or sign-in probe; an unreachable environment is all `not-checked` with no reconnect; results are not stored. The rules are in [`docs/environments.md`](../environments.md) ("Project checks").
 
 ## Decide during planning
 
@@ -35,6 +36,11 @@ The phase doc suggested five subtasks; the user chose a split into eight. Today 
 
 ## Follow-ups
 
+- From `p4-project-checks`:
+  - Rows 7 and 8 call `runProjectChecks(env, root)` and show its five results; no IPC or UI calls it yet (`p4-projects-screen`, `p4-add-project-wizard`).
+  - The design's "signed in" line for the code host is not shown: the checks never sign in or probe the remote (D45).
+  - The Connect tracker button has nothing to connect yet. The tracker check only infers a name and says "Not connected"; connecting comes later.
+  - On a dev container the checks cost several `wsl.exe` round trips (each docker call is one), and the marker-file read adds more. The wizard and the projects screen should not re-run the checks on every poll.
 - From `p4-env-container`:
   - The add wizard (`p4-add-project-wizard`) calls `detectDocker` and must show the container's fixed reasons; no detection runs at start.
   - The container backend's live walk is slow: each docker call is a `wsl.exe` process (about 0.5 s), and the lock watcher lists the spec folders about once a second. The walk on a container takes tens of minutes, so `pnpm test:live` runs it with a 90-minute limit. The projects screen and the phase 7 build view should not poll a container through the watcher more than needed.

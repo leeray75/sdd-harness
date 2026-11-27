@@ -282,6 +282,7 @@ const gitPart: Environment['git'] = {
   push: (root, branch) => git.push(root, branch),
   aheadOfUpstream: (root) => git.aheadOfUpstream(root),
   ignoredEntries: (root, env) => git.ignoredEntries(root, env),
+  originUrl: (root) => git.originUrl(root),
 };
 
 /** The local folder is always reachable: its state never changes and its reconnect always works (D43). */

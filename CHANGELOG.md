@@ -6,6 +6,10 @@ All notable changes to SDD Harness are recorded here. The format follows [Keep a
 
 ### Added
 
+- **Project checks** (`p4-project-checks`, D45): `runProjectChecks(env, root)` in `src/main/projects/checks.ts` computes the five checks the add wizard shows (git repository, code host, tracker, test command and earlier specs) through the project's environment. The result type and the helpers are in `src/shared/project-checks.ts`.
+  - The code host is named from the origin remote, and only the host is kept: no user, token or URL reaches a result. The git part gains `originUrl` on every backend.
+  - The tracker is inferred from the spec tickets and the host, and it is never connected. No check starts a program other than git, reads the network or signs in.
+  - An unreachable environment runs nothing and reports every check as not checked; a check whose call throws is a fixed failure, and the others still return. Results are returned, not stored.
 - **Unit tests on every OS in CI** (`p4-macos-ci-fix`): the matrix job runs `pnpm test` on Windows, macOS and Linux, and is now named `unit, e2e and package`. Before this the unit tests ran only in `check (Linux)`, so a test that passed on Linux and failed on macOS was invisible — the macOS failures fixed in this change were found by running the suite by hand. On Linux the step runs before the sysctl that allows unprivileged user namespaces, so the Linux unit tests keep to the same `unshare`-less path that `check` runs. The one AC8 case whose result the OS network wrapper cannot produce is skipped wherever a wrapper is in place.
 - **SSH projects** (`p4-env-ssh`, D43): a project can live on a saved SSH server. The SSH backend implements the whole environment interface (files over SFTP, programs and git over exec requests, polling watch, the connection part), with the same contract as the local and WSL backends.
   - Saved servers are kept in `ssh-servers.json` in app data with no secret in it. Passwords and key passphrases are in the secret store, read at connect time only. Host keys are pinned per server, and a changed key always refuses.
